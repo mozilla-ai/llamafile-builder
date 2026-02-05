@@ -1,0 +1,12 @@
+[
+  { "type": "section", "label": "Server" },
+  { "type": "text", "key": "host", "label": "Listen Host", "description": "Network interface", "default": "127.0.0.1", "value_type": "string", "flag": "--host" },
+  { "type": "text", "key": "port", "label": "Port", "description": "HTTP server port", "default": 8080, "value_type": "number", "flag": "--port" },
+  { "type": "dropdown", "key": "context_length", "label": "Context Length", "description": "Max tokens", "default": 4096, "options": [2048, 4096, 8192, 16384, 32768, 65536, 131072], "flag": "-c" },
+  { "type": "section", "label": "Inference" },
+  { "type": "text", "key": "threads", "label": "Threads", "description": "CPU threads", "default": "auto", "value_type": "string", "flag": "-t" },
+  { "type": "text", "key": "batch_size", "label": "Batch Size", "description": "Prompt processing", "default": 512, "value_type": "number", "flag": "-b" },
+  { "type": "section", "label": "Features" },
+  { "type": "bool", "key": "enable_web_ui", "label": "Enable Web UI", "description": "Serve built-in chat interface", "default": true, "flag": null },
+  { "type": "bool", "key": "flash_attention", "label": "Flash Attention", "description": "Faster inference", "default": true, "flag": "-fa" }
+]

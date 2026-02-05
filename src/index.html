@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>llamafile Builder</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="window" id="app">
+  <div class="titlebar" data-tauri-drag-region>
+    <div class="titlebar-text">llamafile builder</div>
+  </div>
+
+  <div class="main">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="sidebar-label">Setup Steps</div>
+      <ul class="step-list" id="step-list">
+        <!-- Steps rendered by JS -->
+      </ul>
+
+      <div class="sidebar-bottom">
+        <div class="version-tag">
+          <div class="version-dot"></div>
+          <span id="app-version">llamafile-builder v0.1.0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+      <!-- Step panels rendered by JS -->
+      <div id="step-content"></div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js" type="module"></script>
+</body>
+</html>
