@@ -1784,12 +1784,28 @@ function getGpuSummary() {
 
 function renderBuildButton() {
   if (state.buildProgress?.stage === 'complete') {
-    return `<button class="btn btn-success" onclick="openOutputFolder()"><img src="llamafile-icon.png" style="width:16px;height:16px;"> Show in Finder</button>`;
+    return `
+      <button class="btn btn-success" onclick="openOutputFolder()"><img src="llamafile-icon.png" style="width:16px;height:16px;"> Show in Finder</button>
+      <button class="btn btn-primary" onclick="resetBuild()" style="margin-left: 8px;">Build Another</button>
+    `;
+  }
+  if (state.buildProgress?.stage === 'error') {
+    return `
+      <button class="btn btn-primary" onclick="resetBuild()">Try Again</button>
+    `;
   }
   if (state.isBuilding) {
     return `<button class="btn btn-secondary" onclick="cancelBuild()">Cancel</button>`;
   }
   return `<button class="btn btn-primary" onclick="startBuild()">\u26a1 Build llamafile</button>`;
+}
+
+function resetBuild() {
+  state.buildProgress = null;
+  state.buildLog = [];
+  state.downloadProgress = null;
+  state.currentDownloadPath = null;
+  renderCurrentStep();
 }
 
 function renderBuildProgress() {
@@ -2364,8 +2380,13 @@ async function nextStep() {
 
 function prevStep() {
   if (state.currentStep > 1) {
-    // Skip steps 4, 5 - go back from Build to Configuration
+    // Reset build state when leaving the build step
     if (state.currentStep === 6) {
+      state.buildProgress = null;
+      state.buildLog = [];
+      state.downloadProgress = null;
+      state.currentDownloadPath = null;
+      // Skip steps 4, 5 - go back from Build to Configuration
       state.currentStep = 3;
     } else {
       state.currentStep--;
@@ -2459,6 +2480,7 @@ window.selectOutputPath = selectOutputPath;
 window.refreshArgsContent = refreshArgsContent;
 window.updateArgsContent = updateArgsContent;
 window.startBuild = startBuild;
+window.resetBuild = resetBuild;
 window.cancelBuild = cancelBuild;
 window.confirmCancelBuild = confirmCancelBuild;
 window.dismissCancelConfirm = dismissCancelConfirm;
