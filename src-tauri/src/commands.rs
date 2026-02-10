@@ -360,6 +360,132 @@ pub async fn run_zipalign(
     Ok(code)
 }
 
+/// Download a file from URL with progress events
+/// Returns the destination path on success, or an error string
+/// Error string will be "AUTH_REQUIRED" for 401/403 errors on HF URLs
+#[tauri::command]
+pub async fn download_file(
+    url: String,
+    dest_path: String,
+    expected_sha256: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
+    use crate::download::{download_file as do_download, DownloadError};
+    use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let dest = Path::new(&dest_path);
+    let cancelled = Arc::new(AtomicBool::new(false));
+
+    // Get app-stored HF token if any
+    let app_token = get_stored_hf_token(&app_handle).ok().flatten();
+
+    let handle = app_handle.clone();
+    let result = do_download(
+        &url,
+        dest,
+        expected_sha256.as_deref(),
+        app_token.as_deref(),
+        |progress| {
+            handle.emit("download-progress", &progress).ok();
+        },
+        || cancelled.load(Ordering::Relaxed),
+    )
+    .await;
+
+    match result {
+        Ok(()) => Ok(dest_path),
+        Err(DownloadError::AuthRequired { .. }) => Err("AUTH_REQUIRED".to_string()),
+        Err(DownloadError::Cancelled) => Err("CANCELLED".to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Check if a file exists, optionally verifying its SHA256 checksum
+#[tauri::command]
+pub async fn file_exists(
+    path: String,
+    expected_sha256: Option<String>,
+) -> Result<bool, String> {
+    use crate::download::verify_cached_file;
+    use std::path::Path;
+
+    let p = Path::new(&path);
+    Ok(verify_cached_file(p, expected_sha256.as_deref()).await)
+}
+
+/// Get the current HF token (from env, HF CLI cache, or app storage)
+#[tauri::command]
+pub async fn get_hf_token(app_handle: tauri::AppHandle) -> Result<Option<String>, String> {
+    use crate::download::resolve_hf_token;
+
+    let app_token = get_stored_hf_token(&app_handle).ok().flatten();
+    Ok(resolve_hf_token(app_token.as_deref()))
+}
+
+/// Store HF token in app data directory
+#[tauri::command]
+pub async fn set_hf_token(
+    token: String,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    use tauri::Manager;
+
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+
+    std::fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
+
+    let token_path = app_dir.join("hf_token");
+    std::fs::write(&token_path, token.trim()).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// Clear stored HF token
+#[tauri::command]
+pub async fn clear_hf_token(app_handle: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+
+    let token_path = app_dir.join("hf_token");
+    if token_path.exists() {
+        std::fs::remove_file(&token_path).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+/// Internal helper to get stored HF token from app data directory
+fn get_stored_hf_token(app_handle: &tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri::Manager;
+
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+
+    let token_path = app_dir.join("hf_token");
+    if token_path.exists() {
+        let token = std::fs::read_to_string(&token_path)
+            .map_err(|e| e.to_string())?
+            .trim()
+            .to_string();
+        if !token.is_empty() {
+            return Ok(Some(token));
+        }
+    }
+
+    Ok(None)
+}
+
 /// Validate configuration before build
 #[tauri::command]
 pub async fn validate_config(config: BuildConfig) -> Result<Vec<String>, String> {
