@@ -1327,6 +1327,74 @@ body {
   background: var(--accent-dim);
 }
 
+/* Args preview editor */
+.args-preview {
+  margin-top: 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-deep);
+  overflow: hidden;
+}
+
+.args-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 12px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+}
+
+.args-preview-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.args-preview-refresh {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.args-preview-refresh:hover {
+  background: var(--accent-dim);
+}
+
+.args-preview-editor {
+  width: 100%;
+  min-height: 120px;
+  max-height: 200px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--bg-deep);
+  border: none;
+  padding: 12px;
+  resize: vertical;
+  outline: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.args-preview-editor:focus {
+  background: var(--bg-panel);
+}
+
+.args-preview-editor::-webkit-scrollbar { width: 6px; }
+.args-preview-editor::-webkit-scrollbar-track { background: transparent; }
+.args-preview-editor::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
 /* Build log pane */
 .build-log {
   margin-top: 14px;

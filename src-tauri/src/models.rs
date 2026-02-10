@@ -70,6 +70,12 @@ pub enum ConfigSchemaItem {
         default: serde_json::Value,
         value_type: String,
         flag: Option<String>,
+        #[serde(default)]
+        hidden: bool,
+        #[serde(default)]
+        required: bool,
+        #[serde(default)]
+        conditional: Option<String>,
     },
     Dropdown {
         key: String,
@@ -78,6 +84,12 @@ pub enum ConfigSchemaItem {
         default: serde_json::Value,
         options: Vec<serde_json::Value>,
         flag: Option<String>,
+        #[serde(default)]
+        hidden: bool,
+        #[serde(default)]
+        required: bool,
+        #[serde(default)]
+        conditional: Option<String>,
     },
     Bool {
         key: String,
@@ -85,6 +97,12 @@ pub enum ConfigSchemaItem {
         description: String,
         default: bool,
         flag: Option<String>,
+        #[serde(default)]
+        hidden: bool,
+        #[serde(default)]
+        required: bool,
+        #[serde(default)]
+        conditional: Option<String>,
     },
 }
 

@@ -42,6 +42,155 @@ pub async fn get_config_schema() -> Result<Vec<ConfigSchemaItem>, String> {
     serde_json::from_str(json).map_err(|e| format!("Failed to parse config.json: {}", e))
 }
 
+/// Generate .args file content from config values and model filenames
+#[tauri::command(rename_all = "camelCase")]
+pub async fn generate_args_content(
+    config_values: std::collections::HashMap<String, serde_json::Value>,
+    model_filename: String,
+    mmproj_filename: Option<String>,
+) -> Result<String, String> {
+    let schema = get_config_schema().await?;
+    let mut lines: Vec<String> = Vec::new();
+
+    // Evaluate conditionals
+    let has_mmproj = mmproj_filename.is_some();
+
+    for item in &schema {
+        match item {
+            ConfigSchemaItem::Section { .. } => continue,
+
+            ConfigSchemaItem::Text {
+                key,
+                flag,
+                default,
+                hidden: _,
+                required: _,
+                conditional,
+                ..
+            } => {
+                // Check conditional
+                if let Some(cond) = conditional {
+                    if cond == "has_mmproj" && !has_mmproj {
+                        continue;
+                    }
+                }
+
+                // Skip if no flag
+                let flag = match flag {
+                    Some(f) => f,
+                    None => continue,
+                };
+
+                // Get value from config_values or use default
+                let value = config_values
+                    .get(key)
+                    .cloned()
+                    .unwrap_or_else(|| default.clone());
+
+                // Convert to string
+                let value_str = match &value {
+                    serde_json::Value::String(s) => s.clone(),
+                    serde_json::Value::Number(n) => n.to_string(),
+                    _ => continue,
+                };
+
+                // Skip "auto" for threads
+                if key == "threads" && value_str == "auto" {
+                    continue;
+                }
+
+                // Resolve placeholders
+                let resolved = value_str
+                    .replace("${MODEL_FILENAME}", &model_filename)
+                    .replace("${MMPROJ_FILENAME}", mmproj_filename.as_deref().unwrap_or(""));
+
+                // Add flag on one line, value on next
+                lines.push(flag.clone());
+                lines.push(resolved);
+            }
+
+            ConfigSchemaItem::Dropdown {
+                key,
+                flag,
+                default,
+                hidden: _,
+                required: _,
+                conditional,
+                ..
+            } => {
+                // Check conditional
+                if let Some(cond) = conditional {
+                    if cond == "has_mmproj" && !has_mmproj {
+                        continue;
+                    }
+                }
+
+                // Skip if no flag
+                let flag = match flag {
+                    Some(f) => f,
+                    None => continue,
+                };
+
+                // Get value from config_values or use default
+                let value = config_values
+                    .get(key)
+                    .cloned()
+                    .unwrap_or_else(|| default.clone());
+
+                // Convert to string
+                let value_str = match &value {
+                    serde_json::Value::String(s) => s.clone(),
+                    serde_json::Value::Number(n) => n.to_string(),
+                    _ => continue,
+                };
+
+                // Add flag on one line, value on next
+                lines.push(flag.clone());
+                lines.push(value_str);
+            }
+
+            ConfigSchemaItem::Bool {
+                key,
+                flag,
+                default,
+                hidden: _,
+                required: _,
+                conditional,
+                ..
+            } => {
+                // Check conditional
+                if let Some(cond) = conditional {
+                    if cond == "has_mmproj" && !has_mmproj {
+                        continue;
+                    }
+                }
+
+                // Skip if no flag
+                let flag = match flag {
+                    Some(f) => f,
+                    None => continue,
+                };
+
+                // Get value from config_values or use default
+                let value = config_values
+                    .get(key)
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(*default);
+
+                // Boolean flags: only output if true (no value needed)
+                if value {
+                    lines.push(flag.clone());
+                }
+            }
+        }
+    }
+
+    // Add trailing ... to allow user CLI arguments
+    lines.push("...".to_string());
+
+    Ok(lines.join("\n"))
+}
+
 /// Search models by query
 #[tauri::command]
 pub async fn search_models(query: String, tag: Option<String>) -> Result<Vec<Model>, String> {

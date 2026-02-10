@@ -57,6 +57,7 @@ You are a helpful coding assistant with access to local tools.
 
   // Step 6: Build
   outputPath: '',
+  argsContent: '', // Generated .args file content (editable by user)
   buildProgress: null,
   isBuilding: false,
   buildLog: [],
@@ -114,6 +115,9 @@ const invoke = window.__TAURI__?.core?.invoke || (async (cmd, args) => {
       return '/mock/models';
     case 'select_output_path':
       return args?.defaultPath || '/mock/Desktop/output.llamafile';
+    case 'generate_args_content':
+      // Mock: return sample .args content
+      return `-m\n/zip/${args?.modelFilename || 'model.gguf'}\n--no-mmap\n--host\n127.0.0.1\n--port\n8080\n-c\n4096\n-b\n512\n-fa\n...`;
     case 'run_zipalign':
       return 1;
     case 'download_file':
@@ -1314,6 +1318,9 @@ function renderConfigItems() {
   let sectionOpen = false;
 
   for (const item of state.configSchema) {
+    // Skip hidden items - they're only used at build time
+    if (item.hidden) continue;
+
     if (item.type === 'section') {
       if (sectionOpen) html += '</div>';
       html += `<div class="config-section"><div class="config-section-title">${item.label}</div>`;
@@ -1522,6 +1529,46 @@ function updateSystemPrompt(v) { state.systemPrompt = v; }
 // Step 6: Build
 // ============================================================================
 
+// Get the filename for a model file by role (used to pass to Rust)
+function getModelFilename(role) {
+  if (state.modelSource === 'custom') {
+    const file = state.customModelFiles.find(f => f.role === role);
+    return file ? getFileName(file.path) : null;
+  }
+  if (!state.selectedModel) return null;
+  const file = state.selectedModel.files.find(f => f.role === role);
+  if (!file) return null;
+  const sel = state.modelFileSelections[role];
+  if (sel?.source === 'custom' && sel.customPath) {
+    return getFileName(sel.customPath);
+  }
+  const quant = file.quantizations[sel?.quantizationIdx || 0];
+  // Extract filename from download URL
+  return quant ? getFilenameFromUrl(quant.download_url) : null;
+}
+
+// Regenerate args content by calling Rust backend
+async function refreshArgsContent() {
+  try {
+    const modelFilename = getModelFilename('weights') || 'model.gguf';
+    const mmprojFilename = getModelFilename('mmproj') || null;
+
+    state.argsContent = await invoke('generate_args_content', {
+      configValues: state.configValues,
+      modelFilename,
+      mmprojFilename,
+    });
+  } catch (err) {
+    console.error('Failed to generate args content:', err);
+    state.argsContent = '# Error generating .args content\n...';
+  }
+}
+
+// Called when user edits the args textarea
+function updateArgsContent(value) {
+  state.argsContent = value;
+}
+
 function renderBuildStep() {
   const enabledTools = state.agentTools.filter(t => t.enabled);
 
@@ -1568,6 +1615,19 @@ function renderBuildStep() {
           <div class="output-path-label">Output:</div>
           <div class="output-path-value">${state.outputPath || 'Select location...'}</div>
           <div class="output-path-btn">Browse\u2026</div>
+        </div>
+
+        <div class="args-preview">
+          <div class="args-preview-header">
+            <div class="args-preview-label">.args Configuration</div>
+            <button class="args-preview-refresh" onclick="refreshArgsContent().then(() => renderCurrentStep())" title="Regenerate from settings">Refresh</button>
+          </div>
+          <textarea
+            class="args-preview-editor"
+            spellcheck="false"
+            onchange="updateArgsContent(this.value)"
+            oninput="updateArgsContent(this.value)"
+          >${escapeHtml(state.argsContent)}</textarea>
         </div>
 
         ${state.isBuilding || state.buildProgress ? renderBuildProgress() : ''}
@@ -2193,14 +2253,16 @@ async function openOutputFolder() {
 // Navigation
 // ============================================================================
 
-function goToStep(step) {
+async function goToStep(step) {
   if (step > state.maxVisitedStep) return;
   state.currentStep = step;
+  // Refresh .args content when entering Build step
+  if (step === 6) await refreshArgsContent();
   renderSidebar();
   renderCurrentStep();
 }
 
-function nextStep() {
+async function nextStep() {
   if (state.currentStep < STEPS.length) {
     // DEV: Skip steps 3, 4, 5 (Configuration, Compute, Agent) - go straight to Build
     if (state.currentStep === 2) {
@@ -2209,6 +2271,8 @@ function nextStep() {
       state.currentStep++;
     }
     state.maxVisitedStep = Math.max(state.maxVisitedStep, state.currentStep);
+    // Refresh .args content when entering Build step
+    if (state.currentStep === 6) await refreshArgsContent();
     renderSidebar();
     renderCurrentStep();
   }
@@ -2308,6 +2372,8 @@ window.updateSystemPrompt = updateSystemPrompt;
 window.selectCustomLlamafile = selectCustomLlamafile;
 window.clearCustomLlamafile = clearCustomLlamafile;
 window.selectOutputPath = selectOutputPath;
+window.refreshArgsContent = refreshArgsContent;
+window.updateArgsContent = updateArgsContent;
 window.startBuild = startBuild;
 window.cancelBuild = cancelBuild;
 window.confirmCancelBuild = confirmCancelBuild;

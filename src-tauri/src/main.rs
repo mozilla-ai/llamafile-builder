@@ -31,6 +31,7 @@ fn main() {
             commands::get_llamafile_versions,
             commands::get_models,
             commands::get_config_schema,
+            commands::generate_args_content,
             commands::search_models,
             commands::get_model_details,
             commands::start_build,

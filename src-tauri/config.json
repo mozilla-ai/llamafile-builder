@@ -1,4 +1,8 @@
 [
+  { "type": "text", "key": "model_path", "label": "Model path", "description": "Path to model weights", "default": "/zip/${MODEL_FILENAME}", "value_type": "string", "flag": "-m", "hidden": true, "required": true },
+  { "type": "text", "key": "mmproj_path", "label": "MMProj path", "description": "Path to mmproj weights", "default": "/zip/${MMPROJ_FILENAME}", "value_type": "string", "flag": "--mmproj", "hidden": true, "conditional": "has_mmproj" },
+  { "type": "bool", "key": "no_mmap", "label": "Disable mmap", "description": "Required for llamafile", "default": true, "flag": "--no-mmap", "hidden": true, "required": true },
+
   { "type": "section", "label": "Server" },
   { "type": "text", "key": "host", "label": "Listen Host", "description": "Network interface", "default": "127.0.0.1", "value_type": "string", "flag": "--host" },
   { "type": "text", "key": "port", "label": "Port", "description": "HTTP server port", "default": 8080, "value_type": "number", "flag": "--port" },
