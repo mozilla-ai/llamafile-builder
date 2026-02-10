@@ -725,7 +725,6 @@ function renderModelStep() {
               <div class="selection-card ${isSelected ? 'selected' : ''}"
                    onclick="selectModel('${m.id}')">
                 <div class="radio-dot"></div>
-                <div class="card-icon">${m.icon}</div>
                 <div class="card-info">
                   <div class="card-title">${m.huggingface_url
                     ? `<a href="${m.huggingface_url}" class="model-link" onclick="event.stopPropagation()">${m.name}</a>`

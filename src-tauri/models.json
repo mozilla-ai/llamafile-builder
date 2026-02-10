@@ -1,17 +1,16 @@
 [
   {
-    "id": "llama-3.1-8b-instruct",
-    "name": "Llama 3.1 8B Instruct",
-    "organization": "Meta",
-    "parameters": "8B",
-    "param_count": 8000000000,
-    "description": "Meta's latest instruction-tuned model with strong reasoning capabilities",
-    "license": "Llama 3.1 Community License",
-    "icon": "\ud83e\udd99",
-    "huggingface_url": "https://huggingface.co/meta-llama/Meta-Llama-3.1-8B-Instruct",
-    "tags": ["chat"],
-    "context_lengths": [2048, 4096, 8192, 16384, 32768, 65536, 131072],
-    "default_context": 4096,
+    "id": "ministral-3-3b-instruct-2512",
+    "name": "Ministral 3 3B Instruct",
+    "organization": "Mistral AI",
+    "parameters": "3.3B",
+    "param_count": 3300000000,
+    "description": "Multimodal vision-language model with 262K context, supports 11 languages including EN, FR, ES, DE, IT, PT, NL, ZH, JA, KO, AR",
+    "license": "Apache 2.0",
+    "huggingface_url": "https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512-GGUF",
+    "tags": ["vision", "chat"],
+    "context_lengths": [2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144],
+    "default_context": 8192,
     "files": [
       {
         "role": "weights",
@@ -19,20 +18,65 @@
         "quantizations": [
           {
             "name": "Q4_K_M",
-            "size_bytes": 4900000000,
-            "download_url": "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+            "size_bytes": 2147023008,
+            "download_url": "https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512-GGUF/resolve/main/Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
             "sha256": null
           },
           {
-            "name": "Q5_K_M",
-            "size_bytes": 5700000000,
-            "download_url": "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf",
+            "name": "BF16",
+            "size_bytes": 6866745504,
+            "download_url": "https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512-GGUF/resolve/main/Ministral-3-3B-Instruct-2512-BF16.gguf",
+            "sha256": null
+          }
+        ]
+      },
+      {
+        "role": "mmproj",
+        "label": "Vision Adapter (mmproj)",
+        "quantizations": [
+          {
+            "name": "BF16",
+            "size_bytes": 841501856,
+            "download_url": "https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512-GGUF/resolve/main/Ministral-3-3B-Instruct-2512-BF16-mmproj.gguf",
+            "sha256": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "gpt-oss-20b",
+    "name": "GPT-OSS 20B",
+    "organization": "OpenAI",
+    "parameters": "20B",
+    "param_count": 20000000000,
+    "description": "OpenAI's open-source 20B parameter model with 131K context, supports tool use and reasoning",
+    "license": "Apache 2.0",
+    "huggingface_url": "https://huggingface.co/openai/gpt-oss-20b",
+    "tags": ["chat"],
+    "context_lengths": [2048, 4096, 8192, 16384, 32768, 65536, 131072],
+    "default_context": 8192,
+    "files": [
+      {
+        "role": "weights",
+        "label": "Model Weights",
+        "quantizations": [
+          {
+            "name": "Q5_K_S",
+            "size_bytes": 11711827648,
+            "download_url": "https://huggingface.co/unsloth/gpt-oss-20b-GGUF/resolve/main/gpt-oss-20b-Q5_K_S.gguf",
             "sha256": null
           },
           {
             "name": "Q8_0",
-            "size_bytes": 8500000000,
-            "download_url": "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf",
+            "size_bytes": 12109567168,
+            "download_url": "https://huggingface.co/unsloth/gpt-oss-20b-GGUF/resolve/main/gpt-oss-20b-Q8_0.gguf",
+            "sha256": null
+          },
+          {
+            "name": "MXFP4",
+            "size_bytes": 12109566560,
+            "download_url": "https://huggingface.co/ggml-org/gpt-oss-20b-GGUF/resolve/main/gpt-oss-20b-mxfp4.gguf",
             "sha256": null
           }
         ]
@@ -40,16 +84,15 @@
     ]
   },
   {
-    "id": "mistral-7b-instruct-v0.3",
-    "name": "Mistral 7B Instruct v0.3",
-    "organization": "Mistral AI",
-    "parameters": "7B",
-    "param_count": 7000000000,
-    "description": "Fast and capable instruction-following model",
+    "id": "qwen3-vl-4b-instruct",
+    "name": "Qwen3 VL 4B Instruct",
+    "organization": "Qwen",
+    "parameters": "4B",
+    "param_count": 4000000000,
+    "description": "Multimodal vision-language model that understands both text and images, with tool calling support",
     "license": "Apache 2.0",
-    "icon": "\ud83c\udf0a",
-    "huggingface_url": "https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3",
-    "tags": ["chat"],
+    "huggingface_url": "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct",
+    "tags": ["vision", "chat"],
     "context_lengths": [2048, 4096, 8192, 16384, 32768],
     "default_context": 4096,
     "files": [
@@ -59,160 +102,140 @@
         "quantizations": [
           {
             "name": "Q4_K_M",
-            "size_bytes": 4400000000,
-            "download_url": "https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF/resolve/main/Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
+            "size_bytes": 2497281664,
+            "download_url": "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3VL-4B-Instruct-Q4_K_M.gguf",
             "sha256": null
           },
           {
-            "name": "Q5_K_M",
-            "size_bytes": 5100000000,
-            "download_url": "https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF/resolve/main/Mistral-7B-Instruct-v0.3-Q5_K_M.gguf",
+            "name": "Q8_0",
+            "size_bytes": 4280406144,
+            "download_url": "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3VL-4B-Instruct-Q8_0.gguf",
             "sha256": null
           }
         ]
-      }
-    ]
-  },
-  {
-    "id": "gemma-2-9b-instruct",
-    "name": "Gemma 2 9B Instruct",
-    "organization": "Google",
-    "parameters": "9B",
-    "param_count": 9000000000,
-    "description": "Google's efficient and capable instruction model",
-    "license": "Gemma License",
-    "icon": "\ud83d\udc8e",
-    "huggingface_url": "https://huggingface.co/google/gemma-2-9b-it",
-    "tags": ["chat"],
-    "context_lengths": [2048, 4096, 8192],
-    "default_context": 4096,
-    "files": [
+      },
       {
-        "role": "weights",
-        "label": "Model Weights",
-        "quantizations": [
-          {
-            "name": "Q4_K_M",
-            "size_bytes": 5500000000,
-            "download_url": "https://huggingface.co/bartowski/gemma-2-9b-it-GGUF/resolve/main/gemma-2-9b-it-Q4_K_M.gguf",
-            "sha256": null
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "phi-3.5-mini-instruct",
-    "name": "Phi-3.5 Mini Instruct",
-    "organization": "Microsoft",
-    "parameters": "3.8B",
-    "param_count": 3800000000,
-    "description": "Compact yet capable model, great for constrained environments",
-    "license": "MIT",
-    "icon": "\u26a1",
-    "huggingface_url": "https://huggingface.co/microsoft/Phi-3.5-mini-instruct",
-    "tags": ["chat"],
-    "context_lengths": [2048, 4096, 8192, 16384, 32768, 65536, 131072],
-    "default_context": 4096,
-    "files": [
-      {
-        "role": "weights",
-        "label": "Model Weights",
-        "quantizations": [
-          {
-            "name": "Q4_K_M",
-            "size_bytes": 2400000000,
-            "download_url": "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf",
-            "sha256": null
-          },
-          {
-            "name": "Q5_K_S",
-            "size_bytes": 2800000000,
-            "download_url": "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q5_K_S.gguf",
-            "sha256": null
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "qwen2.5-coder-7b-instruct",
-    "name": "Qwen2.5 Coder 7B Instruct",
-    "organization": "Alibaba",
-    "parameters": "7B",
-    "param_count": 7000000000,
-    "description": "Specialized coding model with strong code generation",
-    "license": "Apache 2.0",
-    "icon": "\ud83e\udde0",
-    "huggingface_url": "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct",
-    "tags": ["code"],
-    "context_lengths": [2048, 4096, 8192, 16384, 32768],
-    "default_context": 4096,
-    "files": [
-      {
-        "role": "weights",
-        "label": "Model Weights",
-        "quantizations": [
-          {
-            "name": "Q4_K_M",
-            "size_bytes": 4700000000,
-            "download_url": "https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
-            "sha256": null
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "deepseek-r1-distill-qwen-7b",
-    "name": "DeepSeek-R1 Distill Qwen 7B",
-    "organization": "DeepSeek",
-    "parameters": "7B",
-    "param_count": 7000000000,
-    "description": "Reasoning-focused model distilled from DeepSeek-R1",
-    "license": "MIT",
-    "icon": "\ud83d\udd2e",
-    "huggingface_url": "https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-    "tags": ["chat"],
-    "context_lengths": [2048, 4096, 8192, 16384, 32768, 65536],
-    "default_context": 4096,
-    "files": [
-      {
-        "role": "weights",
-        "label": "Model Weights",
-        "quantizations": [
-          {
-            "name": "Q4_K_M",
-            "size_bytes": 4700000000,
-            "download_url": "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
-            "sha256": null
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "nomic-embed-text-v1.5",
-    "name": "Nomic Embed Text v1.5",
-    "organization": "Nomic AI",
-    "parameters": "137M",
-    "param_count": 137000000,
-    "description": "High-quality text embeddings for semantic search",
-    "license": "Apache 2.0",
-    "icon": "\ud83d\udd17",
-    "huggingface_url": "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5",
-    "tags": ["embedding"],
-    "context_lengths": [512, 1024, 2048, 8192],
-    "default_context": 2048,
-    "files": [
-      {
-        "role": "weights",
-        "label": "Model Weights",
+        "role": "mmproj",
+        "label": "Vision Adapter (mmproj)",
         "quantizations": [
           {
             "name": "F16",
-            "size_bytes": 274000000,
-            "download_url": "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.f16.gguf",
+            "size_bytes": 836180256,
+            "download_url": "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-4B-Instruct-F16.gguf",
+            "sha256": null
+          },
+          {
+            "name": "Q8_0",
+            "size_bytes": 453974304,
+            "download_url": "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf",
+            "sha256": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "qwen3-0.6b",
+    "name": "Qwen3 0.6B",
+    "organization": "Qwen",
+    "parameters": "0.6B",
+    "param_count": 600000000,
+    "description": "Ultra-compact model with reasoning capabilities, ideal for edge devices and constrained environments",
+    "license": "Apache 2.0",
+    "huggingface_url": "https://huggingface.co/Qwen/Qwen3-0.6B",
+    "tags": ["chat"],
+    "context_lengths": [2048, 4096, 8192, 16384, 32768],
+    "default_context": 4096,
+    "files": [
+      {
+        "role": "weights",
+        "label": "Model Weights",
+        "quantizations": [
+          {
+            "name": "Q8_0",
+            "size_bytes": 639446688,
+            "download_url": "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf",
+            "sha256": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "qwen3-1.7b",
+    "name": "Qwen3 1.7B",
+    "organization": "Qwen",
+    "parameters": "1.7B",
+    "param_count": 1700000000,
+    "description": "Compact model balancing capability and efficiency, with reasoning and tool use support",
+    "license": "Apache 2.0",
+    "huggingface_url": "https://huggingface.co/Qwen/Qwen3-1.7B",
+    "tags": ["chat"],
+    "context_lengths": [2048, 4096, 8192, 16384, 32768],
+    "default_context": 4096,
+    "files": [
+      {
+        "role": "weights",
+        "label": "Model Weights",
+        "quantizations": [
+          {
+            "name": "Q8_0",
+            "size_bytes": 1834426016,
+            "download_url": "https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q8_0.gguf",
+            "sha256": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "qwen3-4b-instruct-2507",
+    "name": "Qwen3 4B Instruct",
+    "organization": "Qwen",
+    "parameters": "4B",
+    "param_count": 4000000000,
+    "description": "Instruction-tuned 4B model (July 2025 release) with strong reasoning and tool calling capabilities",
+    "license": "Apache 2.0",
+    "huggingface_url": "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507",
+    "tags": ["chat"],
+    "context_lengths": [2048, 4096, 8192, 16384, 32768],
+    "default_context": 4096,
+    "files": [
+      {
+        "role": "weights",
+        "label": "Model Weights",
+        "quantizations": [
+          {
+            "name": "Q5_K_S",
+            "size_bytes": 2823711840,
+            "download_url": "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q5_K_S.gguf",
+            "sha256": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "qwen3-8b",
+    "name": "Qwen3 8B",
+    "organization": "Qwen",
+    "parameters": "8B",
+    "param_count": 8000000000,
+    "description": "High-capability model with hybrid thinking modes, strong reasoning, and multilingual support",
+    "license": "Apache 2.0",
+    "huggingface_url": "https://huggingface.co/Qwen/Qwen3-8B",
+    "tags": ["chat"],
+    "context_lengths": [2048, 4096, 8192, 16384, 32768],
+    "default_context": 4096,
+    "files": [
+      {
+        "role": "weights",
+        "label": "Model Weights",
+        "quantizations": [
+          {
+            "name": "Q6_K",
+            "size_bytes": 6725899040,
+            "download_url": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q6_K.gguf",
             "sha256": null
           }
         ]
@@ -225,12 +248,11 @@
     "organization": "Haotian Liu",
     "parameters": "7B",
     "param_count": 7000000000,
-    "description": "Multimodal vision-language model — understands both text and images",
+    "description": "Multimodal vision-language model built on Mistral 7B, understands both text and images",
     "license": "Apache 2.0",
-    "icon": "\ud83d\udc41\ufe0f",
-    "huggingface_url": "https://huggingface.co/cjpais/llava-v1.6-mistral-7b-gguf",
+    "huggingface_url": "https://huggingface.co/liuhaotian/llava-v1.6-mistral-7b",
     "tags": ["vision", "chat"],
-    "context_lengths": [2048, 4096, 8192],
+    "context_lengths": [2048, 4096, 8192, 16384, 32768],
     "default_context": 4096,
     "files": [
       {
@@ -238,15 +260,15 @@
         "label": "Model Weights",
         "quantizations": [
           {
-            "name": "Q4_K_M",
-            "size_bytes": 4370000000,
-            "download_url": "https://huggingface.co/cjpais/llava-v1.6-mistral-7b-gguf/resolve/main/llava-v1.6-mistral-7b.Q4_K_M.gguf",
+            "name": "Q5_K_S",
+            "size_bytes": 4997716224,
+            "download_url": "https://huggingface.co/cjpais/llava-1.6-mistral-7b-gguf/resolve/main/llava-v1.6-mistral-7b.Q5_K_S.gguf",
             "sha256": null
           },
           {
-            "name": "Q5_K_M",
-            "size_bytes": 5130000000,
-            "download_url": "https://huggingface.co/cjpais/llava-v1.6-mistral-7b-gguf/resolve/main/llava-v1.6-mistral-7b.Q5_K_M.gguf",
+            "name": "Q8_0",
+            "size_bytes": 7695857920,
+            "download_url": "https://huggingface.co/cjpais/llava-1.6-mistral-7b-gguf/resolve/main/llava-v1.6-mistral-7b.Q8_0.gguf",
             "sha256": null
           }
         ]
@@ -257,8 +279,8 @@
         "quantizations": [
           {
             "name": "F16",
-            "size_bytes": 624000000,
-            "download_url": "https://huggingface.co/cjpais/llava-v1.6-mistral-7b-gguf/resolve/main/mmproj-model-f16.gguf",
+            "size_bytes": 624451168,
+            "download_url": "https://huggingface.co/cjpais/llava-1.6-mistral-7b-gguf/resolve/main/mmproj-model-f16.gguf",
             "sha256": null
           }
         ]

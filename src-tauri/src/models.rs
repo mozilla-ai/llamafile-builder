@@ -49,7 +49,6 @@ pub struct Model {
     pub param_count: u64,
     pub description: String,
     pub license: String,
-    pub icon: String,
     pub huggingface_url: Option<String>,
     pub tags: Vec<String>,
     pub context_lengths: Vec<u32>,
