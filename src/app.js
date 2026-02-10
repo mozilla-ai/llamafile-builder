@@ -99,7 +99,7 @@ const invoke = window.__TAURI__?.core?.invoke || (async (cmd, args) => {
     case 'select_llamafile_path':
       return '/Users/me/builds/llamafile';
     case 'get_llamafile_cache_dir':
-      return `~/.llamafile/v/${args?.version}/bin`;
+      return `~/.llamafile/bin`;
     case 'get_model_cache_dir':
       return '~/.llamafile/models';
     case 'select_model_file_path':
@@ -601,9 +601,7 @@ async function updateResolvedPath() {
     state.resolvedLlamafilePath = state.customLlamafilePath;
   } else if (state.selectedRelease) {
     try {
-      const cacheDir = await invoke('get_llamafile_cache_dir', {
-        version: state.selectedRelease.version,
-      });
+      const cacheDir = await invoke('get_llamafile_cache_dir');
       // Get filename from download URL
       const filename = getFilenameFromUrl(state.selectedRelease.download_url);
       state.resolvedLlamafilePath = `${cacheDir}/${filename}`;
@@ -1636,7 +1634,7 @@ async function startBuild() {
       renderCurrentStep();
 
       const release = state.selectedRelease;
-      const cacheDir = await invoke('get_llamafile_cache_dir', { version: release.version });
+      const cacheDir = await invoke('get_llamafile_cache_dir');
       const filename = getFilenameFromUrl(release.download_url);
       const cachePath = `${cacheDir}/${filename}`;
 
