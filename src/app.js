@@ -63,6 +63,7 @@ You are a helpful coding assistant with access to local tools.
   downloadProgress: null, // { filename, bytes_downloaded, bytes_total, percentage }
   hfTokenPromptVisible: false,
   hfTokenPendingRetry: null, // { url, destPath, sha256 } - retry after token entry
+  fileExistsPrompt: null, // { filename, path, resolve } - prompt when file exists
 };
 
 const STEPS = [
@@ -97,8 +98,8 @@ const invoke = window.__TAURI__?.core?.invoke || (async (cmd, args) => {
       return { os: 'macos', arch: 'aarch64', cpu_cores: 8, memory_gb: 16, has_metal: true };
     case 'select_llamafile_path':
       return '/Users/me/builds/llamafile';
-    case 'get_llamafile_cache_path':
-      return `~/.llamafile/v/${args?.version}/bin/llamafile`;
+    case 'get_llamafile_cache_dir':
+      return `~/.llamafile/v/${args?.version}/bin`;
     case 'get_model_cache_dir':
       return '~/.llamafile/models';
     case 'select_model_file_path':
@@ -600,9 +601,12 @@ async function updateResolvedPath() {
     state.resolvedLlamafilePath = state.customLlamafilePath;
   } else if (state.selectedRelease) {
     try {
-      state.resolvedLlamafilePath = await invoke('get_llamafile_cache_path', {
+      const cacheDir = await invoke('get_llamafile_cache_dir', {
         version: state.selectedRelease.version,
       });
+      // Get filename from download URL
+      const filename = getFilenameFromUrl(state.selectedRelease.download_url);
+      state.resolvedLlamafilePath = `${cacheDir}/${filename}`;
     } catch (err) {
       console.error('Failed to resolve llamafile path:', err);
       state.resolvedLlamafilePath = null;
@@ -1404,6 +1408,22 @@ function renderBuildStep() {
             </div>
           </div>
         ` : ''}
+
+        ${state.fileExistsPrompt ? `
+          <div class="hf-token-modal">
+            <div class="hf-token-content">
+              <div class="hf-token-title">File Already Exists</div>
+              <div class="hf-token-desc">
+                <code>${state.fileExistsPrompt.filename}</code> already exists in the cache.<br>
+                Would you like to use the existing file or re-download it?
+              </div>
+              <div class="hf-token-buttons" style="margin-top: 16px;">
+                <button class="btn btn-secondary" onclick="handleFileExistsChoice('skip')">Use Existing</button>
+                <button class="btn btn-primary" onclick="handleFileExistsChoice('download')">Re-download</button>
+              </div>
+            </div>
+          </div>
+        ` : ''}
       </div>
       <div class="footer">
         <button class="btn btn-secondary" onclick="prevStep()" ${state.isBuilding ? 'disabled' : ''}>\u2190 Back</button>
@@ -1498,8 +1518,8 @@ async function downloadWithAuth(url, destPath, sha256) {
   try {
     return await invoke('download_file', {
       url,
-      dest_path: destPath,
-      expected_sha256: sha256 || null,
+      destPath,
+      expectedSha256: sha256 || null,
     });
   } catch (err) {
     if (err === 'AUTH_REQUIRED') {
@@ -1536,8 +1556,8 @@ async function submitHfToken(token) {
       try {
         const result = await invoke('download_file', {
           url,
-          dest_path: destPath,
-          expected_sha256: sha256 || null,
+          destPath,
+          expectedSha256: sha256 || null,
         });
         if (window._hfTokenResolve) {
           window._hfTokenResolve(result);
@@ -1569,6 +1589,31 @@ function cancelHfTokenPrompt() {
   }
 }
 
+// Check if file exists and prompt user for action
+// Returns: 'skip' (use existing), 'download' (re-download), or throws on cancel
+async function checkFileExistsWithPrompt(path, sha256) {
+  const exists = await invoke('file_exists', { path, expectedSha256: sha256 });
+  if (!exists) {
+    return 'download';
+  }
+
+  // File exists - prompt user
+  const filename = getFilenameFromUrl(path) || path.split('/').pop();
+
+  return new Promise((resolve) => {
+    state.fileExistsPrompt = { filename, path, resolve };
+    renderCurrentStep();
+  });
+}
+
+function handleFileExistsChoice(choice) {
+  if (state.fileExistsPrompt?.resolve) {
+    state.fileExistsPrompt.resolve(choice);
+  }
+  state.fileExistsPrompt = null;
+  renderCurrentStep();
+}
+
 async function selectOutputPath() {
   try {
     const path = await invoke('select_output_path', { default_name: `${state.selectedModel?.name || 'model'}.llamafile` });
@@ -1591,10 +1636,13 @@ async function startBuild() {
       renderCurrentStep();
 
       const release = state.selectedRelease;
-      const cachePath = await invoke('get_llamafile_cache_path', { version: release.version });
-      const exists = await invoke('file_exists', { path: cachePath, expected_sha256: release.sha256 });
+      const cacheDir = await invoke('get_llamafile_cache_dir', { version: release.version });
+      const filename = getFilenameFromUrl(release.download_url);
+      const cachePath = `${cacheDir}/${filename}`;
 
-      if (!exists && release.download_url) {
+      const action = await checkFileExistsWithPrompt(cachePath, release.sha256);
+
+      if (action === 'download' && release.download_url) {
         state.buildLog.push(`Downloading llamafile ${release.version}...`);
         renderBuildLog();
         try {
@@ -1608,7 +1656,7 @@ async function startBuild() {
         }
       } else {
         llamafilePath = cachePath;
-        state.buildLog.push(`Using cached: ${cachePath}`);
+        state.buildLog.push(`Using existing: ${cachePath}`);
         renderBuildLog();
       }
     }
@@ -1646,9 +1694,9 @@ async function startBuild() {
           const modelDir = `${state.modelDownloadDir}/${state.selectedModel.id}`;
           const destPath = `${modelDir}/${filename}`;
 
-          const exists = await invoke('file_exists', { path: destPath, expected_sha256: quant.sha256 });
+          const action = await checkFileExistsWithPrompt(destPath, quant.sha256);
 
-          if (!exists) {
+          if (action === 'download') {
             state.buildLog.push(`Downloading ${file.label || file.role} (${quant.name})...`);
             renderBuildLog();
             try {
@@ -1663,7 +1711,7 @@ async function startBuild() {
             }
           } else {
             modelFiles.push({ role: file.role, path: destPath });
-            state.buildLog.push(`Using cached: ${destPath}`);
+            state.buildLog.push(`Using existing: ${destPath}`);
             renderBuildLog();
           }
         }
@@ -1780,6 +1828,16 @@ function getFileName(path) {
   return path.split('/').pop().split('\\').pop();
 }
 
+function getFilenameFromUrl(url) {
+  if (!url) return 'file';
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname.split('/').pop() || 'file';
+  } catch {
+    return url.split('/').pop() || 'file';
+  }
+}
+
 // Global exports
 window.goToStep = goToStep;
 window.nextStep = nextStep;
@@ -1813,5 +1871,6 @@ window.clearCustomModel = clearCustomModel;
 window.selectDownloadDir = selectDownloadDir;
 window.submitHfToken = submitHfToken;
 window.cancelHfTokenPrompt = cancelHfTokenPrompt;
+window.handleFileExistsChoice = handleFileExistsChoice;
 
 document.addEventListener('DOMContentLoaded', init);

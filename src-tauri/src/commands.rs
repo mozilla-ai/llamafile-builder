@@ -213,9 +213,10 @@ pub async fn select_llamafile_path(app_handle: tauri::AppHandle) -> Result<Optio
     Ok(result)
 }
 
-/// Get the platform-appropriate cache path for a downloaded llamafile version
+/// Get the platform-appropriate cache directory for a downloaded llamafile version
+/// Returns the directory path; caller should append filename from download URL
 #[tauri::command]
-pub async fn get_llamafile_cache_path(version: String) -> Result<String, String> {
+pub async fn get_llamafile_cache_dir(version: String) -> Result<String, String> {
     let base = directories::BaseDirs::new()
         .ok_or_else(|| "Could not determine home directory".to_string())?;
 
@@ -225,14 +226,12 @@ pub async fn get_llamafile_cache_path(version: String) -> Result<String, String>
             .join("v")
             .join(&version)
             .join("bin")
-            .join("llamafile.exe")
     } else {
         base.home_dir()
             .join(".llamafile")
             .join("v")
             .join(&version)
             .join("bin")
-            .join("llamafile")
     };
 
     Ok(path.to_string_lossy().to_string())
@@ -363,7 +362,7 @@ pub async fn run_zipalign(
 /// Download a file from URL with progress events
 /// Returns the destination path on success, or an error string
 /// Error string will be "AUTH_REQUIRED" for 401/403 errors on HF URLs
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn download_file(
     url: String,
     dest_path: String,
@@ -403,7 +402,7 @@ pub async fn download_file(
 }
 
 /// Check if a file exists, optionally verifying its SHA256 checksum
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn file_exists(
     path: String,
     expected_sha256: Option<String>,

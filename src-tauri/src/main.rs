@@ -41,7 +41,7 @@ fn main() {
             commands::get_system_info,
             commands::validate_config,
             commands::select_llamafile_path,
-            commands::get_llamafile_cache_path,
+            commands::get_llamafile_cache_dir,
             commands::get_model_cache_dir,
             commands::select_model_file_path,
             commands::select_model_download_dir,
