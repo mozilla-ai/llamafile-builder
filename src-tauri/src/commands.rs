@@ -49,146 +49,15 @@ pub async fn generate_args_content(
     model_filename: String,
     mmproj_filename: Option<String>,
 ) -> Result<String, String> {
+    use crate::builder::generate_args_from_schema;
+
     let schema = get_config_schema().await?;
-    let mut lines: Vec<String> = Vec::new();
-
-    // Evaluate conditionals
-    let has_mmproj = mmproj_filename.is_some();
-
-    for item in &schema {
-        match item {
-            ConfigSchemaItem::Section { .. } => continue,
-
-            ConfigSchemaItem::Text {
-                key,
-                flag,
-                default,
-                hidden: _,
-                required: _,
-                conditional,
-                ..
-            } => {
-                // Check conditional
-                if let Some(cond) = conditional {
-                    if cond == "has_mmproj" && !has_mmproj {
-                        continue;
-                    }
-                }
-
-                // Skip if no flag
-                let flag = match flag {
-                    Some(f) => f,
-                    None => continue,
-                };
-
-                // Get value from config_values or use default
-                let value = config_values
-                    .get(key)
-                    .cloned()
-                    .unwrap_or_else(|| default.clone());
-
-                // Convert to string
-                let value_str = match &value {
-                    serde_json::Value::String(s) => s.clone(),
-                    serde_json::Value::Number(n) => n.to_string(),
-                    _ => continue,
-                };
-
-                // Skip "auto" for threads
-                if key == "threads" && value_str == "auto" {
-                    continue;
-                }
-
-                // Resolve placeholders
-                let resolved = value_str
-                    .replace("${MODEL_FILENAME}", &model_filename)
-                    .replace("${MMPROJ_FILENAME}", mmproj_filename.as_deref().unwrap_or(""));
-
-                // Add flag on one line, value on next
-                lines.push(flag.clone());
-                lines.push(resolved);
-            }
-
-            ConfigSchemaItem::Dropdown {
-                key,
-                flag,
-                default,
-                hidden: _,
-                required: _,
-                conditional,
-                ..
-            } => {
-                // Check conditional
-                if let Some(cond) = conditional {
-                    if cond == "has_mmproj" && !has_mmproj {
-                        continue;
-                    }
-                }
-
-                // Skip if no flag
-                let flag = match flag {
-                    Some(f) => f,
-                    None => continue,
-                };
-
-                // Get value from config_values or use default
-                let value = config_values
-                    .get(key)
-                    .cloned()
-                    .unwrap_or_else(|| default.clone());
-
-                // Convert to string
-                let value_str = match &value {
-                    serde_json::Value::String(s) => s.clone(),
-                    serde_json::Value::Number(n) => n.to_string(),
-                    _ => continue,
-                };
-
-                // Add flag on one line, value on next
-                lines.push(flag.clone());
-                lines.push(value_str);
-            }
-
-            ConfigSchemaItem::Bool {
-                key,
-                flag,
-                default,
-                hidden: _,
-                required: _,
-                conditional,
-                ..
-            } => {
-                // Check conditional
-                if let Some(cond) = conditional {
-                    if cond == "has_mmproj" && !has_mmproj {
-                        continue;
-                    }
-                }
-
-                // Skip if no flag
-                let flag = match flag {
-                    Some(f) => f,
-                    None => continue,
-                };
-
-                // Get value from config_values or use default
-                let value = config_values
-                    .get(key)
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(*default);
-
-                // Boolean flags: only output if true (no value needed)
-                if value {
-                    lines.push(flag.clone());
-                }
-            }
-        }
-    }
-
-    // Add trailing ... to allow user CLI arguments
-    lines.push("...".to_string());
-
-    Ok(lines.join("\n"))
+    Ok(generate_args_from_schema(
+        &schema,
+        &config_values,
+        &model_filename,
+        mmproj_filename.as_deref(),
+    ))
 }
 
 /// Search models by query
@@ -779,11 +648,17 @@ pub async fn open_url(url: String, app_handle: tauri::AppHandle) -> Result<(), S
 pub async fn validate_config(config: BuildConfig) -> Result<Vec<String>, String> {
     let mut warnings = Vec::new();
 
-    if config.server.context_length > 32768 {
+    // Get context_length from config_values (default to 4096 if not set)
+    let context_length = config.config_values
+        .get("context_length")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(4096) as u32;
+
+    if context_length > 32768 {
         warnings.push("Large context lengths require significant RAM".to_string());
     }
 
-    if config.compute.mode == ComputeMode::Cpu && config.server.context_length > 8192 {
+    if config.compute.mode == ComputeMode::Cpu && context_length > 8192 {
         warnings.push("CPU inference with large context may be slow".to_string());
     }
 

@@ -638,6 +638,54 @@ body {
   background: var(--border);
 }
 
+/* Toggleable section */
+.config-section-toggleable {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.config-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.config-section-header:hover {
+  background: var(--bg-card-hover);
+}
+
+.config-section-info {
+  flex: 1;
+}
+
+.config-section-header .config-section-title {
+  margin-bottom: 0;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.config-section-header .config-section-title::after {
+  display: none;
+}
+
+.config-section-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.config-section-items {
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
 .config-row {
   display: flex;
   align-items: center;

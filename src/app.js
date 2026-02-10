@@ -377,8 +377,7 @@ function getMockConfigSchema() {
     { type: 'text', key: 'threads', label: 'Threads', description: 'CPU threads', default: 'auto', value_type: 'string', flag: '-t' },
     { type: 'text', key: 'batch_size', label: 'Batch Size', description: 'Prompt processing', default: 512, value_type: 'number', flag: '-b' },
     { type: 'section', label: 'Features' },
-    { type: 'bool', key: 'enable_web_ui', label: 'Enable Web UI', description: 'Serve built-in chat interface', default: true, flag: null },
-    { type: 'bool', key: 'flash_attention', label: 'Flash Attention', description: 'Faster inference', default: true, flag: '-fa' },
+    { type: 'bool', key: 'enable_web_ui', label: 'Enable Web UI', description: 'Serve built-in chat interface', default: true, flag: '--webui' },
   ];
 }
 
@@ -413,9 +412,17 @@ async function init() {
     // Load config schema and initialize defaults
     state.configSchema = await invoke('get_config_schema');
     state.configValues = {};
-    for (const item of state.configSchema) {
-      if (item.type !== 'section' && item.key) {
-        state.configValues[item.key] = item.default;
+    initConfigDefaults(state.configSchema);
+
+    function initConfigDefaults(items) {
+      for (const item of items) {
+        if (item.key && item.default !== undefined) {
+          state.configValues[item.key] = item.default;
+        }
+        // Recurse into nested items
+        if (item.items) {
+          initConfigDefaults(item.items);
+        }
       }
     }
 
@@ -1314,17 +1321,41 @@ function renderConfigStep() {
 }
 
 function renderConfigItems() {
-  let html = '';
-  let sectionOpen = false;
+  return renderConfigItemsRecursive(state.configSchema);
+}
 
-  for (const item of state.configSchema) {
+function renderConfigItemsRecursive(items) {
+  let html = '';
+
+  for (const item of items) {
     // Skip hidden items - they're only used at build time
     if (item.hidden) continue;
 
     if (item.type === 'section') {
-      if (sectionOpen) html += '</div>';
-      html += `<div class="config-section"><div class="config-section-title">${item.label}</div>`;
-      sectionOpen = true;
+      // Check if this is a toggleable section (has a key)
+      if (item.key) {
+        const enabled = state.configValues[item.key] ?? item.default ?? true;
+        html += `
+          <div class="config-section config-section-toggleable">
+            <div class="config-section-header" onclick="toggleConfig('${item.key}')">
+              <div class="config-section-info">
+                <div class="config-section-title">${item.label}</div>
+                ${item.description ? `<div class="config-section-desc">${item.description}</div>` : ''}
+              </div>
+              <div class="toggle-switch ${enabled ? 'on' : ''}"></div>
+            </div>
+            ${enabled && item.items ? `<div class="config-section-items">${renderConfigItemsRecursive(item.items)}</div>` : ''}
+          </div>
+        `;
+      } else {
+        // Regular section header (not toggleable)
+        html += `
+          <div class="config-section">
+            <div class="config-section-title">${item.label}</div>
+            ${item.items ? renderConfigItemsRecursive(item.items) : ''}
+          </div>
+        `;
+      }
     } else if (item.type === 'text') {
       html += renderTextItem(item);
     } else if (item.type === 'dropdown') {
@@ -1333,7 +1364,7 @@ function renderConfigItems() {
       html += renderBoolItem(item);
     }
   }
-  if (sectionOpen) html += '</div>';
+
   return html;
 }
 
@@ -2264,8 +2295,8 @@ async function goToStep(step) {
 
 async function nextStep() {
   if (state.currentStep < STEPS.length) {
-    // DEV: Skip steps 3, 4, 5 (Configuration, Compute, Agent) - go straight to Build
-    if (state.currentStep === 2) {
+    // Skip steps 4, 5 (Compute, Agent) - go from Configuration to Build
+    if (state.currentStep === 3) {
       state.currentStep = 6;
     } else {
       state.currentStep++;
@@ -2280,9 +2311,9 @@ async function nextStep() {
 
 function prevStep() {
   if (state.currentStep > 1) {
-    // DEV: Skip steps 3, 4, 5 - go back from Build to Model
+    // Skip steps 4, 5 - go back from Build to Configuration
     if (state.currentStep === 6) {
-      state.currentStep = 2;
+      state.currentStep = 3;
     } else {
       state.currentStep--;
     }

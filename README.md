@@ -126,7 +126,6 @@ app_handle.emit_all("build-progress", &progress)?;
 | `-c` | Context length (tokens) | `4096` |
 | `-t` | CPU threads | auto |
 | `-b` | Batch size | `512` |
-| `--flash-attn` | Enable flash attention | enabled |
 | `--api-key` | Require API key | none |
 
 ### Compute Targets

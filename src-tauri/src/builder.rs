@@ -1,4 +1,5 @@
 use crate::models::*;
+use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
 use tokio::fs;
@@ -8,58 +9,195 @@ use tokio::process::Command;
 pub enum BuildError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    
+
     #[error("Download failed: {0}")]
     Download(String),
-    
+
     #[error("Build process failed: {0}")]
     Process(String),
-    
+
     #[error("Invalid configuration: {0}")]
     Config(String),
-    
+
     #[error("Build cancelled")]
     Cancelled,
 }
 
-/// Generate the .args file content from server configuration
-pub fn generate_args_file(config: &ServerConfig, agent: &AgentConfig) -> String {
-    let mut args = Vec::new();
-    
-    // Server settings
-    args.push(format!("--host {}", config.host));
-    args.push(format!("--port {}", config.port));
-    args.push(format!("-c {}", config.context_length));
-    args.push(format!("-b {}", config.batch_size));
-    
-    // Threads
-    if let Some(threads) = config.threads {
-        args.push(format!("-t {}", threads));
+/// Context for evaluating conditionals during args generation
+struct ArgsContext<'a> {
+    config_values: &'a HashMap<String, serde_json::Value>,
+    model_filename: &'a str,
+    mmproj_filename: Option<&'a str>,
+    has_mmproj: bool,
+}
+
+/// Generate .args file content from config values and schema
+/// This is the schema-driven implementation that reads flags from config.json
+pub fn generate_args_from_schema(
+    schema: &[ConfigSchemaItem],
+    config_values: &HashMap<String, serde_json::Value>,
+    model_filename: &str,
+    mmproj_filename: Option<&str>,
+) -> String {
+    let mut lines: Vec<String> = Vec::new();
+
+    let ctx = ArgsContext {
+        config_values,
+        model_filename,
+        mmproj_filename,
+        has_mmproj: mmproj_filename.is_some(),
+    };
+
+    // Process all items recursively
+    process_schema_items(schema, &ctx, &mut lines);
+
+    // Add trailing ... to allow user CLI arguments
+    lines.push("...".to_string());
+
+    lines.join("\n")
+}
+
+/// Recursively process config items, respecting section toggles
+fn process_schema_items(items: &[ConfigSchemaItem], ctx: &ArgsContext, lines: &mut Vec<String>) {
+    for item in items {
+        match item {
+            ConfigSchemaItem::Section { key, default, items: nested_items, .. } => {
+                // Check if this is a toggleable section
+                if let Some(section_key) = key {
+                    let enabled = ctx.config_values
+                        .get(section_key)
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(default.unwrap_or(true));
+
+                    // Skip nested items if section is disabled
+                    if !enabled {
+                        continue;
+                    }
+                }
+
+                // Process nested items
+                process_schema_items(nested_items, ctx, lines);
+            }
+
+            ConfigSchemaItem::Text {
+                key,
+                flag,
+                default,
+                conditional,
+                ..
+            } => {
+                // Check conditional
+                if let Some(cond) = conditional {
+                    if cond == "has_mmproj" && !ctx.has_mmproj {
+                        continue;
+                    }
+                }
+
+                // Skip if no flag
+                let flag = match flag {
+                    Some(f) => f,
+                    None => continue,
+                };
+
+                // Get value from config_values or use default
+                let value = ctx.config_values
+                    .get(key)
+                    .cloned()
+                    .unwrap_or_else(|| default.clone());
+
+                // Convert to string
+                let value_str = match &value {
+                    serde_json::Value::String(s) => s.clone(),
+                    serde_json::Value::Number(n) => n.to_string(),
+                    _ => continue,
+                };
+
+                // Skip "auto" for threads
+                if key == "threads" && value_str == "auto" {
+                    continue;
+                }
+
+                // Resolve placeholders
+                let resolved = value_str
+                    .replace("${MODEL_FILENAME}", ctx.model_filename)
+                    .replace("${MMPROJ_FILENAME}", ctx.mmproj_filename.unwrap_or(""));
+
+                // Add flag on one line, value on next
+                lines.push(flag.clone());
+                lines.push(resolved);
+            }
+
+            ConfigSchemaItem::Dropdown {
+                key,
+                flag,
+                default,
+                conditional,
+                ..
+            } => {
+                // Check conditional
+                if let Some(cond) = conditional {
+                    if cond == "has_mmproj" && !ctx.has_mmproj {
+                        continue;
+                    }
+                }
+
+                // Skip if no flag
+                let flag = match flag {
+                    Some(f) => f,
+                    None => continue,
+                };
+
+                // Get value from config_values or use default
+                let value = ctx.config_values
+                    .get(key)
+                    .cloned()
+                    .unwrap_or_else(|| default.clone());
+
+                // Convert to string
+                let value_str = match &value {
+                    serde_json::Value::String(s) => s.clone(),
+                    serde_json::Value::Number(n) => n.to_string(),
+                    _ => continue,
+                };
+
+                // Add flag on one line, value on next
+                lines.push(flag.clone());
+                lines.push(value_str);
+            }
+
+            ConfigSchemaItem::Bool {
+                key,
+                flag,
+                default,
+                conditional,
+                ..
+            } => {
+                // Check conditional
+                if let Some(cond) = conditional {
+                    if cond == "has_mmproj" && !ctx.has_mmproj {
+                        continue;
+                    }
+                }
+
+                // Skip if no flag
+                let flag = match flag {
+                    Some(f) => f,
+                    None => continue,
+                };
+
+                // Get value from config_values or use default
+                let value = ctx.config_values
+                    .get(key)
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(*default);
+
+                // Boolean flags: only output if true (no value needed)
+                if value {
+                    lines.push(flag.clone());
+                }
+            }
+        }
     }
-    
-    // Features
-    if config.flash_attention {
-        args.push("--flash-attn".to_string());
-    }
-    
-    if !config.enable_web_ui {
-        args.push("--no-webui".to_string());
-    }
-    
-    if let Some(ref api_key) = config.api_key {
-        args.push(format!("--api-key {}", api_key));
-    }
-    
-    // Agent mode settings
-    if agent.enabled {
-        // Add system prompt file reference
-        args.push("--system-prompt-file .args.prompt".to_string());
-        
-        // Tool-specific flags would go here
-        // This depends on how agentfile implements tool registration
-    }
-    
-    args.join("\n")
 }
 
 /// Generate the system prompt file for agent mode
@@ -173,8 +311,17 @@ pub async fn build_llamafile(
         bytes_total: 0,
         error: None,
     });
-    
-    let args_content = generate_args_file(&config.server, &config.agent);
+
+    // Load config schema and generate .args content
+    let schema: Vec<ConfigSchemaItem> = serde_json::from_str(include_str!("../config.json"))
+        .map_err(|e| BuildError::Config(format!("Failed to parse config.json: {}", e)))?;
+
+    let args_content = generate_args_from_schema(
+        &schema,
+        &config.config_values,
+        &config.model_filename,
+        config.mmproj_filename.as_deref(),
+    );
     let args_path = cache_dir.join("temp.args");
     fs::write(&args_path, &args_content).await?;
     
@@ -288,31 +435,40 @@ pub async fn zipalign_append(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
-    fn test_generate_args_file() {
-        let config = ServerConfig {
-            host: "0.0.0.0".to_string(),
-            port: 8080,
-            context_length: 8192,
-            threads: Some(8),
-            batch_size: 512,
-            api_key: None,
-            enable_web_ui: true,
-            flash_attention: true,
-        };
-        
-        let agent = AgentConfig::default();
-        let args = generate_args_file(&config, &agent);
-        
-        assert!(args.contains("--host 0.0.0.0"));
-        assert!(args.contains("--port 8080"));
-        assert!(args.contains("-c 8192"));
-        assert!(args.contains("-t 8"));
-        assert!(args.contains("--flash-attn"));
-        assert!(!args.contains("--no-webui"));
+    fn test_generate_args_from_schema() {
+        // Load actual schema
+        let schema: Vec<ConfigSchemaItem> = serde_json::from_str(include_str!("../config.json"))
+            .expect("Failed to parse config.json");
+
+        // Create config values
+        let mut config_values = HashMap::new();
+        config_values.insert("host".to_string(), serde_json::json!("0.0.0.0"));
+        config_values.insert("port".to_string(), serde_json::json!(8080));
+        config_values.insert("context_length".to_string(), serde_json::json!(8192));
+        config_values.insert("server_enabled".to_string(), serde_json::json!(true));
+        config_values.insert("enable_web_ui".to_string(), serde_json::json!(true));
+
+        let args = generate_args_from_schema(
+            &schema,
+            &config_values,
+            "model.gguf",
+            None,
+        );
+
+        assert!(args.contains("-m"));
+        assert!(args.contains("/zip/model.gguf"));
+        assert!(args.contains("--host"));
+        assert!(args.contains("0.0.0.0"));
+        assert!(args.contains("--port"));
+        assert!(args.contains("8080"));
+        assert!(args.contains("--ctx-size"));
+        assert!(args.contains("8192"));
+        assert!(args.contains("--webui"));
+        assert!(args.contains("..."));
     }
-    
+
     #[test]
     fn test_estimate_size() {
         let model_size = 5_000_000_000u64; // 5 GB

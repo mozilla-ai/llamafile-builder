@@ -60,8 +60,20 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConfigSchemaItem {
+    /// A section with nested items, optionally toggleable (if key is present)
     Section {
         label: String,
+        /// If present, section is toggleable and this is its key in configValues
+        #[serde(default)]
+        key: Option<String>,
+        #[serde(default)]
+        description: Option<String>,
+        /// Default toggle state (only used if key is present)
+        #[serde(default)]
+        default: Option<bool>,
+        /// Nested items within this section
+        #[serde(default)]
+        items: Vec<ConfigSchemaItem>,
     },
     Text {
         key: String,
@@ -106,33 +118,6 @@ pub enum ConfigSchemaItem {
     },
 }
 
-/// Server configuration for .args file
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerConfig {
-    pub host: String,
-    pub port: u16,
-    pub context_length: u32,
-    pub threads: Option<u32>,   // None = auto
-    pub batch_size: u32,
-    pub api_key: Option<String>,
-    pub enable_web_ui: bool,
-    pub flash_attention: bool,
-}
-
-impl Default for ServerConfig {
-    fn default() -> Self {
-        Self {
-            host: "127.0.0.1".to_string(),
-            port: 8080,
-            context_length: 4096,
-            threads: None,
-            batch_size: 512,
-            api_key: None,
-            enable_web_ui: true,
-            flash_attention: true,
-        }
-    }
-}
 
 /// Compute target configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -246,10 +231,15 @@ pub struct BuildConfig {
     pub llamafile_version: String,
     pub model_id: String,
     pub quantization: String,
-    pub server: ServerConfig,
+    /// Configuration values from the schema-driven UI (keys match config.json)
+    pub config_values: std::collections::HashMap<String, serde_json::Value>,
     pub compute: ComputeConfig,
     pub agent: AgentConfig,
     pub output_path: String,
+    /// Model filename for .args generation (e.g., "model.gguf")
+    pub model_filename: String,
+    /// Optional mmproj filename for multimodal models
+    pub mmproj_filename: Option<String>,
 }
 
 /// Build progress status
