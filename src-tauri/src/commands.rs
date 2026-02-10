@@ -140,38 +140,66 @@ pub async fn get_build_status(state: State<'_, AppState>) -> Result<BuildProgres
 }
 
 /// Open file dialog to select output path
-#[tauri::command]
-pub async fn select_output_path(app_handle: tauri::AppHandle, default_name: String) -> Result<Option<String>, String> {
+#[tauri::command(rename_all = "camelCase")]
+pub async fn select_output_path(app_handle: tauri::AppHandle, default_path: String) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
+    use std::path::Path;
 
-    let (tx, rx) = tokio::sync::oneshot::channel();
+    let (tx, rx) = oneshot::channel();
 
-    app_handle
-        .dialog()
-        .file()
-        .set_file_name(&default_name)
+    let path = Path::new(&default_path);
+    let mut dialog = app_handle.dialog().file();
+
+    // Set starting directory from the default path
+    if let Some(parent) = path.parent() {
+        dialog = dialog.set_directory(parent);
+    }
+
+    // Set default filename
+    if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+        dialog = dialog.set_file_name(filename);
+    }
+
+    dialog
         .add_filter("llamafile", &["llamafile"])
         .save_file(move |path| {
             let _ = tx.send(path.map(|p| p.to_string()));
         });
 
-    let result = rx.await.map_err(|e| e.to_string())?;
-    Ok(result)
+    rx.await.map_err(|_| "Dialog cancelled".to_string())?
+        .map_or(Ok(None), |p| Ok(Some(p)))
 }
 
 /// Get default output path
-#[tauri::command]
-pub async fn get_default_output_path(model_name: String) -> Result<String, String> {
-    let desktop = directories::UserDirs::new()
-        .and_then(|dirs| dirs.desktop_dir().map(|p| p.to_path_buf()))
+#[tauri::command(rename_all = "camelCase")]
+pub async fn get_default_output_path(gguf_filename: Option<String>, model_name: Option<String>) -> Result<String, String> {
+    // Find a suitable output directory: Desktop > Downloads > Documents > Home
+    let output_dir = directories::UserDirs::new()
+        .and_then(|dirs| {
+            dirs.desktop_dir().map(|p| p.to_path_buf())
+                .or_else(|| dirs.download_dir().map(|p| p.to_path_buf()))
+                .or_else(|| dirs.document_dir().map(|p| p.to_path_buf()))
+        })
+        .or_else(|| dirs::home_dir())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-    let safe_name = model_name
-        .to_lowercase()
-        .replace(" ", "-")
-        .replace(".", "-");
+    // Determine filename: prefer GGUF filename, fall back to model name
+    let base_name = if let Some(gguf) = gguf_filename {
+        // Remove .gguf extension if present
+        gguf.trim_end_matches(".gguf")
+            .trim_end_matches(".GGUF")
+            .to_string()
+    } else if let Some(name) = model_name {
+        // Sanitize model name
+        name.to_lowercase()
+            .replace(" ", "-")
+            .replace(".", "-")
+    } else {
+        "output".to_string()
+    };
 
-    let path = desktop.join(format!("{}.llamafile", safe_name));
+    let path = output_dir.join(format!("{}.llamafile", base_name));
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -201,8 +229,9 @@ pub async fn get_system_info() -> Result<SystemInfo, String> {
 #[tauri::command]
 pub async fn select_llamafile_path(app_handle: tauri::AppHandle) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
 
-    let (tx, rx) = tokio::sync::oneshot::channel();
+    let (tx, rx) = oneshot::channel();
 
     app_handle
         .dialog()
@@ -212,8 +241,8 @@ pub async fn select_llamafile_path(app_handle: tauri::AppHandle) -> Result<Optio
             let _ = tx.send(path.map(|p| p.to_string()));
         });
 
-    let result = rx.await.map_err(|e| e.to_string())?;
-    Ok(result)
+    rx.await.map_err(|_| "Dialog cancelled".to_string())?
+        .map_or(Ok(None), |p| Ok(Some(p)))
 }
 
 /// Get the platform-appropriate cache directory for downloaded llamafile binaries
@@ -259,8 +288,9 @@ pub async fn get_model_cache_dir() -> Result<String, String> {
 #[tauri::command]
 pub async fn select_model_file_path(app_handle: tauri::AppHandle) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
 
-    let (tx, rx) = tokio::sync::oneshot::channel();
+    let (tx, rx) = oneshot::channel();
 
     app_handle
         .dialog()
@@ -271,16 +301,17 @@ pub async fn select_model_file_path(app_handle: tauri::AppHandle) -> Result<Opti
             let _ = tx.send(path.map(|p| p.to_string()));
         });
 
-    let result = rx.await.map_err(|e| e.to_string())?;
-    Ok(result)
+    rx.await.map_err(|_| "Dialog cancelled".to_string())?
+        .map_or(Ok(None), |p| Ok(Some(p)))
 }
 
 /// Open directory picker to select model download directory
 #[tauri::command]
 pub async fn select_model_download_dir(app_handle: tauri::AppHandle) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
 
-    let (tx, rx) = tokio::sync::oneshot::channel();
+    let (tx, rx) = oneshot::channel();
 
     app_handle
         .dialog()
@@ -290,8 +321,8 @@ pub async fn select_model_download_dir(app_handle: tauri::AppHandle) -> Result<O
             let _ = tx.send(path.map(|p| p.to_string()));
         });
 
-    let result = rx.await.map_err(|e| e.to_string())?;
-    Ok(result)
+    rx.await.map_err(|_| "Dialog cancelled".to_string())?
+        .map_or(Ok(None), |p| Ok(Some(p)))
 }
 
 /// Run zipalign binary with given args, streaming output via build-log events

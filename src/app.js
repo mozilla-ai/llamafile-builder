@@ -83,6 +83,7 @@ const STEPS = [
 // Tauri Command Helpers
 // ============================================================================
 
+
 const invoke = window.__TAURI__?.core?.invoke || (async (cmd, args) => {
   console.log(`[Mock] invoke(${cmd})`, args);
   switch (cmd) {
@@ -97,19 +98,22 @@ const invoke = window.__TAURI__?.core?.invoke || (async (cmd, args) => {
         m.name.toLowerCase().includes((args?.query || '').toLowerCase())
       );
     case 'get_default_output_path':
-      return `~/Desktop/${args?.model_name || 'model'}.llamafile`;
+      const baseName = args?.ggufFilename?.replace(/\.gguf$/i, '') || args?.modelName || 'model';
+      return `/mock/Desktop/${baseName}.llamafile`;
     case 'get_system_info':
       return { os: 'macos', arch: 'aarch64', cpu_cores: 8, memory_gb: 16, has_metal: true };
     case 'select_llamafile_path':
-      return '/Users/me/builds/llamafile';
+      return '/mock/builds/llamafile';
     case 'get_llamafile_cache_dir':
-      return `~/.llamafile/bin`;
+      return '/mock/.llamafile/bin';
     case 'get_model_cache_dir':
-      return '~/.llamafile/models';
+      return '/mock/.llamafile/models';
     case 'select_model_file_path':
-      return '/Users/me/models/custom-model.gguf';
+      return '/mock/models/custom-model.gguf';
     case 'select_model_download_dir':
-      return '/Users/me/models';
+      return '/mock/models';
+    case 'select_output_path':
+      return args?.defaultPath || '/mock/Desktop/output.llamafile';
     case 'run_zipalign':
       return 1;
     case 'download_file':
@@ -415,7 +419,8 @@ async function init() {
 
     if (state.selectedModel) {
       state.outputPath = await invoke('get_default_output_path', {
-        model_name: state.selectedModel.name
+        ggufFilename: getSelectedGgufFilename(),
+        modelName: state.selectedModel.name
       });
     }
   } catch (err) {
@@ -975,8 +980,10 @@ function selectModel(modelId) {
   state.configValues.context_length = model.default_context || 4096;
   initModelFileSelections(model);
   renderCurrentStep();
-  invoke('get_default_output_path', { model_name: model.name })
-    .then(path => { state.outputPath = path; });
+  invoke('get_default_output_path', {
+    ggufFilename: getSelectedGgufFilename(),
+    modelName: model.name
+  }).then(path => { state.outputPath = path; });
 }
 
 function toggleModelFileExpand(role) {
@@ -991,6 +998,20 @@ function selectFileQuantization(role, idx) {
     state.modelFileSelections[role].customPath = null;
   }
   renderCurrentStep();
+  // Update output filename if weights changed
+  if (role === 'weights') {
+    updateDefaultOutputPath();
+  }
+}
+
+async function updateDefaultOutputPath() {
+  if (state.selectedModel || state.modelSource === 'custom') {
+    state.outputPath = await invoke('get_default_output_path', {
+      ggufFilename: getSelectedGgufFilename(),
+      modelName: state.selectedModel?.name
+    });
+    renderCurrentStep();
+  }
 }
 
 async function selectCustomFileForRole(role) {
@@ -1918,7 +1939,13 @@ async function deletePartialFile(path) {
 
 async function selectOutputPath() {
   try {
-    const path = await invoke('select_output_path', { default_name: `${state.selectedModel?.name || 'model'}.llamafile` });
+    // Use current outputPath as default (includes directory), or build one
+    const defaultPath = state.outputPath ||
+      await invoke('get_default_output_path', {
+        ggufFilename: getSelectedGgufFilename(),
+        modelName: state.selectedModel?.name
+      });
+    const path = await invoke('select_output_path', { defaultPath });
     if (path) { state.outputPath = path; renderCurrentStep(); }
   } catch (err) { console.error('Failed to select output path:', err); }
 }
@@ -2214,6 +2241,30 @@ function formatBytes(bytes) {
 function getFileName(path) {
   if (!path) return 'N/A';
   return path.split('/').pop().split('\\').pop();
+}
+
+function getSelectedGgufFilename() {
+  // Get GGUF filename from current model selection
+  if (state.modelSource === 'custom' && state.customModelFiles.length > 0) {
+    const weightsFile = state.customModelFiles.find(f => f.role === 'weights');
+    if (weightsFile?.path) {
+      return weightsFile.path.split('/').pop();
+    }
+  }
+
+  if (state.selectedModel && state.modelFileSelections) {
+    const sel = state.modelFileSelections['weights'];
+    if (sel?.source === 'custom' && sel.customPath) {
+      return sel.customPath.split('/').pop();
+    }
+    const weightsFile = state.selectedModel.files?.find(f => f.role === 'weights');
+    const quant = weightsFile?.quantizations[sel?.quantizationIdx || 0];
+    if (quant?.download_url) {
+      return getFilenameFromUrl(quant.download_url);
+    }
+  }
+
+  return null;
 }
 
 function getFilenameFromUrl(url) {
