@@ -1804,7 +1804,12 @@ function goToStep(step) {
 
 function nextStep() {
   if (state.currentStep < STEPS.length) {
-    state.currentStep++;
+    // DEV: Skip steps 3, 4, 5 (Configuration, Compute, Agent) - go straight to Build
+    if (state.currentStep === 2) {
+      state.currentStep = 6;
+    } else {
+      state.currentStep++;
+    }
     state.maxVisitedStep = Math.max(state.maxVisitedStep, state.currentStep);
     renderSidebar();
     renderCurrentStep();
@@ -1813,7 +1818,12 @@ function nextStep() {
 
 function prevStep() {
   if (state.currentStep > 1) {
-    state.currentStep--;
+    // DEV: Skip steps 3, 4, 5 - go back from Build to Model
+    if (state.currentStep === 6) {
+      state.currentStep = 2;
+    } else {
+      state.currentStep--;
+    }
     renderSidebar();
     renderCurrentStep();
   }
