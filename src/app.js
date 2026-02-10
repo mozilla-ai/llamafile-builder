@@ -60,6 +60,9 @@ You are a helpful coding assistant with access to local tools.
   buildProgress: null,
   isBuilding: false,
   buildLog: [],
+  downloadProgress: null, // { filename, bytes_downloaded, bytes_total, percentage }
+  hfTokenPromptVisible: false,
+  hfTokenPendingRetry: null, // { url, destPath, sha256 } - retry after token entry
 };
 
 const STEPS = [
@@ -104,6 +107,19 @@ const invoke = window.__TAURI__?.core?.invoke || (async (cmd, args) => {
       return '/Users/me/models';
     case 'run_zipalign':
       return 1;
+    case 'download_file':
+      // Mock: simulate download success
+      console.log(`[Mock] download_file: ${args?.url} -> ${args?.dest_path}`);
+      return args?.dest_path;
+    case 'file_exists':
+      // Mock: files don't exist (trigger download)
+      return false;
+    case 'get_hf_token':
+      return null;
+    case 'set_hf_token':
+      return null;
+    case 'clear_hf_token':
+      return null;
     default:
       return null;
   }
@@ -397,6 +413,11 @@ async function init() {
   listen('build-log', (event) => {
     state.buildLog.push(event.payload);
     renderBuildLog();
+  });
+
+  listen('download-progress', (event) => {
+    state.downloadProgress = event.payload;
+    renderDownloadProgress();
   });
 
   // Open external links via Tauri shell plugin
@@ -1354,10 +1375,34 @@ function renderBuildStep() {
 
         ${state.isBuilding || state.buildProgress ? renderBuildProgress() : ''}
 
+        ${state.downloadProgress ? `
+          <div class="download-progress">
+            <div class="download-progress-label">Downloading:</div>
+            <div class="download-progress-text" id="download-progress-text">${state.downloadProgress.filename}: ${formatBytes(state.downloadProgress.bytes_downloaded)} / ${formatBytes(state.downloadProgress.bytes_total)} (${state.downloadProgress.percentage.toFixed(1)}%)</div>
+            <div class="download-progress-bar">
+              <div class="download-progress-fill" style="width: ${state.downloadProgress.percentage}%"></div>
+            </div>
+          </div>
+        ` : ''}
+
         ${state.buildLog.length > 0 || state.isBuilding ? `
           <div class="build-log" id="build-log">
             <div class="build-log-header">Log</div>
             <pre class="build-log-content" id="build-log-content">${state.buildLog.length > 0 ? escapeHtml(state.buildLog.join('\n')) : ''}</pre>
+          </div>
+        ` : ''}
+
+        ${state.hfTokenPromptVisible ? `
+          <div class="hf-token-modal">
+            <div class="hf-token-content">
+              <div class="hf-token-title">Authentication Required</div>
+              <div class="hf-token-desc">This model requires a Hugging Face token. You can get one at <a href="https://huggingface.co/settings/tokens" target="_blank">huggingface.co/settings/tokens</a></div>
+              <input type="password" class="hf-token-input" id="hf-token-input" placeholder="hf_..." onkeydown="if(event.key==='Enter') submitHfToken(this.value)">
+              <div class="hf-token-buttons">
+                <button class="btn btn-secondary" onclick="cancelHfTokenPrompt()">Cancel</button>
+                <button class="btn btn-primary" onclick="submitHfToken(document.getElementById('hf-token-input').value)">Save &amp; Retry</button>
+              </div>
+            </div>
           </div>
         ` : ''}
       </div>
@@ -1437,6 +1482,94 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+function renderDownloadProgress() {
+  const el = document.getElementById('download-progress-text');
+  if (!el || !state.downloadProgress) return;
+
+  const { filename, bytes_downloaded, bytes_total, percentage } = state.downloadProgress;
+  const downloaded = formatBytes(bytes_downloaded);
+  const total = bytes_total > 0 ? formatBytes(bytes_total) : '?';
+  const pct = percentage.toFixed(1);
+
+  el.textContent = `${filename}: ${downloaded} / ${total} (${pct}%)`;
+}
+
+// Download a file, handling auth errors by prompting for HF token
+async function downloadWithAuth(url, destPath, sha256) {
+  try {
+    return await invoke('download_file', {
+      url,
+      dest_path: destPath,
+      expected_sha256: sha256 || null,
+    });
+  } catch (err) {
+    if (err === 'AUTH_REQUIRED') {
+      // Store pending retry info and show token prompt
+      state.hfTokenPendingRetry = { url, destPath, sha256 };
+      state.hfTokenPromptVisible = true;
+      renderCurrentStep();
+      // Wait for user to enter token or cancel
+      return new Promise((resolve, reject) => {
+        window._hfTokenResolve = resolve;
+        window._hfTokenReject = reject;
+      });
+    }
+    throw err;
+  }
+}
+
+async function submitHfToken(token) {
+  if (!token || !token.trim()) {
+    cancelHfTokenPrompt();
+    return;
+  }
+
+  try {
+    await invoke('set_hf_token', { token: token.trim() });
+    state.hfTokenPromptVisible = false;
+
+    // Retry the pending download
+    if (state.hfTokenPendingRetry) {
+      const { url, destPath, sha256 } = state.hfTokenPendingRetry;
+      state.hfTokenPendingRetry = null;
+      renderCurrentStep();
+
+      try {
+        const result = await invoke('download_file', {
+          url,
+          dest_path: destPath,
+          expected_sha256: sha256 || null,
+        });
+        if (window._hfTokenResolve) {
+          window._hfTokenResolve(result);
+          window._hfTokenResolve = null;
+          window._hfTokenReject = null;
+        }
+      } catch (retryErr) {
+        if (window._hfTokenReject) {
+          window._hfTokenReject(retryErr);
+          window._hfTokenResolve = null;
+          window._hfTokenReject = null;
+        }
+      }
+    }
+  } catch (err) {
+    state.buildLog.push(`Failed to save HF token: ${err}`);
+    renderBuildLog();
+  }
+}
+
+function cancelHfTokenPrompt() {
+  state.hfTokenPromptVisible = false;
+  state.hfTokenPendingRetry = null;
+  renderCurrentStep();
+  if (window._hfTokenReject) {
+    window._hfTokenReject('User cancelled');
+    window._hfTokenResolve = null;
+    window._hfTokenReject = null;
+  }
+}
+
 async function selectOutputPath() {
   try {
     const path = await invoke('select_output_path', { default_name: `${state.selectedModel?.name || 'model'}.llamafile` });
@@ -1447,35 +1580,157 @@ async function selectOutputPath() {
 async function startBuild() {
   state.isBuilding = true;
   state.buildLog = [];
-  state.buildProgress = { stage: 'downloading_model', progress_pct: 0 };
+  state.downloadProgress = null;
   renderCurrentStep();
 
-  // Simulate build progress for demo
-  const stages = [
-    { stage: 'downloading_model', pct: 60, delay: 2000 },
-    { stage: 'downloading_runtime', pct: 75, delay: 1200 },
-    { stage: 'writing_config', pct: 82, delay: 600 },
-    { stage: 'bundling_gpu', pct: 95, delay: 1500 },
-    { stage: 'creating_executable', pct: 100, delay: 800 },
-  ];
-
-  for (const s of stages) {
-    await new Promise(r => setTimeout(r, s.delay));
-    state.buildProgress = { stage: s.stage, progress_pct: s.pct };
-    renderCurrentStep();
-  }
-
-  // Run zipalign after creating executable
   try {
-    await invoke('run_zipalign', { args: [] });
+    // Step 1: Download llamafile runtime (if from registry)
+    let llamafilePath = state.resolvedLlamafilePath;
+
+    if (state.llamafileSource === 'registry' && state.selectedRelease) {
+      state.buildProgress = { stage: 'downloading_runtime', progress_pct: 0, message: 'Downloading llamafile runtime...' };
+      renderCurrentStep();
+
+      const release = state.selectedRelease;
+      const cachePath = await invoke('get_llamafile_cache_path', { version: release.version });
+      const exists = await invoke('file_exists', { path: cachePath, expected_sha256: release.sha256 });
+
+      if (!exists && release.download_url) {
+        state.buildLog.push(`Downloading llamafile ${release.version}...`);
+        renderBuildLog();
+        try {
+          llamafilePath = await downloadWithAuth(release.download_url, cachePath, release.sha256);
+          state.buildLog.push(`Downloaded: ${cachePath}`);
+          renderBuildLog();
+        } catch (err) {
+          state.buildLog.push(`Download failed: ${err}`);
+          renderBuildLog();
+          throw err;
+        }
+      } else {
+        llamafilePath = cachePath;
+        state.buildLog.push(`Using cached: ${cachePath}`);
+        renderBuildLog();
+      }
+    }
+
+    state.buildProgress = { stage: 'downloading_runtime', progress_pct: 50 };
+    renderCurrentStep();
+
+    // Step 2: Download model files (if from registry)
+    const modelFiles = []; // { role, path }
+
+    if (state.modelSource === 'registry' && state.selectedModel) {
+      state.buildProgress = { stage: 'downloading_model', progress_pct: 0, message: 'Downloading model files...' };
+      renderCurrentStep();
+
+      for (const file of state.selectedModel.files) {
+        const sel = state.modelFileSelections[file.role];
+        if (!sel) continue;
+
+        if (sel.source === 'custom' && sel.customPath) {
+          // User-provided file
+          modelFiles.push({ role: file.role, path: sel.customPath });
+          state.buildLog.push(`Using custom ${file.role}: ${sel.customPath}`);
+          renderBuildLog();
+        } else {
+          // Download from registry
+          const quant = file.quantizations[sel.quantizationIdx] || file.quantizations[0];
+          if (!quant.download_url) {
+            state.buildLog.push(`No download URL for ${file.role} ${quant.name}`);
+            renderBuildLog();
+            continue;
+          }
+
+          // Build destination path: modelDownloadDir/model-id/filename
+          const filename = quant.download_url.split('/').pop();
+          const modelDir = `${state.modelDownloadDir}/${state.selectedModel.id}`;
+          const destPath = `${modelDir}/${filename}`;
+
+          const exists = await invoke('file_exists', { path: destPath, expected_sha256: quant.sha256 });
+
+          if (!exists) {
+            state.buildLog.push(`Downloading ${file.label || file.role} (${quant.name})...`);
+            renderBuildLog();
+            try {
+              const path = await downloadWithAuth(quant.download_url, destPath, quant.sha256);
+              modelFiles.push({ role: file.role, path });
+              state.buildLog.push(`Downloaded: ${destPath}`);
+              renderBuildLog();
+            } catch (err) {
+              state.buildLog.push(`Download failed: ${err}`);
+              renderBuildLog();
+              throw err;
+            }
+          } else {
+            modelFiles.push({ role: file.role, path: destPath });
+            state.buildLog.push(`Using cached: ${destPath}`);
+            renderBuildLog();
+          }
+        }
+      }
+    } else if (state.modelSource === 'custom') {
+      // Custom model files
+      for (const f of state.customModelFiles) {
+        modelFiles.push({ role: f.role, path: f.path });
+      }
+    }
+
+    state.buildProgress = { stage: 'downloading_model', progress_pct: 60 };
+    renderCurrentStep();
+
+    // Step 3: Write config
+    state.buildProgress = { stage: 'writing_config', progress_pct: 70, message: 'Writing configuration...' };
+    renderCurrentStep();
+    state.buildLog.push('Writing .args configuration...');
+    renderBuildLog();
+    await new Promise(r => setTimeout(r, 300)); // Placeholder for actual config writing
+
+    // Step 4: Bundle GPU (placeholder)
+    state.buildProgress = { stage: 'bundling_gpu', progress_pct: 85, message: 'Bundling GPU libraries...' };
+    renderCurrentStep();
+    state.buildLog.push(`Compute mode: ${state.computeMode}`);
+    if (state.computeMode === 'gpu') {
+      const gpus = [];
+      if (state.gpuOptions.cuda) gpus.push('CUDA');
+      if (state.gpuOptions.rocm) gpus.push('ROCm');
+      if (state.gpuOptions.metal) gpus.push('Metal');
+      state.buildLog.push(`GPU targets: ${gpus.join(', ') || 'none'}`);
+    }
+    renderBuildLog();
+    await new Promise(r => setTimeout(r, 300));
+
+    // Step 5: Create executable
+    state.buildProgress = { stage: 'creating_executable', progress_pct: 95, message: 'Creating executable...' };
+    renderCurrentStep();
+    state.buildLog.push(`Creating executable at: ${state.outputPath}`);
+    state.buildLog.push(`Llamafile: ${llamafilePath}`);
+    for (const f of modelFiles) {
+      state.buildLog.push(`Model ${f.role}: ${f.path}`);
+    }
+    renderBuildLog();
+
+    // Run zipalign
+    try {
+      await invoke('run_zipalign', { args: [] });
+    } catch (err) {
+      state.buildLog.push(`zipalign error: ${err}`);
+      renderBuildLog();
+    }
+
+    // Done
+    state.buildProgress = { stage: 'complete', progress_pct: 100, message: 'Build complete!' };
+    state.buildLog.push('Build complete!');
+    renderBuildLog();
+
   } catch (err) {
-    state.buildLog.push(`Error: ${err}`);
+    state.buildProgress = { stage: 'error', progress_pct: 0, message: `Error: ${err}` };
+    state.buildLog.push(`Build failed: ${err}`);
     renderBuildLog();
   }
 
-  // Final completion
-  state.buildProgress = { stage: 'complete', progress_pct: 100 };
   state.isBuilding = false;
+  state.downloadProgress = null;
   renderCurrentStep();
 }
 
@@ -1557,5 +1812,7 @@ window.selectCustomModel = selectCustomModel;
 window.addCompanionFile = addCompanionFile;
 window.clearCustomModel = clearCustomModel;
 window.selectDownloadDir = selectDownloadDir;
+window.submitHfToken = submitHfToken;
+window.cancelHfTokenPrompt = cancelHfTokenPrompt;
 
 document.addEventListener('DOMContentLoaded', init);

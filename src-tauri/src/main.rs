@@ -46,6 +46,11 @@ fn main() {
             commands::select_model_file_path,
             commands::select_model_download_dir,
             commands::run_zipalign,
+            commands::download_file,
+            commands::file_exists,
+            commands::get_hf_token,
+            commands::set_hf_token,
+            commands::clear_hf_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

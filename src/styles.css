@@ -1368,3 +1368,108 @@ body {
 .build-log-content::-webkit-scrollbar { width: 6px; }
 .build-log-content::-webkit-scrollbar-track { background: transparent; }
 .build-log-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Download progress */
+.download-progress {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 7px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+
+.download-progress-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.download-progress-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.download-progress-bar {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.download-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--blue), var(--accent));
+  border-radius: 2px;
+  transition: width 0.2s ease;
+}
+
+/* HF Token Modal */
+.hf-token-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.hf-token-content {
+  background: var(--bg-panel);
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  width: 420px;
+  max-width: 90%;
+}
+
+.hf-token-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.hf-token-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.hf-token-desc a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.hf-token-desc a:hover {
+  text-decoration: underline;
+}
+
+.hf-token-input {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  margin-bottom: 16px;
+  outline: none;
+}
+
+.hf-token-input:focus {
+  border-color: var(--accent);
+}
+
+.hf-token-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
