@@ -51,6 +51,7 @@ fn main() {
             commands::get_hf_token,
             commands::set_hf_token,
             commands::clear_hf_token,
+            commands::open_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

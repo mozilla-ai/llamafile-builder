@@ -485,6 +485,17 @@ fn get_stored_hf_token(app_handle: &tauri::AppHandle) -> Result<Option<String>, 
     Ok(None)
 }
 
+/// Open a URL in the system's default browser
+#[tauri::command]
+pub async fn open_url(url: String, app_handle: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_shell::ShellExt;
+
+    app_handle
+        .shell()
+        .open(&url, None)
+        .map_err(|e| e.to_string())
+}
+
 /// Validate configuration before build
 #[tauri::command]
 pub async fn validate_config(config: BuildConfig) -> Result<Vec<String>, String> {

@@ -421,15 +421,15 @@ async function init() {
     renderDownloadProgress();
   });
 
-  // Open external links via Tauri shell plugin
-  document.addEventListener('click', (e) => {
+  // Open external links in system browser
+  document.addEventListener('click', async (e) => {
     const link = e.target.closest('a[href]');
     if (link && link.href && link.href.startsWith('http')) {
       e.preventDefault();
-      const shellOpen = window.__TAURI__?.shell?.open;
-      if (shellOpen) {
-        shellOpen(link.href);
-      } else {
+      try {
+        await invoke('open_url', { url: link.href });
+      } catch (err) {
+        console.error('Failed to open URL:', err);
         window.open(link.href, '_blank');
       }
     }
@@ -752,7 +752,7 @@ function renderModelStep() {
                 <div class="radio-dot"></div>
                 <div class="card-info">
                   <div class="card-title">${m.huggingface_url
-                    ? `<a href="${m.huggingface_url}" class="model-link" onclick="event.stopPropagation()">${m.name}</a>`
+                    ? `<a href="${m.huggingface_url}" class="model-link" onclick="openExternalLink(event, '${m.huggingface_url}')">${m.name}</a>`
                     : m.name
                   }</div>
                   <div class="model-detail">
@@ -1782,7 +1782,14 @@ async function startBuild() {
 }
 
 async function cancelBuild() { state.isBuilding = false; state.buildProgress = null; renderCurrentStep(); }
-function openOutputFolder() { window.__TAURI__?.shell?.open(state.outputPath.substring(0, state.outputPath.lastIndexOf('/'))); }
+async function openOutputFolder() {
+  const folder = state.outputPath.substring(0, state.outputPath.lastIndexOf('/'));
+  try {
+    await invoke('open_url', { url: folder });
+  } catch (err) {
+    console.error('Failed to open folder:', err);
+  }
+}
 
 // ============================================================================
 // Navigation
@@ -1838,6 +1845,17 @@ function getFilenameFromUrl(url) {
   }
 }
 
+async function openExternalLink(event, url) {
+  event.preventDefault();
+  event.stopPropagation();
+  try {
+    await invoke('open_url', { url });
+  } catch (err) {
+    console.error('Failed to open URL:', err);
+    window.open(url, '_blank');
+  }
+}
+
 // Global exports
 window.goToStep = goToStep;
 window.nextStep = nextStep;
@@ -1872,5 +1890,6 @@ window.selectDownloadDir = selectDownloadDir;
 window.submitHfToken = submitHfToken;
 window.cancelHfTokenPrompt = cancelHfTokenPrompt;
 window.handleFileExistsChoice = handleFileExistsChoice;
+window.openExternalLink = openExternalLink;
 
 document.addEventListener('DOMContentLoaded', init);
