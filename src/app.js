@@ -64,6 +64,8 @@ You are a helpful coding assistant with access to local tools.
   hfTokenPromptVisible: false,
   hfTokenPendingRetry: null, // { url, destPath, sha256 } - retry after token entry
   fileExistsPrompt: null, // { filename, path, resolve } - prompt when file exists
+  cancelConfirmVisible: false, // show cancel confirmation modal
+  currentDownloadPath: null, // path of file currently being downloaded (for cleanup)
 };
 
 const STEPS = [
@@ -110,11 +112,23 @@ const invoke = window.__TAURI__?.core?.invoke || (async (cmd, args) => {
       return 1;
     case 'download_file':
       // Mock: simulate download success
-      console.log(`[Mock] download_file: ${args?.url} -> ${args?.dest_path}`);
-      return args?.dest_path;
+      console.log(`[Mock] download_file: ${args?.url} -> ${args?.destPath}`);
+      return args?.destPath;
+    case 'cancel_download':
+      console.log('[Mock] cancel_download');
+      return null;
+    case 'get_file_info':
+      // Mock: file doesn't exist
+      return { exists: false, size: 0, expectedSize: args?.expectedSize, isComplete: false, isPartial: false, checksumValid: null };
     case 'file_exists':
       // Mock: files don't exist (trigger download)
       return false;
+    case 'delete_file':
+      console.log(`[Mock] delete_file: ${args?.path}`);
+      return null;
+    case 'calculate_sha256':
+      console.log(`[Mock] calculate_sha256: ${args?.path}`);
+      return 'mock_sha256_' + Math.random().toString(36).substring(7);
     case 'get_hf_token':
       return null;
     case 'set_hf_token':
@@ -417,8 +431,19 @@ async function init() {
   });
 
   listen('download-progress', (event) => {
+    const wasNull = state.downloadProgress === null;
     state.downloadProgress = event.payload;
-    renderDownloadProgress();
+    // Update build progress with download percentage
+    if (state.buildProgress && state.isBuilding) {
+      state.buildProgress.progress_pct = event.payload.percentage;
+      state.buildProgress.message = `Downloading ${event.payload.filename}...`;
+    }
+    // First progress event - need full re-render to create the progress bar element
+    if (wasNull) {
+      renderCurrentStep();
+    } else {
+      renderDownloadProgress();
+    }
   });
 
   // Open external links in system browser
@@ -1410,14 +1435,60 @@ function renderBuildStep() {
         ${state.fileExistsPrompt ? `
           <div class="hf-token-modal">
             <div class="hf-token-content">
-              <div class="hf-token-title">File Already Exists</div>
+              ${state.fileExistsPrompt.isPartial ? `
+                <div class="hf-token-title">Incomplete Download Found</div>
+                <div class="hf-token-desc">
+                  <code>${state.fileExistsPrompt.filename}</code> appears to be a partial download.<br>
+                  <span style="color: var(--text-muted)">
+                    ${formatBytes(state.fileExistsPrompt.currentSize)} of ${formatBytes(state.fileExistsPrompt.expectedSize)} downloaded
+                  </span>
+                </div>
+                <div class="hf-token-buttons" style="margin-top: 16px;">
+                  <button class="btn btn-primary" onclick="handleFileExistsChoice('resume')">Resume Download</button>
+                  <button class="btn btn-secondary" onclick="handleFileExistsChoice('download')">Start Fresh</button>
+                  <button class="btn btn-secondary" onclick="handleFileExistsChoice('cancel')" style="margin-left: auto;">Cancel</button>
+                </div>
+              ` : state.fileExistsPrompt.checksumMismatch ? `
+                <div class="hf-token-title">Checksum Mismatch</div>
+                <div class="hf-token-desc">
+                  <code>${state.fileExistsPrompt.filename}</code> exists but the checksum doesn't match.<br>
+                  <span style="color: var(--accent)">The file may be corrupted or from a different version.</span>
+                </div>
+                <div class="hf-token-buttons" style="margin-top: 16px;">
+                  <button class="btn btn-primary" onclick="handleFileExistsChoice('download')">Re-download</button>
+                  <button class="btn btn-secondary" onclick="handleFileExistsChoice('skip')">Use Anyway</button>
+                  <button class="btn btn-secondary" onclick="handleFileExistsChoice('cancel')" style="margin-left: auto;">Cancel</button>
+                </div>
+              ` : `
+                <div class="hf-token-title">File Already Exists</div>
+                <div class="hf-token-desc">
+                  <code>${state.fileExistsPrompt.filename}</code> already exists in the cache.${
+                    state.fileExistsPrompt.isComplete
+                      ? (state.fileExistsPrompt.checksumVerified
+                          ? '<br><span style="color: var(--green)">File is complete and checksum verified.</span>'
+                          : '<br><span style="color: var(--text-secondary)">File size matches (no checksum available to verify).</span>')
+                      : ''
+                  }
+                </div>
+                <div class="hf-token-buttons" style="margin-top: 16px;">
+                  <button class="btn btn-primary" onclick="handleFileExistsChoice('skip')">Use Existing</button>
+                  <button class="btn btn-secondary" onclick="handleFileExistsChoice('download')">Re-download</button>
+                </div>
+              `}
+            </div>
+          </div>
+        ` : ''}
+
+        ${state.cancelConfirmVisible ? `
+          <div class="hf-token-modal">
+            <div class="hf-token-content">
+              <div class="hf-token-title">Cancel Build?</div>
               <div class="hf-token-desc">
-                <code>${state.fileExistsPrompt.filename}</code> already exists in the cache.<br>
-                Would you like to use the existing file or re-download it?
+                Are you sure you want to cancel the build?${state.downloadProgress ? '<br><br><span style="color: var(--accent)">The current download will be stopped and the partial file will be deleted.</span>' : ''}
               </div>
               <div class="hf-token-buttons" style="margin-top: 16px;">
-                <button class="btn btn-secondary" onclick="handleFileExistsChoice('skip')">Use Existing</button>
-                <button class="btn btn-primary" onclick="handleFileExistsChoice('download')">Re-download</button>
+                <button class="btn btn-secondary" onclick="dismissCancelConfirm()">Continue Build</button>
+                <button class="btn btn-primary" style="background: var(--red);" onclick="confirmCancelBuild()">Cancel Build</button>
               </div>
             </div>
           </div>
@@ -1500,29 +1571,38 @@ function escapeHtml(text) {
 }
 
 function renderDownloadProgress() {
-  const el = document.getElementById('download-progress-text');
-  if (!el || !state.downloadProgress) return;
+  if (!state.downloadProgress) return;
 
   const { filename, bytes_downloaded, bytes_total, percentage } = state.downloadProgress;
   const downloaded = formatBytes(bytes_downloaded);
   const total = bytes_total > 0 ? formatBytes(bytes_total) : '?';
   const pct = percentage.toFixed(1);
 
-  el.textContent = `${filename}: ${downloaded} / ${total} (${pct}%)`;
+  const textEl = document.getElementById('download-progress-text');
+  if (textEl) {
+    textEl.textContent = `${filename}: ${downloaded} / ${total} (${pct}%)`;
+  }
+
+  const fillEl = document.querySelector('.download-progress-fill');
+  if (fillEl) {
+    fillEl.style.width = `${percentage}%`;
+  }
 }
 
 // Download a file, handling auth errors by prompting for HF token
-async function downloadWithAuth(url, destPath, sha256) {
+async function downloadWithAuth(url, destPath, expectedSize, sha256, resume = false) {
   try {
     return await invoke('download_file', {
       url,
       destPath,
+      expectedSize: expectedSize || null,
       expectedSha256: sha256 || null,
+      resume,
     });
   } catch (err) {
     if (err === 'AUTH_REQUIRED') {
       // Store pending retry info and show token prompt
-      state.hfTokenPendingRetry = { url, destPath, sha256 };
+      state.hfTokenPendingRetry = { url, destPath, expectedSize, sha256, resume };
       state.hfTokenPromptVisible = true;
       renderCurrentStep();
       // Wait for user to enter token or cancel
@@ -1547,7 +1627,7 @@ async function submitHfToken(token) {
 
     // Retry the pending download
     if (state.hfTokenPendingRetry) {
-      const { url, destPath, sha256 } = state.hfTokenPendingRetry;
+      const { url, destPath, expectedSize, sha256, resume } = state.hfTokenPendingRetry;
       state.hfTokenPendingRetry = null;
       renderCurrentStep();
 
@@ -1555,7 +1635,9 @@ async function submitHfToken(token) {
         const result = await invoke('download_file', {
           url,
           destPath,
+          expectedSize: expectedSize || null,
           expectedSha256: sha256 || null,
+          resume: resume || false,
         });
         if (window._hfTokenResolve) {
           window._hfTokenResolve(result);
@@ -1588,16 +1670,77 @@ function cancelHfTokenPrompt() {
 }
 
 // Check if file exists and prompt user for action
-// Returns: 'skip' (use existing), 'download' (re-download), or throws on cancel
-async function checkFileExistsWithPrompt(path, sha256) {
-  const exists = await invoke('file_exists', { path, expectedSha256: sha256 });
-  if (!exists) {
+// Returns: 'skip' (use existing), 'download' (fresh download), 'resume' (continue partial), or throws on cancel
+async function checkFileExistsWithPrompt(path, expectedSize, sha256) {
+  const fileInfo = await invoke('get_file_info', {
+    path,
+    expectedSize,
+    expectedSha256: sha256,
+    verifyChecksum: true,
+  });
+
+  const filename = path.split('/').pop();
+
+  if (!fileInfo.exists) {
+    state.buildLog.push(`${filename}: not found, will download`);
+    renderBuildLog();
     return 'download';
   }
 
-  // File exists - prompt user
-  const filename = getFilenameFromUrl(path) || path.split('/').pop();
+  // File is partial - offer resume/delete/cancel
+  if (fileInfo.isPartial) {
+    const pct = ((fileInfo.size / fileInfo.expectedSize) * 100).toFixed(1);
+    state.buildLog.push(`${filename}: partial download found (${formatBytes(fileInfo.size)} / ${formatBytes(fileInfo.expectedSize)}, ${pct}%)`);
+    renderBuildLog();
+    return new Promise((resolve) => {
+      state.fileExistsPrompt = {
+        filename,
+        path,
+        isPartial: true,
+        currentSize: fileInfo.size,
+        expectedSize: fileInfo.expectedSize,
+        resolve,
+      };
+      renderCurrentStep();
+    });
+  }
 
+  // File is complete - check if checksum is valid
+  if (fileInfo.isComplete) {
+    if (fileInfo.checksumValid === false) {
+      // Checksum mismatch - offer re-download or use anyway
+      state.buildLog.push(`${filename}: checksum mismatch (file may be corrupted)`);
+      renderBuildLog();
+      return new Promise((resolve) => {
+        state.fileExistsPrompt = {
+          filename,
+          path,
+          checksumMismatch: true,
+          resolve,
+        };
+        renderCurrentStep();
+      });
+    }
+    // File is complete and valid (or no checksum to verify)
+    const checksumVerified = fileInfo.checksumValid === true;
+    const validationMsg = checksumVerified ? 'checksum verified' : 'size verified';
+    state.buildLog.push(`${filename}: found and ${validationMsg}`);
+    renderBuildLog();
+    return new Promise((resolve) => {
+      state.fileExistsPrompt = {
+        filename,
+        path,
+        isComplete: true,
+        checksumVerified,
+        resolve,
+      };
+      renderCurrentStep();
+    });
+  }
+
+  // File exists but we don't know expected size - ask user
+  state.buildLog.push(`${filename}: found (${formatBytes(fileInfo.size)})`);
+  renderBuildLog();
   return new Promise((resolve) => {
     state.fileExistsPrompt = { filename, path, resolve };
     renderCurrentStep();
@@ -1610,6 +1753,17 @@ function handleFileExistsChoice(choice) {
   }
   state.fileExistsPrompt = null;
   renderCurrentStep();
+}
+
+async function deletePartialFile(path) {
+  try {
+    await invoke('delete_file', { path });
+    state.buildLog.push(`Deleted partial file: ${path}`);
+    renderBuildLog();
+  } catch (err) {
+    state.buildLog.push(`Failed to delete file: ${err}`);
+    renderBuildLog();
+  }
 }
 
 async function selectOutputPath() {
@@ -1638,16 +1792,25 @@ async function startBuild() {
       const filename = getFilenameFromUrl(release.download_url);
       const cachePath = `${cacheDir}/${filename}`;
 
-      const action = await checkFileExistsWithPrompt(cachePath, release.sha256);
+      const action = await checkFileExistsWithPrompt(cachePath, release.size_bytes, release.sha256);
 
-      if (action === 'download' && release.download_url) {
-        state.buildLog.push(`Downloading llamafile ${release.version}...`);
+      if (action === 'cancel') {
+        throw new Error('Download cancelled by user');
+      } else if (action === 'download' || action === 'resume') {
+        const isResume = action === 'resume';
+        state.buildLog.push(`${isResume ? 'Resuming' : 'Downloading'} llamafile ${release.version}...`);
         renderBuildLog();
+        state.currentDownloadPath = cachePath;
         try {
-          llamafilePath = await downloadWithAuth(release.download_url, cachePath, release.sha256);
-          state.buildLog.push(`Downloaded: ${cachePath}`);
+          llamafilePath = await downloadWithAuth(release.download_url, cachePath, release.size_bytes, release.sha256, isResume);
+          state.currentDownloadPath = null;
+          state.downloadProgress = null;
+          const verifyMsg = release.sha256 ? 'downloaded and checksum verified' : 'downloaded';
+          state.buildLog.push(`${filename}: ${verifyMsg}`);
           renderBuildLog();
         } catch (err) {
+          state.currentDownloadPath = null;
+          state.downloadProgress = null;
           state.buildLog.push(`Download failed: ${err}`);
           renderBuildLog();
           throw err;
@@ -1657,6 +1820,11 @@ async function startBuild() {
         state.buildLog.push(`Using existing: ${cachePath}`);
         renderBuildLog();
       }
+    } else if (state.llamafileSource === 'custom' && llamafilePath) {
+      // Custom llamafile binary - just log the path
+      const filename = llamafilePath.split('/').pop();
+      state.buildLog.push(`${filename}: using custom binary`);
+      renderBuildLog();
     }
 
     state.buildProgress = { stage: 'downloading_runtime', progress_pct: 50 };
@@ -1674,9 +1842,10 @@ async function startBuild() {
         if (!sel) continue;
 
         if (sel.source === 'custom' && sel.customPath) {
-          // User-provided file
+          // User-provided file - just log the path
           modelFiles.push({ role: file.role, path: sel.customPath });
-          state.buildLog.push(`Using custom ${file.role}: ${sel.customPath}`);
+          const filename = sel.customPath.split('/').pop();
+          state.buildLog.push(`${filename}: using custom file`);
           renderBuildLog();
         } else {
           // Download from registry
@@ -1692,17 +1861,26 @@ async function startBuild() {
           const modelDir = `${state.modelDownloadDir}/${state.selectedModel.id}`;
           const destPath = `${modelDir}/${filename}`;
 
-          const action = await checkFileExistsWithPrompt(destPath, quant.sha256);
+          const action = await checkFileExistsWithPrompt(destPath, quant.size_bytes, quant.sha256);
 
-          if (action === 'download') {
-            state.buildLog.push(`Downloading ${file.label || file.role} (${quant.name})...`);
+          if (action === 'cancel') {
+            throw new Error('Download cancelled by user');
+          } else if (action === 'download' || action === 'resume') {
+            const isResume = action === 'resume';
+            state.buildLog.push(`${isResume ? 'Resuming' : 'Downloading'} ${file.label || file.role} (${quant.name})...`);
             renderBuildLog();
+            state.currentDownloadPath = destPath;
             try {
-              const path = await downloadWithAuth(quant.download_url, destPath, quant.sha256);
+              const path = await downloadWithAuth(quant.download_url, destPath, quant.size_bytes, quant.sha256, isResume);
+              state.currentDownloadPath = null;
+              state.downloadProgress = null;
               modelFiles.push({ role: file.role, path });
-              state.buildLog.push(`Downloaded: ${destPath}`);
+              const verifyMsg = quant.sha256 ? 'downloaded and checksum verified' : 'downloaded';
+              state.buildLog.push(`${filename}: ${verifyMsg}`);
               renderBuildLog();
             } catch (err) {
+              state.currentDownloadPath = null;
+              state.downloadProgress = null;
               state.buildLog.push(`Download failed: ${err}`);
               renderBuildLog();
               throw err;
@@ -1715,9 +1893,12 @@ async function startBuild() {
         }
       }
     } else if (state.modelSource === 'custom') {
-      // Custom model files
+      // Custom model files - just log the paths
       for (const f of state.customModelFiles) {
         modelFiles.push({ role: f.role, path: f.path });
+        const filename = f.path.split('/').pop();
+        state.buildLog.push(`${filename}: using custom file`);
+        renderBuildLog();
       }
     }
 
@@ -1769,6 +1950,9 @@ async function startBuild() {
     renderBuildLog();
 
   } catch (err) {
+    // Don't update state if build was already cancelled (cancelBuild already cleared state)
+    if (!state.isBuilding) return;
+
     state.buildProgress = { stage: 'error', progress_pct: 0, message: `Error: ${err}` };
     state.buildLog.push(`Build failed: ${err}`);
     renderBuildLog();
@@ -1776,10 +1960,49 @@ async function startBuild() {
 
   state.isBuilding = false;
   state.downloadProgress = null;
+  state.currentDownloadPath = null;
   renderCurrentStep();
 }
 
-async function cancelBuild() { state.isBuilding = false; state.buildProgress = null; renderCurrentStep(); }
+function cancelBuild() {
+  // Show confirmation modal
+  state.cancelConfirmVisible = true;
+  renderCurrentStep();
+}
+
+async function confirmCancelBuild() {
+  state.cancelConfirmVisible = false;
+
+  // Cancel any ongoing download
+  try {
+    await invoke('cancel_download');
+  } catch (err) {
+    // Ignore errors - download might not be active
+  }
+
+  // Delete partial file if there was a download in progress
+  if (state.currentDownloadPath) {
+    try {
+      await invoke('delete_file', { path: state.currentDownloadPath });
+    } catch (err) {
+      // Ignore errors - file might not exist
+    }
+  }
+
+  // Fully reset build state
+  state.isBuilding = false;
+  state.buildProgress = null;
+  state.buildLog = [];
+  state.downloadProgress = null;
+  state.fileExistsPrompt = null;
+  state.currentDownloadPath = null;
+  renderCurrentStep();
+}
+
+function dismissCancelConfirm() {
+  state.cancelConfirmVisible = false;
+  renderCurrentStep();
+}
 async function openOutputFolder() {
   const folder = state.outputPath.substring(0, state.outputPath.lastIndexOf('/'));
   try {
@@ -1886,6 +2109,8 @@ window.clearCustomLlamafile = clearCustomLlamafile;
 window.selectOutputPath = selectOutputPath;
 window.startBuild = startBuild;
 window.cancelBuild = cancelBuild;
+window.confirmCancelBuild = confirmCancelBuild;
+window.dismissCancelConfirm = dismissCancelConfirm;
 window.openOutputFolder = openOutputFolder;
 window.toggleModelFileExpand = toggleModelFileExpand;
 window.selectFileQuantization = selectFileQuantization;

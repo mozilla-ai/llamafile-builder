@@ -1,12 +1,14 @@
 use crate::models::*;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use tauri::State;
 use tauri::Emitter;
 
-/// Global build state
+/// Global app state
 pub struct AppState {
     pub build_progress: Mutex<BuildProgress>,
     pub build_cancelled: Mutex<bool>,
+    pub download_cancel_flag: Arc<AtomicBool>,
 }
 
 impl Default for AppState {
@@ -14,6 +16,7 @@ impl Default for AppState {
         Self {
             build_progress: Mutex::new(BuildProgress::default()),
             build_cancelled: Mutex::new(false),
+            download_cancel_flag: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -213,24 +216,20 @@ pub async fn select_llamafile_path(app_handle: tauri::AppHandle) -> Result<Optio
     Ok(result)
 }
 
-/// Get the platform-appropriate cache directory for a downloaded llamafile version
+/// Get the platform-appropriate cache directory for downloaded llamafile binaries
 /// Returns the directory path; caller should append filename from download URL
 #[tauri::command]
-pub async fn get_llamafile_cache_dir(version: String) -> Result<String, String> {
+pub async fn get_llamafile_cache_dir() -> Result<String, String> {
     let base = directories::BaseDirs::new()
         .ok_or_else(|| "Could not determine home directory".to_string())?;
 
     let path = if cfg!(target_os = "windows") {
         base.data_local_dir()
             .join("llamafile")
-            .join("v")
-            .join(&version)
             .join("bin")
     } else {
         base.home_dir()
             .join(".llamafile")
-            .join("v")
-            .join(&version)
             .join("bin")
     };
 
@@ -362,20 +361,26 @@ pub async fn run_zipalign(
 /// Download a file from URL with progress events
 /// Returns the destination path on success, or an error string
 /// Error string will be "AUTH_REQUIRED" for 401/403 errors on HF URLs
+/// Error string will be "CANCELLED" if download was cancelled
+/// Error string will be "SIZE_MISMATCH" or "CHECKSUM_MISMATCH" for validation errors
 #[tauri::command(rename_all = "camelCase")]
 pub async fn download_file(
     url: String,
     dest_path: String,
+    expected_size: Option<u64>,
     expected_sha256: Option<String>,
+    resume: Option<bool>,
+    state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
     use crate::download::{download_file as do_download, DownloadError};
     use std::path::Path;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
 
     let dest = Path::new(&dest_path);
-    let cancelled = Arc::new(AtomicBool::new(false));
+
+    // Reset cancel flag before starting
+    state.download_cancel_flag.store(false, Ordering::Relaxed);
+    let cancel_flag = state.download_cancel_flag.clone();
 
     // Get app-stored HF token if any
     let app_token = get_stored_hf_token(&app_handle).ok().flatten();
@@ -384,12 +389,14 @@ pub async fn download_file(
     let result = do_download(
         &url,
         dest,
+        expected_size,
         expected_sha256.as_deref(),
         app_token.as_deref(),
+        resume.unwrap_or(false),
         |progress| {
             handle.emit("download-progress", &progress).ok();
         },
-        || cancelled.load(Ordering::Relaxed),
+        cancel_flag,
     )
     .await;
 
@@ -397,21 +404,112 @@ pub async fn download_file(
         Ok(()) => Ok(dest_path),
         Err(DownloadError::AuthRequired { .. }) => Err("AUTH_REQUIRED".to_string()),
         Err(DownloadError::Cancelled) => Err("CANCELLED".to_string()),
+        Err(DownloadError::SizeMismatch { expected, actual }) => {
+            Err(format!("SIZE_MISMATCH:{}:{}", expected, actual))
+        }
+        Err(DownloadError::ChecksumMismatch { expected, actual }) => {
+            Err(format!("CHECKSUM_MISMATCH:{}:{}", expected, actual))
+        }
         Err(e) => Err(e.to_string()),
     }
 }
 
-/// Check if a file exists, optionally verifying its SHA256 checksum
+/// Cancel the current download
+#[tauri::command]
+pub async fn cancel_download(state: State<'_, AppState>) -> Result<(), String> {
+    state.download_cancel_flag.store(true, Ordering::Relaxed);
+    Ok(())
+}
+
+/// Get detailed file info including partial file detection
+#[tauri::command(rename_all = "camelCase")]
+pub async fn get_file_info(
+    path: String,
+    expected_size: Option<u64>,
+    expected_sha256: Option<String>,
+    verify_checksum: Option<bool>,
+) -> Result<crate::download::FileInfo, String> {
+    use crate::download::get_file_info as do_get_file_info;
+    use std::path::Path;
+
+    let p = Path::new(&path);
+    Ok(do_get_file_info(
+        p,
+        expected_size,
+        expected_sha256.as_deref(),
+        verify_checksum.unwrap_or(false),
+    ).await)
+}
+
+/// Simple check if a file exists (for backwards compatibility)
 #[tauri::command(rename_all = "camelCase")]
 pub async fn file_exists(
     path: String,
     expected_sha256: Option<String>,
 ) -> Result<bool, String> {
-    use crate::download::verify_cached_file;
     use std::path::Path;
 
     let p = Path::new(&path);
-    Ok(verify_cached_file(p, expected_sha256.as_deref()).await)
+    if !p.exists() {
+        return Ok(false);
+    }
+
+    // If checksum provided, verify it
+    if let Some(expected) = expected_sha256 {
+        use sha2::{Digest, Sha256};
+        match tokio::fs::read(p).await {
+            Ok(contents) => {
+                let mut hasher = Sha256::new();
+                hasher.update(&contents);
+                let actual = hex::encode(hasher.finalize());
+                Ok(actual == expected)
+            }
+            Err(_) => Ok(false),
+        }
+    } else {
+        Ok(true)
+    }
+}
+
+/// Delete a file (for cleaning up partial downloads)
+#[tauri::command]
+pub async fn delete_file(path: String) -> Result<(), String> {
+    use crate::download::delete_file as do_delete;
+    use std::path::Path;
+
+    do_delete(Path::new(&path))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Calculate SHA256 checksum of a file
+#[tauri::command]
+pub async fn calculate_sha256(path: String) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    use std::path::Path;
+    use tokio::io::AsyncReadExt;
+
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Err("File not found".to_string());
+    }
+
+    let mut file = tokio::fs::File::open(p)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 64 * 1024]; // 64KB buffer
+
+    loop {
+        let n = file.read(&mut buffer).await.map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
+
+    Ok(hex::encode(hasher.finalize()))
 }
 
 /// Get the current HF token (from env, HF CLI cache, or app storage)
