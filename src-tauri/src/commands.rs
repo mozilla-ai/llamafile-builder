@@ -531,6 +531,70 @@ pub async fn delete_file(path: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Copy a file from src to dest
+#[tauri::command]
+pub async fn copy_file(src: String, dest: String) -> Result<(), String> {
+    use std::path::Path;
+
+    let src_path = Path::new(&src);
+    let dest_path = Path::new(&dest);
+
+    // Create parent directory if it doesn't exist
+    if let Some(parent) = dest_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+
+    tokio::fs::copy(src_path, dest_path)
+        .await
+        .map_err(|e| format!("Failed to copy file: {}", e))?;
+
+    Ok(())
+}
+
+/// Write content to a temporary file and return its path
+#[tauri::command]
+pub async fn write_temp_file(content: String, filename: String) -> Result<String, String> {
+    let temp_dir = std::env::temp_dir().join("llamafile-builder");
+
+    tokio::fs::create_dir_all(&temp_dir)
+        .await
+        .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+
+    let file_path = temp_dir.join(&filename);
+
+    tokio::fs::write(&file_path, content)
+        .await
+        .map_err(|e| format!("Failed to write temp file: {}", e))?;
+
+    Ok(file_path.to_string_lossy().to_string())
+}
+
+/// Make a file executable (Unix only, no-op on Windows)
+#[tauri::command]
+pub async fn make_executable(path: String) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        use std::path::Path;
+
+        let p = Path::new(&path);
+        let metadata = tokio::fs::metadata(p)
+            .await
+            .map_err(|e| format!("Failed to get file metadata: {}", e))?;
+
+        let mut perms = metadata.permissions();
+        perms.set_mode(0o755);
+
+        tokio::fs::set_permissions(p, perms)
+            .await
+            .map_err(|e| format!("Failed to set permissions: {}", e))?;
+    }
+
+    Ok(())
+}
+
 /// Calculate SHA256 checksum of a file
 #[tauri::command]
 pub async fn calculate_sha256(path: String) -> Result<String, String> {

@@ -117,9 +117,19 @@ const invoke = window.__TAURI__?.core?.invoke || (async (cmd, args) => {
       return args?.defaultPath || '/mock/Desktop/output.llamafile';
     case 'generate_args_content':
       // Mock: return sample .args content
-      return `-m\n/zip/${args?.modelFilename || 'model.gguf'}\n--no-mmap\n--host\n127.0.0.1\n--port\n8080\n-c\n4096\n-b\n512\n-fa\n...`;
+      return `-m\n/zip/${args?.modelFilename || 'model.gguf'}\n--no-mmap\n--host\n127.0.0.1\n--port\n8080\n--ctx-size\n4096\n--webui\n...`;
+    case 'copy_file':
+      console.log(`[Mock] copy_file: ${args?.src} -> ${args?.dest}`);
+      return null;
+    case 'write_temp_file':
+      console.log(`[Mock] write_temp_file: ${args?.filename}`);
+      return `/tmp/llamafile-builder/${args?.filename}`;
+    case 'make_executable':
+      console.log(`[Mock] make_executable: ${args?.path}`);
+      return null;
     case 'run_zipalign':
-      return 1;
+      console.log(`[Mock] run_zipalign: ${args?.args?.join(' ')}`);
+      return 0; // Success
     case 'download_file':
       // Mock: simulate download success
       console.log(`[Mock] download_file: ${args?.url} -> ${args?.destPath}`);
@@ -2173,15 +2183,40 @@ async function startBuild() {
     state.buildProgress = { stage: 'downloading_model', progress_pct: 60 };
     renderCurrentStep();
 
-    // Step 3: Write config
+    // Step 3: Generate and write .args configuration
     state.buildProgress = { stage: 'writing_config', progress_pct: 70, message: 'Writing configuration...' };
     renderCurrentStep();
-    state.buildLog.push('Writing .args configuration...');
-    renderBuildLog();
-    await new Promise(r => setTimeout(r, 300)); // Placeholder for actual config writing
 
-    // Step 4: Bundle GPU (placeholder)
-    state.buildProgress = { stage: 'bundling_gpu', progress_pct: 85, message: 'Bundling GPU libraries...' };
+    // Get model and mmproj filenames for .args generation
+    const weightsFile = modelFiles.find(f => f.role === 'weights');
+    const mmprojFile = modelFiles.find(f => f.role === 'mmproj');
+
+    if (!weightsFile) {
+      throw new Error('No model weights file found');
+    }
+
+    const modelFilename = weightsFile.path.split('/').pop();
+    const mmprojFilename = mmprojFile ? mmprojFile.path.split('/').pop() : null;
+
+    // Generate .args content
+    const argsContent = await invoke('generate_args_content', {
+      configValues: state.configValues,
+      modelFilename,
+      mmprojFilename,
+    });
+
+    // Write .args to temp file
+    const argsPath = await invoke('write_temp_file', {
+      content: argsContent,
+      filename: '.args',
+    });
+
+    state.buildLog.push('Generated .args configuration');
+    state.buildLog.push(argsContent.split('\n').map(l => `  ${l}`).join('\n'));
+    renderBuildLog();
+
+    // Step 4: Bundle GPU (placeholder for future)
+    state.buildProgress = { stage: 'bundling_gpu', progress_pct: 80, message: 'Bundling GPU libraries...' };
     renderCurrentStep();
     state.buildLog.push(`Compute mode: ${state.computeMode}`);
     if (state.computeMode === 'gpu') {
@@ -2189,32 +2224,50 @@ async function startBuild() {
       if (state.gpuOptions.cuda) gpus.push('CUDA');
       if (state.gpuOptions.rocm) gpus.push('ROCm');
       if (state.gpuOptions.metal) gpus.push('Metal');
-      state.buildLog.push(`GPU targets: ${gpus.join(', ') || 'none'}`);
+      state.buildLog.push(`GPU targets: ${gpus.join(', ') || 'none'} (not yet implemented)`);
     }
     renderBuildLog();
-    await new Promise(r => setTimeout(r, 300));
 
     // Step 5: Create executable
-    state.buildProgress = { stage: 'creating_executable', progress_pct: 95, message: 'Creating executable...' };
+    state.buildProgress = { stage: 'creating_executable', progress_pct: 85, message: 'Creating executable...' };
     renderCurrentStep();
-    state.buildLog.push(`Creating executable at: ${state.outputPath}`);
-    state.buildLog.push(`Llamafile: ${llamafilePath}`);
-    for (const f of modelFiles) {
-      state.buildLog.push(`Model ${f.role}: ${f.path}`);
-    }
+
+    // Copy llamafile to output path
+    state.buildLog.push(`Copying llamafile to ${state.outputPath}...`);
+    renderBuildLog();
+    await invoke('copy_file', { src: llamafilePath, dest: state.outputPath });
+
+    // Make it executable
+    await invoke('make_executable', { path: state.outputPath });
+
+    // Build zipalign args: -j0 <output> <.args> <weights> [<mmproj>]
+    const zipalignArgs = ['-j0', state.outputPath, argsPath];
+
+    // Add model weights
+    zipalignArgs.push(weightsFile.path);
+    state.buildLog.push(`Adding weights: ${modelFilename}`);
     renderBuildLog();
 
-    // Run zipalign
-    try {
-      await invoke('run_zipalign', { args: [] });
-    } catch (err) {
-      state.buildLog.push(`zipalign error: ${err}`);
+    // Add mmproj if present
+    if (mmprojFile) {
+      zipalignArgs.push(mmprojFile.path);
+      state.buildLog.push(`Adding mmproj: ${mmprojFilename}`);
       renderBuildLog();
+    }
+
+    // Run zipalign to bundle everything
+    state.buildProgress = { stage: 'creating_executable', progress_pct: 95, message: 'Running zipalign...' };
+    renderCurrentStep();
+
+    const exitCode = await invoke('run_zipalign', { args: zipalignArgs });
+
+    if (exitCode !== 0) {
+      throw new Error(`zipalign failed with exit code ${exitCode}`);
     }
 
     // Done
     state.buildProgress = { stage: 'complete', progress_pct: 100, message: 'Build complete!' };
-    state.buildLog.push('Build complete!');
+    state.buildLog.push(`Build complete: ${state.outputPath}`);
     renderBuildLog();
 
   } catch (err) {
