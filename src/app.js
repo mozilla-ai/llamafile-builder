@@ -66,6 +66,8 @@ You are a helpful coding assistant with access to local tools.
   fileExistsPrompt: null, // { filename, path, resolve } - prompt when file exists
   cancelConfirmVisible: false, // show cancel confirmation modal
   currentDownloadPath: null, // path of file currently being downloaded (for cleanup)
+  shaVerifyPrompt: null, // { role, path, filename, expectedSha, resolve } - prompt for custom file SHA verification
+  shaVerifyProgress: null, // { filename } - shown while calculating SHA
 };
 
 const STEPS = [
@@ -795,6 +797,70 @@ function renderModelStep() {
         <div class="version-divider"><span>or</span></div>
 
         ${renderCustomModelCard()}
+
+        ${state.shaVerifyProgress ? `
+          <div class="hf-token-modal">
+            <div class="hf-token-content">
+              <div class="hf-token-title">Calculating SHA256...</div>
+              <div class="hf-token-desc">
+                Verifying <code>${state.shaVerifyProgress.filename}</code><br>
+                <span style="color: var(--text-secondary)">This may take a moment for large files.</span>
+              </div>
+            </div>
+          </div>
+        ` : ''}
+
+        ${state.shaVerifyPrompt?.verified ? `
+          <div class="hf-token-modal">
+            <div class="hf-token-content">
+              <div class="hf-token-title">SHA256 Verified!</div>
+              <div class="hf-token-desc">
+                <code>${state.shaVerifyPrompt.filename}</code> matches the expected checksum for <strong>${state.shaVerifyPrompt.quantName}</strong>.<br><br>
+                <span style="color: var(--green)">File will be used as ${state.shaVerifyPrompt.quantName} quantization.</span>
+              </div>
+              <div class="hf-token-buttons" style="margin-top: 16px;">
+                <button class="btn btn-primary" onclick="handleShaVerifyChoice('ok')">OK</button>
+              </div>
+            </div>
+          </div>
+        ` : ''}
+
+        ${state.shaVerifyPrompt && !state.shaVerifyPrompt.mismatch && !state.shaVerifyPrompt.verified ? `
+          <div class="hf-token-modal">
+            <div class="hf-token-content">
+              <div class="hf-token-title">Verify File Checksum?</div>
+              <div class="hf-token-desc">
+                <code>${state.shaVerifyPrompt.filename}</code><br><br>
+                The registry has a SHA256 checksum for <strong>${state.shaVerifyPrompt.quantName}</strong>.<br>
+                Would you like to verify your file matches?
+              </div>
+              <div class="hf-token-buttons" style="margin-top: 16px;">
+                <button class="btn btn-primary" onclick="handleShaVerifyChoice('verify')">Verify SHA256</button>
+                <button class="btn btn-secondary" onclick="handleShaVerifyChoice('skip')">Skip (use as custom)</button>
+                <button class="btn btn-secondary" onclick="handleShaVerifyChoice('cancel')" style="margin-left: auto;">Cancel</button>
+              </div>
+            </div>
+          </div>
+        ` : ''}
+
+        ${state.shaVerifyPrompt?.mismatch ? `
+          <div class="hf-token-modal">
+            <div class="hf-token-content">
+              <div class="hf-token-title">SHA256 Mismatch</div>
+              <div class="hf-token-desc">
+                <code>${state.shaVerifyPrompt.filename}</code> does not match the expected checksum for <strong>${state.shaVerifyPrompt.quantName}</strong>.<br><br>
+                <span style="color: var(--text-secondary); font-size: 11px;">
+                  Expected: ${state.shaVerifyPrompt.expectedSha?.substring(0, 16)}...<br>
+                  Actual: ${state.shaVerifyPrompt.actualSha?.substring(0, 16)}...
+                </span><br><br>
+                <span style="color: var(--accent)">This file will be used as a custom model instead.</span>
+              </div>
+              <div class="hf-token-buttons" style="margin-top: 16px;">
+                <button class="btn btn-primary" onclick="handleShaVerifyChoice('use_custom')">OK, Use as Custom</button>
+              </div>
+            </div>
+          </div>
+        ` : ''}
       </div>
       <div class="footer">
         <button class="btn btn-secondary" onclick="prevStep()">\u2190 Back</button>
@@ -930,13 +996,97 @@ function selectFileQuantization(role, idx) {
 async function selectCustomFileForRole(role) {
   try {
     const path = await invoke('select_model_file_path');
-    if (path && state.modelFileSelections[role]) {
-      state.modelFileSelections[role].source = 'custom';
-      state.modelFileSelections[role].customPath = path;
+    if (!path || !state.modelFileSelections[role]) return;
+
+    const filename = path.split('/').pop();
+    const sel = state.modelFileSelections[role];
+    const file = state.selectedModel?.files.find(f => f.role === role);
+    const quant = file?.quantizations[sel.quantizationIdx];
+    const expectedSha = quant?.sha256;
+
+    // If no expected SHA in registry, just use as custom file
+    if (!expectedSha) {
+      sel.source = 'custom';
+      sel.customPath = path;
+      renderCurrentStep();
+      return;
+    }
+
+    // Ask user if they want to verify SHA
+    const action = await new Promise((resolve) => {
+      state.shaVerifyPrompt = { role, path, filename, expectedSha, quantName: quant.name, resolve };
+      renderCurrentStep();
+    });
+
+    if (action === 'skip') {
+      // User doesn't want to verify - switch to full custom model mode
+      switchToCustomModelWithFile(role, path);
+    } else if (action === 'verify') {
+      // Calculate SHA and verify
+      state.shaVerifyPrompt = null;
+      state.shaVerifyProgress = { filename };
+      renderCurrentStep();
+
+      try {
+        const actualSha = await invoke('calculate_sha256', { path });
+        state.shaVerifyProgress = null;
+
+        if (actualSha === expectedSha) {
+          // SHA matches - keep as registry model with custom file
+          sel.source = 'custom';
+          sel.customPath = path;
+          // Show success modal
+          state.shaVerifyPrompt = {
+            role, path, filename, expectedSha, quantName: quant.name,
+            verified: true,
+            resolve: () => {
+              state.shaVerifyPrompt = null;
+              renderCurrentStep();
+            }
+          };
+          renderCurrentStep();
+        } else {
+          // SHA doesn't match - switch to custom model mode
+          state.shaVerifyPrompt = {
+            role, path, filename, expectedSha, quantName: quant.name,
+            mismatch: true, actualSha,
+            resolve: (action) => {
+              state.shaVerifyPrompt = null;
+              if (action === 'use_custom') {
+                switchToCustomModelWithFile(role, path);
+              }
+              renderCurrentStep();
+            }
+          };
+          renderCurrentStep();
+        }
+      } catch (err) {
+        state.shaVerifyProgress = null;
+        console.error('Failed to calculate SHA:', err);
+        // On error, just use as custom
+        switchToCustomModelWithFile(role, path);
+      }
+    } else {
+      // Cancelled
+      state.shaVerifyPrompt = null;
       renderCurrentStep();
     }
   } catch (err) {
     console.error('Failed to select custom file for role:', err);
+  }
+}
+
+function switchToCustomModelWithFile(role, path) {
+  // Switch to custom model mode with this file
+  state.modelSource = 'custom';
+  state.customModelFiles = [{ role, path }];
+  state.selectedModel = null;
+  renderCurrentStep();
+}
+
+function handleShaVerifyChoice(choice) {
+  if (state.shaVerifyPrompt?.resolve) {
+    state.shaVerifyPrompt.resolve(choice);
   }
 }
 
@@ -2116,6 +2266,7 @@ window.toggleModelFileExpand = toggleModelFileExpand;
 window.selectFileQuantization = selectFileQuantization;
 window.selectCustomFileForRole = selectCustomFileForRole;
 window.clearCustomFileForRole = clearCustomFileForRole;
+window.handleShaVerifyChoice = handleShaVerifyChoice;
 window.selectCustomModel = selectCustomModel;
 window.addCompanionFile = addCompanionFile;
 window.clearCustomModel = clearCustomModel;
