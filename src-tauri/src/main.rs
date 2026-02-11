@@ -8,12 +8,16 @@ mod builder;
 mod commands;
 mod download;
 mod models;
+mod validation;
 
 use tracing_subscriber;
 
 fn main() {
     // Initialize logging
     tracing_subscriber::fmt::init();
+
+    // Validate all JSON config files before starting
+    validation::validate_config_files();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
