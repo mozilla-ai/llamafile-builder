@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llamafile-builder/schemas/models.schema.json",
+  "title": "Llamafile Builder Models Registry",
+  "description": "Schema for models.json - defines available models and their downloadable files",
+  "type": "array",
+  "items": {
+    "$ref": "#/$defs/Model"
+  },
+  "$defs": {
+    "Model": {
+      "type": "object",
+      "description": "A model available for building into a llamafile",
+      "required": [
+        "id",
+        "name",
+        "organization",
+        "parameters",
+        "param_count",
+        "description",
+        "license",
+        "tags",
+        "context_length",
+        "files"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the model (e.g., 'qwen3-8b', 'llava-v1.6-mistral-7b')"
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable display name"
+        },
+        "organization": {
+          "type": "string",
+          "description": "Organization or author that created the model"
+        },
+        "parameters": {
+          "type": "string",
+          "description": "Model size as a human-readable string (e.g., '7B', '0.6B', '20B')"
+        },
+        "param_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Exact parameter count as a number (e.g., 7000000000 for 7B)"
+        },
+        "description": {
+          "type": "string",
+          "description": "Brief description of the model's capabilities"
+        },
+        "license": {
+          "type": "string",
+          "description": "License under which the model is released (e.g., 'Apache 2.0', 'MIT')"
+        },
+        "huggingface_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL to the model's Hugging Face page"
+        },
+        "tags": {
+          "type": "array",
+          "description": "Capability tags for filtering and display",
+          "items": {
+            "type": "string",
+            "enum": ["chat", "vision", "code", "reasoning"]
+          }
+        },
+        "context_length": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Default context length for this model"
+        },
+        "files": {
+          "type": "array",
+          "description": "Downloadable files for this model (weights, vision adapters, etc.)",
+          "items": {
+            "$ref": "#/$defs/ModelFile"
+          },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "ModelFile": {
+      "type": "object",
+      "description": "A downloadable file within a model",
+      "required": ["role", "quantizations"],
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["weights", "mmproj"],
+          "description": "'weights' for main model weights, 'mmproj' for multimodal vision adapter"
+        },
+        "label": {
+          "type": "string",
+          "description": "Human-readable label for display (e.g., 'Model Weights', 'Vision Adapter')"
+        },
+        "quantizations": {
+          "type": "array",
+          "description": "Available quantization variants of this file",
+          "items": {
+            "$ref": "#/$defs/Quantization"
+          },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "Quantization": {
+      "type": "object",
+      "description": "A specific quantized version of a model file",
+      "required": ["name", "size_bytes", "download_url"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Quantization name (e.g., 'Q4_K_M', 'Q8_0', 'BF16', 'F16')"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "File size in bytes"
+        },
+        "download_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Direct download URL for the GGUF file"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 checksum of the file for integrity verification"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

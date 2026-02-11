@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llamafile-builder/schemas/versions.schema.json",
+  "title": "Llamafile Builder Versions Registry",
+  "description": "Schema for versions.json - defines available llamafile runtime versions",
+  "type": "array",
+  "items": {
+    "$ref": "#/$defs/VersionGroup"
+  },
+  "$defs": {
+    "VersionGroup": {
+      "type": "object",
+      "description": "A group of related llamafile releases (e.g., all 0.9.x versions)",
+      "required": ["name", "tag", "releases"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name for the version group (e.g., 'llamafile 0.9', 'llamafile 0.10')"
+        },
+        "tag": {
+          "type": "string",
+          "enum": ["latest", "stable", "legacy"],
+          "description": "Release channel tag. 'latest' for newest features, 'stable' for production-ready, 'legacy' for older versions."
+        },
+        "description": {
+          "type": "string",
+          "description": "Brief description of this version group's features. Supports markdown links."
+        },
+        "releases": {
+          "type": "array",
+          "description": "Individual releases within this version group, ordered newest first",
+          "items": {
+            "$ref": "#/$defs/Release"
+          },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "Release": {
+      "type": "object",
+      "description": "A specific llamafile release",
+      "required": ["version", "release_date", "download_url", "size_bytes", "sha256"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "Version string (e.g., '0.9.3', '0.10.0 - commit 11f4446')"
+        },
+        "description": {
+          "type": "string",
+          "description": "Brief description of this release's changes. Supports markdown links to release notes."
+        },
+        "release_date": {
+          "type": "string",
+          "format": "date",
+          "description": "Release date in ISO 8601 format (YYYY-MM-DD)"
+        },
+        "download_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Direct download URL for the llamafile binary"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "File size in bytes"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 checksum of the file for integrity verification"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
