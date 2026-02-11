@@ -89,13 +89,14 @@ const invoke = window.__TAURI__?.core?.invoke || (async (cmd, args) => {
   console.log(`[Mock] invoke(${cmd})`, args);
   switch (cmd) {
     case 'get_llamafile_versions':
-      return getMockVersions();
+      return await getMockVersions();
     case 'get_models':
-      return getMockModels();
+      return await getMockModels();
     case 'get_config_schema':
-      return getMockConfigSchema();
+      return await getMockConfigSchema();
     case 'search_models':
-      return getMockModels().filter(m =>
+      const models = await getMockModels();
+      return models.filter(m =>
         m.name.toLowerCase().includes((args?.query || '').toLowerCase())
       );
     case 'get_default_output_path':
@@ -248,204 +249,56 @@ const listen = window.__TAURI__?.event?.listen || ((event, callback) => {
 });
 
 // ============================================================================
-// Mock Data
+// Mock Data - loads from real JSON files for browser development
 // ============================================================================
 
-function getMockVersions() {
-  return [
-    {
-      name: 'llamafile 0.9',
-      tag: 'latest',
-      description: 'Latest release — improved Metal support, new quantization options, [release notes](https://github.com/Mozilla-Ocho/llamafile/releases/tag/0.9.4)',
-      releases: [
-        { version: '0.9.4', description: 'Metal performance fixes, improved prompt caching, [release notes](https://github.com/Mozilla-Ocho/llamafile/releases/tag/0.9.4)', release_date: '2024-12-20', download_url: 'https://github.com/Mozilla-Ocho/llamafile/releases/download/0.9.4/llamafile-0.9.4', size_bytes: 5300000, sha256: 'a1b2c3d4e5f6...' },
-        { version: '0.9.2', description: 'New quantization options, faster tokenizer, [release notes](https://github.com/Mozilla-Ocho/llamafile/releases/tag/0.9.2)', release_date: '2024-12-15', download_url: 'https://github.com/Mozilla-Ocho/llamafile/releases/download/0.9.2/llamafile-0.9.2', size_bytes: 5200000, sha256: 'b2c3d4e5f6a1...' },
-        { version: '0.9.0', description: 'Initial 0.9 release with Metal support overhaul, [release notes](https://github.com/Mozilla-Ocho/llamafile/releases/tag/0.9.0)', release_date: '2024-12-01', download_url: 'https://github.com/Mozilla-Ocho/llamafile/releases/download/0.9.0/llamafile-0.9.0', size_bytes: 5100000, sha256: 'c3d4e5f6a1b2...' },
-      ],
-    },
-    {
-      name: 'llamafile 0.8',
-      tag: 'stable',
-      description: 'Stable release — CUDA 12 support, multi-GPU, flash attention, **recommended for production**',
-      releases: [
-        { version: '0.8.16', description: 'Speculative decoding, bug fixes, [release notes](https://github.com/Mozilla-Ocho/llamafile/releases/tag/0.8.16)', release_date: '2024-10-20', download_url: 'https://github.com/Mozilla-Ocho/llamafile/releases/download/0.8.16/llamafile-0.8.16', size_bytes: 5100000, sha256: 'd4e5f6a1b2c3...' },
-        { version: '0.8.14', description: 'Multi-GPU improvements, [release notes](https://github.com/Mozilla-Ocho/llamafile/releases/tag/0.8.14)', release_date: '2024-10-05', download_url: 'https://github.com/Mozilla-Ocho/llamafile/releases/download/0.8.14/llamafile-0.8.14', size_bytes: 5050000, sha256: 'e5f6a1b2c3d4...' },
-      ],
-    },
-    {
-      name: 'llamafile 0.7',
-      tag: 'legacy',
-      description: 'Legacy — broad compatibility, well-tested with older model architectures',
-      releases: [
-        { version: '0.7.6', release_date: '2024-06-01', download_url: 'https://github.com/Mozilla-Ocho/llamafile/releases/download/0.7.6/llamafile-0.7.6', size_bytes: 4800000, sha256: 'f6a1b2c3d4e5...' },
-      ],
-    },
-  ];
+// Cache for loaded JSON data
+const mockDataCache = {
+  versions: null,
+  models: null,
+  configSchema: null,
+};
+
+async function getMockVersions() {
+  if (mockDataCache.versions) return mockDataCache.versions;
+  try {
+    const response = await fetch('../src-tauri/versions.json');
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    mockDataCache.versions = await response.json();
+    console.log('[Mock] Loaded versions.json:', mockDataCache.versions.length, 'version groups');
+    return mockDataCache.versions;
+  } catch (e) {
+    console.error('[Mock] Failed to load versions.json:', e);
+    return [];
+  }
 }
 
-function getMockModels() {
-  return [
-    {
-      id: 'llama-3.1-8b-instruct',
-      name: 'Llama 3.1 8B Instruct',
-      organization: 'Meta',
-      parameters: '8B',
-      param_count: 8000000000,
-      description: "Meta's latest instruction-tuned model with strong reasoning capabilities",
-      license: 'Llama 3.1 Community License',
-      icon: '\ud83e\udd99',
-      huggingface_url: 'https://huggingface.co/meta-llama/Meta-Llama-3.1-8B-Instruct',
-      tags: ['chat'],
-      context_lengths: [2048, 4096, 8192, 16384, 32768, 65536, 131072],
-      default_context: 4096,
-      files: [
-        { role: 'weights', label: 'Model Weights', quantizations: [
-          { name: 'Q4_K_M', size_bytes: 4900000000, download_url: '', sha256: null },
-          { name: 'Q5_K_M', size_bytes: 5700000000, download_url: '', sha256: null },
-          { name: 'Q8_0', size_bytes: 8500000000, download_url: '', sha256: null },
-        ]},
-      ],
-    },
-    {
-      id: 'mistral-7b-instruct-v0.3',
-      name: 'Mistral 7B Instruct v0.3',
-      organization: 'Mistral AI',
-      parameters: '7B',
-      param_count: 7000000000,
-      description: 'Fast and capable instruction-following model',
-      license: 'Apache 2.0',
-      icon: '\ud83c\udf0a',
-      huggingface_url: 'https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3',
-      tags: ['chat'],
-      context_lengths: [2048, 4096, 8192, 16384, 32768],
-      default_context: 4096,
-      files: [
-        { role: 'weights', label: 'Model Weights', quantizations: [
-          { name: 'Q4_K_M', size_bytes: 4400000000, download_url: '', sha256: null },
-          { name: 'Q5_K_M', size_bytes: 5100000000, download_url: '', sha256: null },
-        ]},
-      ],
-    },
-    {
-      id: 'gemma-2-9b-instruct',
-      name: 'Gemma 2 9B Instruct',
-      organization: 'Google',
-      parameters: '9B',
-      param_count: 9000000000,
-      description: "Google's efficient and capable instruction model",
-      license: 'Gemma License',
-      icon: '\ud83d\udc8e',
-      huggingface_url: 'https://huggingface.co/google/gemma-2-9b-it',
-      tags: ['chat'],
-      context_lengths: [2048, 4096, 8192],
-      default_context: 4096,
-      files: [
-        { role: 'weights', label: 'Model Weights', quantizations: [
-          { name: 'Q4_K_M', size_bytes: 5500000000, download_url: '', sha256: null },
-        ]},
-      ],
-    },
-    {
-      id: 'phi-3.5-mini-instruct',
-      name: 'Phi-3.5 Mini Instruct',
-      organization: 'Microsoft',
-      parameters: '3.8B',
-      param_count: 3800000000,
-      description: 'Compact yet capable model, great for constrained environments',
-      license: 'MIT',
-      icon: '\u26a1',
-      huggingface_url: 'https://huggingface.co/microsoft/Phi-3.5-mini-instruct',
-      tags: ['chat'],
-      context_lengths: [2048, 4096, 8192, 16384, 32768, 65536, 131072],
-      default_context: 4096,
-      files: [
-        { role: 'weights', label: 'Model Weights', quantizations: [
-          { name: 'Q4_K_M', size_bytes: 2400000000, download_url: '', sha256: null },
-          { name: 'Q5_K_S', size_bytes: 2800000000, download_url: '', sha256: null },
-        ]},
-      ],
-    },
-    {
-      id: 'qwen2.5-coder-7b-instruct',
-      name: 'Qwen2.5 Coder 7B Instruct',
-      organization: 'Alibaba',
-      parameters: '7B',
-      param_count: 7000000000,
-      description: 'Specialized coding model with strong code generation',
-      license: 'Apache 2.0',
-      icon: '\ud83e\udde0',
-      huggingface_url: 'https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct',
-      tags: ['code'],
-      context_lengths: [2048, 4096, 8192, 16384, 32768],
-      default_context: 4096,
-      files: [
-        { role: 'weights', label: 'Model Weights', quantizations: [
-          { name: 'Q4_K_M', size_bytes: 4700000000, download_url: '', sha256: null },
-        ]},
-      ],
-    },
-    {
-      id: 'deepseek-r1-distill-qwen-7b',
-      name: 'DeepSeek-R1 Distill Qwen 7B',
-      organization: 'DeepSeek',
-      parameters: '7B',
-      param_count: 7000000000,
-      description: 'Reasoning-focused model distilled from DeepSeek-R1',
-      license: 'MIT',
-      icon: '\ud83d\udd2e',
-      huggingface_url: 'https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B',
-      tags: ['chat'],
-      context_lengths: [2048, 4096, 8192, 16384, 32768, 65536],
-      default_context: 4096,
-      files: [
-        { role: 'weights', label: 'Model Weights', quantizations: [
-          { name: 'Q4_K_M', size_bytes: 4700000000, download_url: '', sha256: null },
-        ]},
-      ],
-    },
-    {
-      id: 'nomic-embed-text-v1.5',
-      name: 'Nomic Embed Text v1.5',
-      organization: 'Nomic AI',
-      parameters: '137M',
-      param_count: 137000000,
-      description: 'High-quality text embeddings for semantic search',
-      license: 'Apache 2.0',
-      icon: '\ud83d\udd17',
-      huggingface_url: 'https://huggingface.co/nomic-ai/nomic-embed-text-v1.5',
-      tags: ['embedding'],
-      context_lengths: [512, 1024, 2048, 8192],
-      default_context: 2048,
-      files: [
-        { role: 'weights', label: 'Model Weights', quantizations: [
-          { name: 'F16', size_bytes: 274000000, download_url: '', sha256: null },
-        ]},
-      ],
-    },
-    {
-      id: 'llava-v1.6-mistral-7b',
-      name: 'LLaVA v1.6 Mistral 7B',
-      organization: 'Haotian Liu',
-      parameters: '7B',
-      param_count: 7000000000,
-      description: 'Multimodal vision-language model — understands both text and images',
-      license: 'Apache 2.0',
-      icon: '\ud83d\udc41\ufe0f',
-      huggingface_url: 'https://huggingface.co/cjpais/llava-v1.6-mistral-7b-gguf',
-      tags: ['vision', 'chat'],
-      context_lengths: [2048, 4096, 8192],
-      default_context: 4096,
-      files: [
-        { role: 'weights', label: 'Model Weights', quantizations: [
-          { name: 'Q4_K_M', size_bytes: 4370000000, download_url: '', sha256: null },
-          { name: 'Q5_K_M', size_bytes: 5130000000, download_url: '', sha256: null },
-        ]},
-        { role: 'mmproj', label: 'Vision Adapter (mmproj)', quantizations: [
-          { name: 'F16', size_bytes: 624000000, download_url: '', sha256: null },
-        ]},
-      ],
-    },
-  ];
+async function getMockModels() {
+  if (mockDataCache.models) return mockDataCache.models;
+  try {
+    const response = await fetch('../src-tauri/models.json');
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    mockDataCache.models = await response.json();
+    console.log('[Mock] Loaded models.json:', mockDataCache.models.length, 'models');
+    return mockDataCache.models;
+  } catch (e) {
+    console.error('[Mock] Failed to load models.json:', e);
+    return [];
+  }
+}
+
+async function getMockConfigSchema() {
+  if (mockDataCache.configSchema) return mockDataCache.configSchema;
+  try {
+    const response = await fetch('../src-tauri/config.json');
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    mockDataCache.configSchema = await response.json();
+    console.log('[Mock] Loaded config.json:', mockDataCache.configSchema.length, 'items');
+    return mockDataCache.configSchema;
+  } catch (e) {
+    console.error('[Mock] Failed to load config.json:', e);
+    return [];
+  }
 }
 
 function getMockAgentTools() {
@@ -456,20 +309,6 @@ function getMockAgentTools() {
     { id: 'python', name: 'Python REPL', description: 'Execute Python code', icon: '\ud83d\udc0d', enabled: false },
     { id: 'sqlite', name: 'SQLite', description: 'Query SQLite databases', icon: '\ud83d\uddc4\ufe0f', enabled: false },
     { id: 'data_analysis', name: 'Data Analysis', description: 'Analyze and visualize data', icon: '\ud83d\udcca', enabled: false },
-  ];
-}
-
-function getMockConfigSchema() {
-  return [
-    { type: 'section', label: 'Server' },
-    { type: 'text', key: 'host', label: 'Listen Host', description: 'Network interface', default: '127.0.0.1', value_type: 'string', flag: '--host' },
-    { type: 'text', key: 'port', label: 'Port', description: 'HTTP server port', default: 8080, value_type: 'number', flag: '--port' },
-    { type: 'dropdown', key: 'context_length', label: 'Context Length', description: 'Max tokens', default: 4096, options: [2048, 4096, 8192, 16384, 32768, 65536, 131072], flag: '-c' },
-    { type: 'section', label: 'Inference' },
-    { type: 'text', key: 'threads', label: 'Threads', description: 'CPU threads', default: 'auto', value_type: 'string', flag: '-t' },
-    { type: 'text', key: 'batch_size', label: 'Batch Size', description: 'Prompt processing', default: 512, value_type: 'number', flag: '-b' },
-    { type: 'section', label: 'Features' },
-    { type: 'bool', key: 'enable_web_ui', label: 'Enable Web UI', description: 'Serve built-in chat interface', default: true, flag: '--webui' },
   ];
 }
 
