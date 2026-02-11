@@ -6,6 +6,7 @@
   {
     "type": "section",
     "key": "server_enabled",
+    "flag": "--server",
     "label": "Server Mode",
     "description": "Run as an HTTP server with OpenAI-compatible API",
     "default": true,

@@ -70,6 +70,9 @@ pub enum ConfigSchemaItem {
         /// Default toggle state (only used if key is present)
         #[serde(default)]
         default: Option<bool>,
+        /// Flag to emit when section is enabled (like a boolean)
+        #[serde(default)]
+        flag: Option<String>,
         /// Nested items within this section
         #[serde(default)]
         items: Vec<ConfigSchemaItem>,

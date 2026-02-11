@@ -61,7 +61,7 @@ pub fn generate_args_from_schema(
 fn process_schema_items(items: &[ConfigSchemaItem], ctx: &ArgsContext, lines: &mut Vec<String>) {
     for item in items {
         match item {
-            ConfigSchemaItem::Section { key, default, items: nested_items, .. } => {
+            ConfigSchemaItem::Section { key, default, flag, items: nested_items, .. } => {
                 // Check if this is a toggleable section
                 if let Some(section_key) = key {
                     let enabled = ctx.config_values
@@ -72,6 +72,11 @@ fn process_schema_items(items: &[ConfigSchemaItem], ctx: &ArgsContext, lines: &m
                     // Skip nested items if section is disabled
                     if !enabled {
                         continue;
+                    }
+
+                    // Emit section flag if enabled (like a boolean)
+                    if let Some(f) = flag {
+                        lines.push(f.clone());
                     }
                 }
 
