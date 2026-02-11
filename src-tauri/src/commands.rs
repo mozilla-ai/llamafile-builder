@@ -1,21 +1,20 @@
+use crate::build_state::{BuildState, BuildStateManager};
 use crate::models::*;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use tauri::State;
+use std::sync::Arc;
 use tauri::Emitter;
+use tauri::State;
 
 /// Global app state
 pub struct AppState {
-    pub build_progress: Mutex<BuildProgress>,
-    pub build_cancelled: Mutex<bool>,
+    pub build_state: BuildStateManager,
     pub download_cancel_flag: Arc<AtomicBool>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self {
-            build_progress: Mutex::new(BuildProgress::default()),
-            build_cancelled: Mutex::new(false),
+            build_state: BuildStateManager::new(),
             download_cancel_flag: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -142,19 +141,16 @@ pub async fn start_build(
     Ok(())
 }
 
-/// Cancel the current build
+/// Cancel the current build (placeholder - build cancellation handled in JS)
 #[tauri::command]
-pub async fn cancel_build(state: State<'_, AppState>) -> Result<(), String> {
-    let mut cancelled = state.build_cancelled.lock().map_err(|e| e.to_string())?;
-    *cancelled = true;
+pub async fn cancel_build() -> Result<(), String> {
     Ok(())
 }
 
-/// Get current build status
+/// Get current build status (placeholder - build status managed in JS)
 #[tauri::command]
-pub async fn get_build_status(state: State<'_, AppState>) -> Result<BuildProgress, String> {
-    let progress = state.build_progress.lock().map_err(|e| e.to_string())?;
-    Ok(progress.clone())
+pub async fn get_build_status() -> Result<BuildProgress, String> {
+    Ok(BuildProgress::default())
 }
 
 /// Open file dialog to select output path
@@ -731,4 +727,118 @@ pub async fn validate_config(config: BuildConfig) -> Result<Vec<String>, String>
     }
 
     Ok(warnings)
+}
+
+// ============================================================================
+// Build State Commands
+// ============================================================================
+
+/// Get the current build state
+#[tauri::command]
+pub async fn get_build_state(state: State<'_, AppState>) -> Result<BuildState, String> {
+    Ok(state.build_state.get_state())
+}
+
+/// Select a model from the registry
+#[tauri::command(rename_all = "camelCase")]
+pub async fn select_registry_model(
+    model_id: String,
+    state: State<'_, AppState>,
+) -> Result<BuildState, String> {
+    Ok(state.build_state.select_registry_model(model_id))
+}
+
+/// Select a custom model file (switches to custom mode)
+#[tauri::command]
+pub async fn select_custom_model(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<BuildState, String> {
+    Ok(state.build_state.select_custom_model(path))
+}
+
+/// Add a companion file in custom mode (e.g., mmproj)
+#[tauri::command]
+pub async fn add_custom_companion_file(
+    role: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<BuildState, String> {
+    Ok(state.build_state.add_custom_companion_file(role, path))
+}
+
+/// Remove a companion file in custom mode
+#[tauri::command]
+pub async fn remove_custom_companion_file(
+    role: String,
+    state: State<'_, AppState>,
+) -> Result<BuildState, String> {
+    Ok(state.build_state.remove_custom_companion_file(role))
+}
+
+/// Select quantization for a file role
+#[tauri::command]
+pub async fn select_file_quantization(
+    role: String,
+    idx: usize,
+    state: State<'_, AppState>,
+) -> Result<BuildState, String> {
+    Ok(state.build_state.select_file_quantization(role, idx))
+}
+
+/// Use a custom file for a specific role (within registry model)
+#[tauri::command]
+pub async fn use_custom_file_for_role(
+    role: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<BuildState, String> {
+    Ok(state.build_state.use_custom_file_for_role(role, path))
+}
+
+/// Clear custom file for a role (revert to registry)
+#[tauri::command]
+pub async fn clear_custom_file_for_role(
+    role: String,
+    state: State<'_, AppState>,
+) -> Result<BuildState, String> {
+    Ok(state.build_state.clear_custom_file_for_role(role))
+}
+
+/// Select a llamafile version from the registry
+#[tauri::command]
+pub async fn select_llamafile_version(
+    group_name: String,
+    version: String,
+    state: State<'_, AppState>,
+) -> Result<BuildState, String> {
+    Ok(state.build_state.select_llamafile_version(group_name, version))
+}
+
+/// Use a custom llamafile binary
+#[tauri::command]
+pub async fn use_custom_llamafile(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<BuildState, String> {
+    Ok(state.build_state.use_custom_llamafile(path))
+}
+
+/// Set a configuration value
+#[tauri::command]
+pub async fn set_config_value(
+    key: String,
+    value: serde_json::Value,
+    state: State<'_, AppState>,
+) -> Result<BuildState, String> {
+    Ok(state.build_state.set_config_value(key, value))
+}
+
+/// Set the output path
+#[tauri::command]
+pub async fn set_output_path(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<BuildState, String> {
+    Ok(state.build_state.set_output_path(path))
 }

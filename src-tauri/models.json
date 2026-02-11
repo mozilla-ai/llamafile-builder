@@ -9,8 +9,7 @@
     "license": "Apache 2.0",
     "huggingface_url": "https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512-GGUF",
     "tags": ["vision", "chat"],
-    "context_lengths": [2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144],
-    "default_context": 8192,
+    "context_length": 4096,
     "files": [
       {
         "role": "weights",
@@ -54,8 +53,7 @@
     "license": "Apache 2.0",
     "huggingface_url": "https://huggingface.co/openai/gpt-oss-20b",
     "tags": ["chat"],
-    "context_lengths": [2048, 4096, 8192, 16384, 32768, 65536, 131072],
-    "default_context": 8192,
+    "context_length": 4096,
     "files": [
       {
         "role": "weights",
@@ -93,8 +91,7 @@
     "license": "Apache 2.0",
     "huggingface_url": "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct",
     "tags": ["vision", "chat"],
-    "context_lengths": [2048, 4096, 8192, 16384, 32768],
-    "default_context": 4096,
+    "context_length": 4096,
     "files": [
       {
         "role": "weights",
@@ -144,8 +141,7 @@
     "license": "Apache 2.0",
     "huggingface_url": "https://huggingface.co/Qwen/Qwen3-0.6B",
     "tags": ["chat"],
-    "context_lengths": [2048, 4096, 8192, 16384, 32768],
-    "default_context": 4096,
+    "context_length": 4096,
     "files": [
       {
         "role": "weights",
@@ -171,8 +167,7 @@
     "license": "Apache 2.0",
     "huggingface_url": "https://huggingface.co/Qwen/Qwen3-1.7B",
     "tags": ["chat"],
-    "context_lengths": [2048, 4096, 8192, 16384, 32768],
-    "default_context": 4096,
+    "context_length": 4096,
     "files": [
       {
         "role": "weights",
@@ -198,8 +193,7 @@
     "license": "Apache 2.0",
     "huggingface_url": "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507",
     "tags": ["chat"],
-    "context_lengths": [2048, 4096, 8192, 16384, 32768],
-    "default_context": 4096,
+    "context_length": 4096,
     "files": [
       {
         "role": "weights",
@@ -225,8 +219,7 @@
     "license": "Apache 2.0",
     "huggingface_url": "https://huggingface.co/Qwen/Qwen3-8B",
     "tags": ["chat"],
-    "context_lengths": [2048, 4096, 8192, 16384, 32768],
-    "default_context": 4096,
+    "context_length": 4096,
     "files": [
       {
         "role": "weights",
@@ -252,8 +245,7 @@
     "license": "Apache 2.0",
     "huggingface_url": "https://huggingface.co/liuhaotian/llava-v1.6-mistral-7b",
     "tags": ["vision", "chat"],
-    "context_lengths": [2048, 4096, 8192, 16384, 32768],
-    "default_context": 4096,
+    "context_length": 4096,
     "files": [
       {
         "role": "weights",

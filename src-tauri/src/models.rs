@@ -51,8 +51,7 @@ pub struct Model {
     pub license: String,
     pub huggingface_url: Option<String>,
     pub tags: Vec<String>,
-    pub context_lengths: Vec<u32>,
-    pub default_context: u32,
+    pub context_length: u32,
     pub files: Vec<ModelFile>,
 }
 

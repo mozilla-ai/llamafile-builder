@@ -3,10 +3,11 @@
     windows_subsystem = "windows"
 )]
 
+mod build_state;
+mod builder;
 mod commands;
 mod download;
 mod models;
-mod builder;
 
 use tracing_subscriber;
 
@@ -60,6 +61,19 @@ fn main() {
             commands::set_hf_token,
             commands::clear_hf_token,
             commands::open_url,
+            // Build state commands
+            commands::get_build_state,
+            commands::select_registry_model,
+            commands::select_custom_model,
+            commands::add_custom_companion_file,
+            commands::remove_custom_companion_file,
+            commands::select_file_quantization,
+            commands::use_custom_file_for_role,
+            commands::clear_custom_file_for_role,
+            commands::select_llamafile_version,
+            commands::use_custom_llamafile,
+            commands::set_config_value,
+            commands::set_output_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

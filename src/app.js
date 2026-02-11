@@ -155,10 +155,92 @@ const invoke = window.__TAURI__?.core?.invoke || (async (cmd, args) => {
       return null;
     case 'clear_hf_token':
       return null;
+    // Build state commands - return mock BuildState
+    case 'get_build_state':
+      return getMockBuildState();
+    case 'select_registry_model':
+      return { ...getMockBuildState(), modelSource: 'registry', selectedModelId: args?.modelId };
+    case 'select_custom_model':
+      return { ...getMockBuildState(), modelSource: 'custom', selectedModelId: null, customModelFiles: [{ role: 'weights', path: args?.path }], outputPath: `/mock/Desktop/${args?.path?.split('/').pop()?.replace('.gguf', '')}.llamafile` };
+    case 'add_custom_companion_file':
+      return getMockBuildState();
+    case 'remove_custom_companion_file':
+      return getMockBuildState();
+    case 'select_file_quantization':
+      return getMockBuildState();
+    case 'use_custom_file_for_role':
+      return { ...getMockBuildState(), outputPath: `/mock/Desktop/${args?.path?.split('/').pop()?.replace('.gguf', '')}.llamafile` };
+    case 'clear_custom_file_for_role':
+      return getMockBuildState();
+    case 'select_llamafile_version':
+      return { ...getMockBuildState(), llamafileSource: 'registry', selectedVersionGroup: args?.groupName, selectedReleaseVersion: args?.version };
+    case 'use_custom_llamafile':
+      return { ...getMockBuildState(), llamafileSource: 'custom', customLlamafilePath: args?.path };
+    case 'set_config_value':
+      return getMockBuildState();
+    case 'set_output_path':
+      return { ...getMockBuildState(), outputPath: args?.path };
     default:
       return null;
   }
 });
+
+function getMockBuildState() {
+  return {
+    modelSource: 'registry',
+    selectedModelId: null,
+    modelFileSelections: {},
+    customModelFiles: [],
+    llamafileSource: 'registry',
+    selectedVersionGroup: null,
+    selectedReleaseVersion: null,
+    customLlamafilePath: null,
+    configValues: { context_length: 4096 },
+    outputPath: '/mock/Desktop/output.llamafile',
+    resolvedLlamafilePath: null,
+  };
+}
+
+/**
+ * Sync JS state from Rust BuildState
+ * Maps Rust camelCase fields to JS state fields
+ */
+function syncFromBuildState(buildState) {
+  // Model selection
+  state.modelSource = buildState.modelSource;
+  state.modelFileSelections = buildState.modelFileSelections || {};
+  state.customModelFiles = buildState.customModelFiles || [];
+
+  // If model source is registry and we have a model ID, find the model
+  if (buildState.modelSource === 'registry' && buildState.selectedModelId) {
+    state.selectedModel = state.models.find(m => m.id === buildState.selectedModelId) || null;
+  } else if (buildState.modelSource === 'custom') {
+    state.selectedModel = null;
+  }
+
+  // Llamafile selection
+  state.llamafileSource = buildState.llamafileSource;
+  state.customLlamafilePath = buildState.customLlamafilePath;
+  state.resolvedLlamafilePath = buildState.resolvedLlamafilePath;
+
+  // If llamafile source is registry and we have version info, find the group/release
+  if (buildState.llamafileSource === 'registry' && buildState.selectedVersionGroup) {
+    state.selectedVersionGroup = state.versionGroups.find(g => g.name === buildState.selectedVersionGroup) || null;
+    if (state.selectedVersionGroup && buildState.selectedReleaseVersion) {
+      state.selectedRelease = state.selectedVersionGroup.releases.find(r => r.version === buildState.selectedReleaseVersion) || null;
+    }
+  } else if (buildState.llamafileSource === 'custom') {
+    state.selectedVersionGroup = null;
+    state.selectedRelease = null;
+  }
+
+  // Config - merge with existing values (don't overwrite defaults from schema)
+  if (buildState.configValues) {
+    state.configValues = { ...state.configValues, ...buildState.configValues };
+  }
+  // Output path
+  state.outputPath = buildState.outputPath || state.outputPath || '';
+}
 
 const listen = window.__TAURI__?.event?.listen || ((event, callback) => {
   console.log(`[Mock] listen(${event})`);
@@ -397,13 +479,8 @@ function getMockConfigSchema() {
 
 async function init() {
   try {
+    // Load version groups and models first (needed for sync)
     state.versionGroups = await invoke('get_llamafile_versions');
-    if (state.versionGroups.length > 0) {
-      state.selectedVersionGroup = state.versionGroups[0].name;
-      state.selectedRelease = state.versionGroups[0].releases[0];
-    }
-    await updateResolvedPath();
-
     state.models = await invoke('get_models');
     state.filteredModels = [...state.models];
 
@@ -412,11 +489,6 @@ async function init() {
       state.modelDownloadDir = await invoke('get_model_cache_dir') || '';
     } catch (e) {
       state.modelDownloadDir = '~/.llamafile/models';
-    }
-
-    // Select first model using selectModel flow
-    if (state.models.length > 0) {
-      selectModel(state.models[0].id);
     }
 
     // Load config schema and initialize defaults
@@ -436,9 +508,20 @@ async function init() {
       }
     }
 
+    // Select first version group (calls Rust to update build state)
+    if (state.versionGroups.length > 0) {
+      await selectVersionGroup(state.versionGroups[0].name);
+    }
+
+    // Select first model (calls Rust to update build state)
+    if (state.models.length > 0) {
+      await selectModel(state.models[0].id);
+    }
+
     state.agentTools = getMockAgentTools();
 
-    if (state.selectedModel) {
+    // Output path is now set by Rust via selectModel
+    if (!state.outputPath && state.selectedModel) {
       state.outputPath = await invoke('get_default_output_path', {
         ggufFilename: getSelectedGgufFilename(),
         modelName: state.selectedModel.name
@@ -573,7 +656,7 @@ function renderVersionStep() {
       </div>
       <div class="content-body">
         ${state.versionGroups.map(g => {
-          const isGroupSelected = state.llamafileSource === 'registry' && state.selectedVersionGroup === g.name;
+          const isGroupSelected = state.llamafileSource === 'registry' && state.selectedVersionGroup?.name === g.name;
           const isExpanded = !!state.expandedGroups[g.name];
           const hasMultiple = g.releases.length > 1;
           const shortVersion = g.name.replace('llamafile ', '');
@@ -667,26 +750,37 @@ async function updateResolvedPath() {
   }
 }
 
-function selectVersionGroup(name) {
+async function selectVersionGroup(name) {
   const group = state.versionGroups.find(g => g.name === name);
   if (!group) return;
-  state.selectedVersionGroup = name;
+
+  // Select first release in group via Rust
+  const version = group.releases[0]?.version;
+  if (version) {
+    const buildState = await invoke('select_llamafile_version', { groupName: name, version });
+    syncFromBuildState(buildState);
+  }
+
+  // Keep local references for UI
+  state.selectedVersionGroup = group;
   state.selectedRelease = group.releases[0];
-  state.llamafileSource = 'registry';
-  state.customLlamafilePath = null;
   updateResolvedPath();
   renderCurrentStep();
 }
 
-function selectSpecificRelease(groupName, version) {
+async function selectSpecificRelease(groupName, version) {
   const group = state.versionGroups.find(g => g.name === groupName);
   if (!group) return;
   const release = group.releases.find(r => r.version === version);
   if (!release) return;
-  state.selectedVersionGroup = groupName;
+
+  // Call Rust to update build state
+  const buildState = await invoke('select_llamafile_version', { groupName, version });
+  syncFromBuildState(buildState);
+
+  // Keep local references for UI
+  state.selectedVersionGroup = group;
   state.selectedRelease = release;
-  state.llamafileSource = 'registry';
-  state.customLlamafilePath = null;
   updateResolvedPath();
   renderCurrentStep();
 }
@@ -695,8 +789,11 @@ async function selectCustomLlamafile() {
   try {
     const path = await invoke('select_llamafile_path');
     if (path) {
-      state.llamafileSource = 'custom';
-      state.customLlamafilePath = path;
+      // Call Rust to update build state
+      const buildState = await invoke('use_custom_llamafile', { path });
+      syncFromBuildState(buildState);
+
+      // Keep local references for UI
       state.selectedVersionGroup = null;
       state.selectedRelease = null;
       updateResolvedPath();
@@ -707,15 +804,16 @@ async function selectCustomLlamafile() {
   }
 }
 
-function clearCustomLlamafile() {
-  state.llamafileSource = 'registry';
-  state.customLlamafilePath = null;
+async function clearCustomLlamafile() {
+  // Select first version group if available
   if (state.versionGroups.length > 0) {
-    state.selectedVersionGroup = state.versionGroups[0].name;
-    state.selectedRelease = state.versionGroups[0].releases[0];
+    await selectVersionGroup(state.versionGroups[0].name);
+  } else {
+    state.llamafileSource = 'registry';
+    state.customLlamafilePath = null;
+    updateResolvedPath();
+    renderCurrentStep();
   }
-  updateResolvedPath();
-  renderCurrentStep();
 }
 
 function toggleVersionGroup(name) {
@@ -992,19 +1090,20 @@ function renderCustomModelCard() {
 
 // -- Model interaction functions --
 
-function selectModel(modelId) {
+async function selectModel(modelId) {
   const model = state.models.find(m => m.id === modelId);
   if (!model) return;
+
+  // Call Rust to update build state
+  const buildState = await invoke('select_registry_model', { modelId });
+  syncFromBuildState(buildState);
+
+  // Keep model object reference for UI (Rust only stores the ID)
   state.selectedModel = model;
-  state.modelSource = 'registry';
-  state.customModelFiles = [];
-  state.configValues.context_length = model.default_context || 4096;
+
+  // Initialize UI-only state
   initModelFileSelections(model);
   renderCurrentStep();
-  invoke('get_default_output_path', {
-    ggufFilename: getSelectedGgufFilename(),
-    modelName: model.name
-  }).then(path => { state.outputPath = path; });
 }
 
 function toggleModelFileExpand(role) {
@@ -1012,27 +1111,26 @@ function toggleModelFileExpand(role) {
   renderCurrentStep();
 }
 
-function selectFileQuantization(role, idx) {
+async function selectFileQuantization(role, idx) {
+  // Call Rust to update build state
+  const buildState = await invoke('select_file_quantization', { role, idx });
+  syncFromBuildState(buildState);
+
+  // Keep local UI state in sync
   if (state.modelFileSelections[role]) {
     state.modelFileSelections[role].quantizationIdx = idx;
     state.modelFileSelections[role].source = 'registry';
     state.modelFileSelections[role].customPath = null;
   }
   renderCurrentStep();
-  // Update output filename if weights changed
-  if (role === 'weights') {
-    updateDefaultOutputPath();
-  }
 }
 
+// Output path is now managed by Rust BuildState
+// This function is kept for backwards compatibility but just syncs from Rust
 async function updateDefaultOutputPath() {
-  if (state.selectedModel || state.modelSource === 'custom') {
-    state.outputPath = await invoke('get_default_output_path', {
-      ggufFilename: getSelectedGgufFilename(),
-      modelName: state.selectedModel?.name
-    });
-    renderCurrentStep();
-  }
+  const buildState = await invoke('get_build_state');
+  state.outputPath = buildState.outputPath;
+  renderCurrentStep();
 }
 
 async function selectCustomFileForRole(role) {
@@ -1048,6 +1146,11 @@ async function selectCustomFileForRole(role) {
 
     // If no expected SHA in registry, just use as custom file
     if (!expectedSha) {
+      // Call Rust to update build state
+      const buildState = await invoke('use_custom_file_for_role', { role, path });
+      syncFromBuildState(buildState);
+
+      // Update local UI state
       sel.source = 'custom';
       sel.customPath = path;
       renderCurrentStep();
@@ -1075,8 +1178,14 @@ async function selectCustomFileForRole(role) {
 
         if (actualSha === expectedSha) {
           // SHA matches - keep as registry model with custom file
+          // Call Rust to update build state
+          const buildState = await invoke('use_custom_file_for_role', { role, path });
+          syncFromBuildState(buildState);
+
+          // Update local UI state
           sel.source = 'custom';
           sel.customPath = path;
+
           // Show success modal
           state.shaVerifyPrompt = {
             role, path, filename, expectedSha, quantName: quant.name,
@@ -1118,11 +1227,10 @@ async function selectCustomFileForRole(role) {
   }
 }
 
-function switchToCustomModelWithFile(role, path) {
-  // Switch to custom model mode with this file
-  state.modelSource = 'custom';
-  state.customModelFiles = [{ role, path }];
-  state.selectedModel = null;
+async function switchToCustomModelWithFile(role, path) {
+  // Call Rust to switch to custom model mode
+  const buildState = await invoke('select_custom_model', { path });
+  syncFromBuildState(buildState);
   renderCurrentStep();
 }
 
@@ -1132,7 +1240,12 @@ function handleShaVerifyChoice(choice) {
   }
 }
 
-function clearCustomFileForRole(role) {
+async function clearCustomFileForRole(role) {
+  // Call Rust to clear custom file
+  const buildState = await invoke('clear_custom_file_for_role', { role });
+  syncFromBuildState(buildState);
+
+  // Update local UI state
   if (state.modelFileSelections[role]) {
     state.modelFileSelections[role].source = 'registry';
     state.modelFileSelections[role].customPath = null;
@@ -1145,11 +1258,13 @@ async function selectCustomModel() {
   try {
     const path = await invoke('select_model_file_path');
     if (path) {
-      state.modelSource = 'custom';
-      state.selectedModel = null;
+      // Call Rust to switch to custom model mode
+      const buildState = await invoke('select_custom_model', { path });
+      syncFromBuildState(buildState);
+
+      // Clear UI-only state
       state.modelFileSelections = {};
       state.expandedModelFiles = {};
-      state.customModelFiles = [{ role: 'weights', path }];
       renderCurrentStep();
     }
   } catch (err) {
@@ -1167,7 +1282,10 @@ async function addCompanionFile() {
       if (!existingRoles.includes('mmproj')) {
         role = 'mmproj';
       }
-      state.customModelFiles.push({ role, path });
+
+      // Call Rust to add companion file
+      const buildState = await invoke('add_custom_companion_file', { role, path });
+      syncFromBuildState(buildState);
       renderCurrentStep();
     }
   } catch (err) {
@@ -1175,14 +1293,20 @@ async function addCompanionFile() {
   }
 }
 
-function clearCustomModel() {
-  state.modelSource = 'registry';
-  state.customModelFiles = [];
-  // Re-select first model if available
+async function removeCompanionFile(role) {
+  const buildState = await invoke('remove_custom_companion_file', { role });
+  syncFromBuildState(buildState);
+  renderCurrentStep();
+}
+
+async function clearCustomModel() {
+  // Re-select first model if available (this will switch back to registry mode)
   if (state.models.length > 0) {
-    selectModel(state.models[0].id);
+    await selectModel(state.models[0].id);
   } else {
+    state.modelSource = 'registry';
     state.selectedModel = null;
+    state.customModelFiles = [];
     renderCurrentStep();
   }
 }
@@ -1424,8 +1548,19 @@ function renderBoolItem(item) {
   `;
 }
 
-function updateConfig(key, value) { state.configValues[key] = value; }
-function toggleConfig(key) { state.configValues[key] = !state.configValues[key]; renderCurrentStep(); }
+async function updateConfig(key, value) {
+  state.configValues[key] = value;
+  // Update Rust build state (fire-and-forget for performance)
+  invoke('set_config_value', { key, value: value });
+}
+
+async function toggleConfig(key) {
+  const newValue = !state.configValues[key];
+  state.configValues[key] = newValue;
+  // Update Rust build state
+  invoke('set_config_value', { key, value: newValue });
+  renderCurrentStep();
+}
 
 // ============================================================================
 // Step 4: Compute
@@ -2056,14 +2191,15 @@ async function deletePartialFile(path) {
 
 async function selectOutputPath() {
   try {
-    // Use current outputPath as default (includes directory), or build one
-    const defaultPath = state.outputPath ||
-      await invoke('get_default_output_path', {
-        ggufFilename: getSelectedGgufFilename(),
-        modelName: state.selectedModel?.name
-      });
+    // Use current outputPath as default
+    const defaultPath = state.outputPath || '/output.llamafile';
     const path = await invoke('select_output_path', { defaultPath });
-    if (path) { state.outputPath = path; renderCurrentStep(); }
+    if (path) {
+      // Update Rust build state
+      const buildState = await invoke('set_output_path', { path });
+      syncFromBuildState(buildState);
+      renderCurrentStep();
+    }
   } catch (err) { console.error('Failed to select output path:', err); }
 }
 
@@ -2492,6 +2628,7 @@ window.clearCustomFileForRole = clearCustomFileForRole;
 window.handleShaVerifyChoice = handleShaVerifyChoice;
 window.selectCustomModel = selectCustomModel;
 window.addCompanionFile = addCompanionFile;
+window.removeCompanionFile = removeCompanionFile;
 window.clearCustomModel = clearCustomModel;
 window.selectDownloadDir = selectDownloadDir;
 window.submitHfToken = submitHfToken;
