@@ -201,6 +201,43 @@ fn process_schema_items(items: &[ConfigSchemaItem], ctx: &ArgsContext, lines: &m
                     lines.push(flag.clone());
                 }
             }
+
+            ConfigSchemaItem::Slider {
+                key,
+                flag,
+                default,
+                conditional,
+                ..
+            } => {
+                // Check conditional
+                if let Some(cond) = conditional {
+                    if cond == "has_mmproj" && !ctx.has_mmproj {
+                        continue;
+                    }
+                }
+
+                // Skip if no flag
+                let flag = match flag {
+                    Some(f) => f,
+                    None => continue,
+                };
+
+                // Get value from config_values or use default
+                let value = ctx.config_values
+                    .get(key)
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(*default);
+
+                // Format as integer if it's a whole number, otherwise as float
+                let value_str = if value.fract() == 0.0 {
+                    format!("{}", value as i64)
+                } else {
+                    format!("{}", value)
+                };
+
+                lines.push(flag.clone());
+                lines.push(value_str);
+            }
         }
     }
 }

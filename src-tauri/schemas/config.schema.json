@@ -9,12 +9,13 @@
   },
   "$defs": {
     "ConfigSchemaItem": {
-      "description": "A configuration item that can be a section, text input, dropdown, or boolean toggle",
+      "description": "A configuration item that can be a section, text input, dropdown, boolean toggle, or slider",
       "oneOf": [
         { "$ref": "#/$defs/Section" },
         { "$ref": "#/$defs/Text" },
         { "$ref": "#/$defs/Dropdown" },
-        { "$ref": "#/$defs/Bool" }
+        { "$ref": "#/$defs/Bool" },
+        { "$ref": "#/$defs/Slider" }
       ]
     },
     "Section": {
@@ -192,6 +193,65 @@
           "type": "boolean",
           "default": false,
           "description": "If true, this field must be enabled"
+        },
+        "conditional": {
+          "type": "string",
+          "enum": ["has_mmproj"],
+          "description": "Condition that must be met for this item to be included"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Slider": {
+      "type": "object",
+      "description": "A slider for selecting a numeric value within a range",
+      "required": ["type", "key", "label", "description", "default", "min", "max"],
+      "properties": {
+        "type": {
+          "const": "slider"
+        },
+        "key": {
+          "type": "string",
+          "description": "Unique identifier used to store/retrieve the value in configValues"
+        },
+        "label": {
+          "type": "string",
+          "description": "Display label for the slider"
+        },
+        "description": {
+          "type": "string",
+          "description": "Help text explaining what this setting controls"
+        },
+        "default": {
+          "type": "number",
+          "description": "Default value. Must be between min and max."
+        },
+        "min": {
+          "type": "number",
+          "description": "Minimum allowed value"
+        },
+        "max": {
+          "type": "number",
+          "description": "Maximum allowed value"
+        },
+        "step": {
+          "type": "number",
+          "default": 1,
+          "description": "Increment step for the slider. Defaults to 1."
+        },
+        "flag": {
+          "type": "string",
+          "description": "CLI flag to use when generating .args file"
+        },
+        "hidden": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, this item is not shown in the UI"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, this field must have a value"
         },
         "conditional": {
           "type": "string",

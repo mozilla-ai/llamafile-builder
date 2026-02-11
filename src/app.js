@@ -1496,6 +1496,8 @@ function renderConfigItemsRecursive(items) {
       html += renderDropdownItem(item);
     } else if (item.type === 'bool') {
       html += renderBoolItem(item);
+    } else if (item.type === 'slider') {
+      html += renderSliderItem(item);
     }
   }
 
@@ -1548,10 +1550,39 @@ function renderBoolItem(item) {
   `;
 }
 
+function renderSliderItem(item) {
+  const val = state.configValues[item.key];
+  const step = item.step ?? 1;
+  const isInteger = step >= 1 && Number.isInteger(step);
+  return `
+    <div class="config-row">
+      <div class="config-label">${item.label}<div class="config-label-sub">${item.description}</div></div>
+      <div class="slider-container">
+        <input type="range" class="config-slider"
+          min="${item.min}" max="${item.max}" step="${step}" value="${val}"
+          oninput="updateSlider('${item.key}', this.value, ${isInteger})">
+        <span class="slider-value" id="slider-value-${item.key}">${isInteger ? Math.round(val) : val}</span>
+      </div>
+    </div>
+  `;
+}
+
 async function updateConfig(key, value) {
   state.configValues[key] = value;
   // Update Rust build state (fire-and-forget for performance)
   invoke('set_config_value', { key, value: value });
+}
+
+function updateSlider(key, value, isInteger) {
+  const numValue = isInteger ? parseInt(value) : parseFloat(value);
+  state.configValues[key] = numValue;
+  // Update the displayed value
+  const valueEl = document.getElementById(`slider-value-${key}`);
+  if (valueEl) {
+    valueEl.textContent = isInteger ? Math.round(numValue) : numValue;
+  }
+  // Update Rust build state
+  invoke('set_config_value', { key, value: numValue });
 }
 
 async function toggleConfig(key) {
@@ -2604,6 +2635,7 @@ window.selectModel = selectModel;
 window.searchModels = searchModels;
 window.filterModels = filterModels;
 window.updateConfig = updateConfig;
+window.updateSlider = updateSlider;
 window.toggleConfig = toggleConfig;
 window.selectComputeMode = selectComputeMode;
 window.toggleGpuOption = toggleGpuOption;

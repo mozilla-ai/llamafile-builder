@@ -118,6 +118,27 @@ pub enum ConfigSchemaItem {
         #[serde(default)]
         conditional: Option<String>,
     },
+    Slider {
+        key: String,
+        label: String,
+        description: String,
+        default: f64,
+        min: f64,
+        max: f64,
+        #[serde(default = "default_step")]
+        step: f64,
+        flag: Option<String>,
+        #[serde(default)]
+        hidden: bool,
+        #[serde(default)]
+        required: bool,
+        #[serde(default)]
+        conditional: Option<String>,
+    },
+}
+
+fn default_step() -> f64 {
+    1.0
 }
 
 
