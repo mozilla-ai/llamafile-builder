@@ -1736,6 +1736,18 @@ function renderBuildStep() {
                   <button class="btn btn-secondary" onclick="handleFileExistsChoice('skip')">Use Anyway</button>
                   <button class="btn btn-secondary" onclick="handleFileExistsChoice('cancel')" style="margin-left: auto;">Cancel</button>
                 </div>
+              ` : state.fileExistsPrompt.askVerifyChecksum ? `
+                <div class="hf-token-title">Verify File Integrity?</div>
+                <div class="hf-token-desc">
+                  <code>${state.fileExistsPrompt.filename}</code> exists and the file size matches
+                  (${formatBytes(state.fileExistsPrompt.expectedSize)}).<br>
+                  <span style="color: var(--text-muted)">Would you like to verify the SHA256 checksum? This may take a moment for large files.</span>
+                </div>
+                <div class="hf-token-buttons" style="margin-top: 16px;">
+                  <button class="btn btn-primary" onclick="handleFileExistsChoice('verify')">Verify SHA256</button>
+                  <button class="btn btn-secondary" onclick="handleFileExistsChoice('skip')">Skip Verification</button>
+                  <button class="btn btn-secondary" onclick="handleFileExistsChoice('download')">Re-download</button>
+                </div>
               ` : `
                 <div class="hf-token-title">File Already Exists</div>
                 <div class="hf-token-desc">
@@ -1965,11 +1977,12 @@ function cancelHfTokenPrompt() {
 // Check if file exists and prompt user for action
 // Returns: 'skip' (use existing), 'download' (fresh download), 'resume' (continue partial), or throws on cancel
 async function checkFileExistsWithPrompt(path, expectedSize, sha256) {
+  // First, check file info WITHOUT checksum verification (fast)
   const fileInfo = await invoke('get_file_info', {
     path,
     expectedSize,
     expectedSha256: sha256,
-    verifyChecksum: true,
+    verifyChecksum: false,
   });
 
   const filename = path.split('/').pop();
@@ -1998,33 +2011,82 @@ async function checkFileExistsWithPrompt(path, expectedSize, sha256) {
     });
   }
 
-  // File is complete - check if checksum is valid
+  // File is complete (size matches)
   if (fileInfo.isComplete) {
-    if (fileInfo.checksumValid === false) {
-      // Checksum mismatch - offer re-download or use anyway
-      state.buildLog.push(`${filename}: checksum mismatch (file may be corrupted)`);
+    // If we have a SHA256 to verify, ask user if they want to verify
+    if (sha256) {
+      state.buildLog.push(`${filename}: found, size matches (${formatBytes(fileInfo.size)})`);
       renderBuildLog();
-      return new Promise((resolve) => {
+
+      // Ask user if they want to verify checksum
+      const userChoice = await new Promise((resolve) => {
         state.fileExistsPrompt = {
           filename,
           path,
-          checksumMismatch: true,
+          isComplete: true,
+          askVerifyChecksum: true,
+          expectedSize: fileInfo.size,
           resolve,
         };
         renderCurrentStep();
       });
+
+      if (userChoice === 'verify') {
+        // User wants to verify - show progress and calculate
+        state.fileExistsPrompt = null;
+        state.buildLog.push(`${filename}: calculating SHA256...`);
+        renderBuildLog();
+        renderCurrentStep();
+
+        const actualSha = await invoke('calculate_sha256', { path });
+
+        if (actualSha === sha256) {
+          state.buildLog.push(`${filename}: checksum verified ✓`);
+          renderBuildLog();
+          return new Promise((resolve) => {
+            state.fileExistsPrompt = {
+              filename,
+              path,
+              isComplete: true,
+              checksumVerified: true,
+              resolve,
+            };
+            renderCurrentStep();
+          });
+        } else {
+          // Checksum mismatch
+          state.buildLog.push(`${filename}: checksum mismatch!`);
+          renderBuildLog();
+          return new Promise((resolve) => {
+            state.fileExistsPrompt = {
+              filename,
+              path,
+              checksumMismatch: true,
+              resolve,
+            };
+            renderCurrentStep();
+          });
+        }
+      } else if (userChoice === 'skip') {
+        // User skipped verification - use file without verifying
+        return 'skip';
+      } else if (userChoice === 'download') {
+        return 'download';
+      } else {
+        // cancelled
+        return 'cancel';
+      }
     }
-    // File is complete and valid (or no checksum to verify)
-    const checksumVerified = fileInfo.checksumValid === true;
-    const validationMsg = checksumVerified ? 'checksum verified' : 'size verified';
-    state.buildLog.push(`${filename}: found and ${validationMsg}`);
+
+    // No SHA256 available - just show size verified
+    state.buildLog.push(`${filename}: found and size verified (${formatBytes(fileInfo.size)})`);
     renderBuildLog();
     return new Promise((resolve) => {
       state.fileExistsPrompt = {
         filename,
         path,
         isComplete: true,
-        checksumVerified,
+        checksumVerified: false,
         resolve,
       };
       renderCurrentStep();
