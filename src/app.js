@@ -22,13 +22,17 @@ const state = {
   models: [],
   filteredModels: [],
   selectedModel: null,
-  modelSource: 'registry',       // 'registry' or 'custom'
+  modelSource: 'registry',       // 'registry', 'custom', or 'ollama'
   modelFileSelections: {},        // keyed by file role: { source, quantizationIdx, customPath }
   expandedModelFiles: {},         // keyed by file role: bool
   modelDownloadDir: '',
   customModelFiles: [],           // array of { role, path }
   searchQuery: '',
   activeFilter: 'all',
+  // Ollama model support
+  ollamaAvailable: false,         // Whether ~/.ollama exists with models
+  ollamaModels: [],               // Array of OllamaModel objects from backend
+  selectedOllamaModel: null,      // Currently selected Ollama model
 
   // Step 3: Configuration (schema-driven)
   configSchema: [],
@@ -181,6 +185,13 @@ const invoke = window.__TAURI__?.core?.invoke || (async (cmd, args) => {
       return getMockBuildState();
     case 'set_output_path':
       return { ...getMockBuildState(), outputPath: args?.path };
+    // Ollama commands
+    case 'check_ollama_available':
+      return false; // Mock: Ollama not available in browser dev
+    case 'get_ollama_models':
+      return []; // Mock: no Ollama models in browser dev
+    case 'select_ollama_model':
+      return { ...getMockBuildState(), modelSource: 'ollama', selectedOllamaModel: { modelName: args?.modelName, tag: args?.tag, displayName: `${args?.modelName}:${args?.tag}`, weightsPath: '/mock/ollama/blob', sizeBytes: 0 }, outputPath: `/mock/Desktop/${args?.modelName}_${args?.tag}.llamafile` };
     default:
       return null;
   }
@@ -192,6 +203,7 @@ function getMockBuildState() {
     selectedModelId: null,
     modelFileSelections: {},
     customModelFiles: [],
+    selectedOllamaModel: null,
     llamafileSource: 'registry',
     selectedVersionGroup: null,
     selectedReleaseVersion: null,
@@ -211,11 +223,12 @@ function syncFromBuildState(buildState) {
   state.modelSource = buildState.modelSource;
   state.modelFileSelections = buildState.modelFileSelections || {};
   state.customModelFiles = buildState.customModelFiles || [];
+  state.selectedOllamaModel = buildState.selectedOllamaModel || null;
 
   // If model source is registry and we have a model ID, find the model
   if (buildState.modelSource === 'registry' && buildState.selectedModelId) {
     state.selectedModel = state.models.find(m => m.id === buildState.selectedModelId) || null;
-  } else if (buildState.modelSource === 'custom') {
+  } else if (buildState.modelSource === 'custom' || buildState.modelSource === 'ollama') {
     state.selectedModel = null;
   }
 
@@ -328,6 +341,20 @@ async function init() {
       state.modelDownloadDir = await invoke('get_model_cache_dir') || '';
     } catch (e) {
       state.modelDownloadDir = '~/.llamafile/models';
+    }
+
+    // Check for Ollama models
+    try {
+      state.ollamaAvailable = await invoke('check_ollama_available');
+      console.log('Ollama available:', state.ollamaAvailable);
+      if (state.ollamaAvailable) {
+        state.ollamaModels = await invoke('get_ollama_models');
+        console.log('Found Ollama models:', state.ollamaModels.length, state.ollamaModels);
+      }
+    } catch (e) {
+      console.log('Ollama check failed (expected in browser dev):', e);
+      state.ollamaAvailable = false;
+      state.ollamaModels = [];
     }
 
     // Load config schema and initialize defaults
@@ -700,7 +727,7 @@ function initModelFileSelections(model) {
 
 function renderModelStep() {
   const chips = getModelFilterChips();
-  const isCustomMode = state.modelSource === 'custom';
+  const isRegistryMode = state.modelSource === 'registry';
 
   return `
     <div class="step-panel active">
@@ -728,7 +755,7 @@ function renderModelStep() {
         </div>
 
         ${state.filteredModels.map(m => {
-          const isSelected = !isCustomMode && state.selectedModel?.id === m.id;
+          const isSelected = isRegistryMode && state.selectedModel?.id === m.id;
           const weightsFile = m.files.find(f => f.role === 'weights');
           const firstQuant = weightsFile?.quantizations[0];
           const totalSize = getTotalModelSizeForModel(m);
@@ -760,6 +787,11 @@ function renderModelStep() {
         <div class="version-divider"><span>or</span></div>
 
         ${renderCustomModelCard()}
+
+        ${state.ollamaAvailable ? `
+        <div class="version-divider"><span>or</span></div>
+        ${renderOllamaModelCard()}
+        ` : ''}
 
         ${state.shaVerifyProgress ? `
           <div class="hf-token-modal">
@@ -923,6 +955,71 @@ function renderCustomModelCard() {
         <div class="card-desc">Use a custom GGUF model file from your filesystem</div>
       </div>
       <div class="card-meta" style="color: var(--text-secondary);">Browse&hellip;</div>
+    </div>
+  `;
+}
+
+function renderOllamaModelCard() {
+  const isActive = state.modelSource === 'ollama';
+  const hasSelection = state.selectedOllamaModel !== null;
+
+  // If Ollama is selected and we have a model, show the expanded state
+  if (isActive && hasSelection) {
+    return `
+      <div class="custom-llamafile-card active" onclick="">
+        <div class="card-icon" style="background: var(--purple-dim); color: var(--purple); font-size: 18px;">🦙</div>
+        <div class="card-info">
+          <div class="card-title">Load from Ollama</div>
+          <div class="custom-file-list">
+            <div class="custom-file-entry">
+              <span class="file-role-tag">model</span>
+              <span class="custom-path-display" title="${state.selectedOllamaModel.weightsPath}">${state.selectedOllamaModel.displayName}</span>
+              <span class="file-size-label">${formatBytes(state.selectedOllamaModel.sizeBytes)}</span>
+            </div>
+          </div>
+          <button class="custom-add-btn" onclick="event.stopPropagation(); expandOllamaSelection()">Change model</button>
+        </div>
+        <button class="custom-clear-btn" onclick="event.stopPropagation(); clearOllamaModel()">Clear</button>
+      </div>
+    `;
+  }
+
+  // If Ollama is selected but no model yet, show the list of available models
+  if (isActive && !hasSelection) {
+    return `
+      <div class="custom-llamafile-card active" onclick="">
+        <div class="card-icon" style="background: var(--purple-dim); color: var(--purple); font-size: 18px;">🦙</div>
+        <div class="card-info">
+          <div class="card-title">Load from Ollama</div>
+          <div class="card-desc">Select a model from your local Ollama cache</div>
+        </div>
+        <button class="custom-clear-btn" onclick="event.stopPropagation(); clearOllamaModel()">Cancel</button>
+      </div>
+      <div class="version-releases" style="margin-top: 8px;">
+        ${state.ollamaModels.map(m => `
+          <div class="release-row" onclick="selectOllamaModel('${m.modelName}', '${m.tag}')">
+            <div class="release-radio"></div>
+            <div class="release-info">
+              <span class="release-version">${m.displayName}</span>
+            </div>
+            <span class="release-date">${formatBytes(m.sizeBytes)}</span>
+          </div>
+        `).join('')}
+        ${state.ollamaModels.length === 0 ? '<div class="card-desc" style="padding: 8px 12px; color: var(--text-secondary);">No Ollama models found</div>' : ''}
+      </div>
+    `;
+  }
+
+  // Default collapsed state - show the card to click
+  return `
+    <div class="custom-llamafile-card"
+         onclick="selectOllamaSource()">
+      <div class="card-icon" style="background: var(--purple-dim); color: var(--purple); font-size: 18px;">🦙</div>
+      <div class="card-info">
+        <div class="card-title">Load from Ollama</div>
+        <div class="card-desc">Use a model from your local Ollama cache (~/.ollama)</div>
+      </div>
+      <div class="card-meta" style="color: var(--text-secondary);">${state.ollamaModels.length} models</div>
     </div>
   `;
 }
@@ -1150,6 +1247,63 @@ async function clearCustomModel() {
   }
 }
 
+// -- Ollama model interaction functions --
+
+async function selectOllamaSource() {
+  console.log('selectOllamaSource called, ollamaModels:', state.ollamaModels);
+
+  // Switch to Ollama mode without selecting a model yet
+  state.modelSource = 'ollama';
+  state.selectedModel = null;
+  state.selectedOllamaModel = null;
+  state.customModelFiles = [];
+  state.modelFileSelections = {};
+  state.expandedModelFiles = {};
+
+  // If only one Ollama model, auto-select it
+  if (state.ollamaModels.length === 1) {
+    await selectOllamaModel(state.ollamaModels[0].modelName, state.ollamaModels[0].tag);
+    return;
+  }
+
+  renderCurrentStep();
+}
+
+async function selectOllamaModel(modelName, tag) {
+  console.log('selectOllamaModel called:', modelName, tag);
+  try {
+    const buildState = await invoke('select_ollama_model', { modelName, tag });
+    console.log('select_ollama_model returned:', buildState);
+    syncFromBuildState(buildState);
+
+    // Clear UI-only state
+    state.selectedModel = null;
+    state.modelFileSelections = {};
+    state.expandedModelFiles = {};
+    renderCurrentStep();
+  } catch (err) {
+    console.error('Failed to select Ollama model:', err);
+  }
+}
+
+function expandOllamaSelection() {
+  // Show the model list again (clear selection but stay in Ollama mode)
+  state.selectedOllamaModel = null;
+  renderCurrentStep();
+}
+
+async function clearOllamaModel() {
+  // Re-select first model if available (this will switch back to registry mode)
+  if (state.models.length > 0) {
+    await selectModel(state.models[0].id);
+  } else {
+    state.modelSource = 'registry';
+    state.selectedModel = null;
+    state.selectedOllamaModel = null;
+    renderCurrentStep();
+  }
+}
+
 async function selectDownloadDir() {
   try {
     const path = await invoke('select_model_download_dir');
@@ -1165,6 +1319,9 @@ async function selectDownloadDir() {
 function isModelStepValid() {
   if (state.modelSource === 'custom') {
     return state.customModelFiles.length > 0 && state.customModelFiles[0].path;
+  }
+  if (state.modelSource === 'ollama') {
+    return !!state.selectedOllamaModel;
   }
   return !!state.selectedModel;
 }
@@ -1205,6 +1362,10 @@ function renderModelSummaryValue() {
       text += ` + ${companions.join(', ')}`;
     }
     return text;
+  }
+  if (state.modelSource === 'ollama') {
+    if (!state.selectedOllamaModel) return 'Ollama \u2014 N/A';
+    return `Ollama \u2014 ${state.selectedOllamaModel.displayName}`;
   }
   if (!state.selectedModel) return 'N/A';
   const weightsFile = state.selectedModel.files.find(f => f.role === 'weights');
@@ -1580,6 +1741,13 @@ function getModelFilename(role) {
   if (state.modelSource === 'custom') {
     const file = state.customModelFiles.find(f => f.role === role);
     return file ? getFileName(file.path) : null;
+  }
+  if (state.modelSource === 'ollama') {
+    // Ollama models only have weights (the blob file)
+    if (role === 'weights' && state.selectedOllamaModel) {
+      return getFileName(state.selectedOllamaModel.weightsPath);
+    }
+    return null;
   }
   if (!state.selectedModel) return null;
   const file = state.selectedModel.files.find(f => f.role === role);
@@ -2262,6 +2430,13 @@ async function startBuild() {
         state.buildLog.push(`${filename}: using custom file`);
         renderBuildLog();
       }
+    } else if (state.modelSource === 'ollama') {
+      // Ollama model - use the blob path directly
+      if (state.selectedOllamaModel) {
+        modelFiles.push({ role: 'weights', path: state.selectedOllamaModel.weightsPath });
+        state.buildLog.push(`${state.selectedOllamaModel.displayName}: using Ollama cache`);
+        renderBuildLog();
+      }
     }
 
     state.buildProgress = { stage: 'downloading_model', progress_pct: 60 };
@@ -2489,6 +2664,11 @@ function getSelectedGgufFilename() {
     }
   }
 
+  if (state.modelSource === 'ollama' && state.selectedOllamaModel) {
+    // Ollama models don't have GGUF filenames - return null (output path uses model_name_tag)
+    return null;
+  }
+
   if (state.selectedModel && state.modelFileSelections) {
     const sel = state.modelFileSelections['weights'];
     if (sel?.source === 'custom' && sel.customPath) {
@@ -2568,5 +2748,9 @@ window.submitHfToken = submitHfToken;
 window.cancelHfTokenPrompt = cancelHfTokenPrompt;
 window.handleFileExistsChoice = handleFileExistsChoice;
 window.openExternalLink = openExternalLink;
+window.selectOllamaSource = selectOllamaSource;
+window.selectOllamaModel = selectOllamaModel;
+window.expandOllamaSelection = expandOllamaSelection;
+window.clearOllamaModel = clearOllamaModel;
 
 document.addEventListener('DOMContentLoaded', init);

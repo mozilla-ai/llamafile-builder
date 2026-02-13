@@ -78,6 +78,10 @@ fn main() {
             commands::use_custom_llamafile,
             commands::set_config_value,
             commands::set_output_path,
+            // Ollama commands
+            commands::check_ollama_available,
+            commands::get_ollama_models,
+            commands::select_ollama_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

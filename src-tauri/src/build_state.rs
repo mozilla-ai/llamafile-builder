@@ -8,6 +8,7 @@ use std::sync::Mutex;
 pub enum ModelSource {
     Registry,
     Custom,
+    Ollama,
 }
 
 /// Source of a specific file (within a registry model)
@@ -53,6 +54,8 @@ pub struct BuildState {
     pub model_file_selections: HashMap<String, FileSelection>,
     /// Custom files for fully custom mode
     pub custom_model_files: Vec<CustomFile>,
+    /// Selected Ollama model (when model_source is Ollama)
+    pub selected_ollama_model: Option<crate::models::OllamaModel>,
 
     // Llamafile selection
     pub llamafile_source: LlamafileSource,
@@ -77,6 +80,7 @@ impl Default for BuildState {
             selected_model_id: None,
             model_file_selections: HashMap::new(),
             custom_model_files: Vec::new(),
+            selected_ollama_model: None,
             llamafile_source: LlamafileSource::Registry,
             selected_version_group: None,
             selected_release_version: None,
@@ -98,6 +102,10 @@ impl BuildState {
                     .iter()
                     .find(|f| f.role == "weights")
                     .map(|f| get_filename_from_path(&f.path))
+            }
+            ModelSource::Ollama => {
+                // In Ollama mode, return None (we use model_name_tag for output)
+                None
             }
             ModelSource::Registry => {
                 // In registry mode, check for custom path first, then registry
@@ -123,6 +131,10 @@ impl BuildState {
     pub fn get_model_name(&self, models: &[crate::models::Model]) -> Option<String> {
         match self.model_source {
             ModelSource::Custom => None,
+            ModelSource::Ollama => {
+                // For Ollama, return the display name (model_name:tag)
+                self.selected_ollama_model.as_ref().map(|m| m.display_name.clone())
+            }
             ModelSource::Registry => {
                 let model_id = self.selected_model_id.as_ref()?;
                 let model = models.iter().find(|m| &m.id == model_id)?;
@@ -133,18 +145,31 @@ impl BuildState {
 
     /// Update the output path based on current selection
     pub fn update_output_path(&mut self, models: &[crate::models::Model]) {
-        let gguf_filename = self.get_gguf_filename(models);
-        let model_name = self.get_model_name(models);
+        // Determine base name based on model source
+        let base_name = match self.model_source {
+            ModelSource::Ollama => {
+                // For Ollama: use model_name_tag format
+                if let Some(ref ollama) = self.selected_ollama_model {
+                    format!("{}_{}", ollama.model_name, ollama.tag)
+                } else {
+                    "output".to_string()
+                }
+            }
+            _ => {
+                // For Registry/Custom: use GGUF filename or model name
+                let gguf_filename = self.get_gguf_filename(models);
+                let model_name = self.get_model_name(models);
 
-        // Determine base name
-        let base_name = if let Some(gguf) = gguf_filename {
-            gguf.trim_end_matches(".gguf")
-                .trim_end_matches(".GGUF")
-                .to_string()
-        } else if let Some(name) = model_name {
-            name.to_lowercase().replace(" ", "-").replace(".", "-")
-        } else {
-            "output".to_string()
+                if let Some(gguf) = gguf_filename {
+                    gguf.trim_end_matches(".gguf")
+                        .trim_end_matches(".GGUF")
+                        .to_string()
+                } else if let Some(name) = model_name {
+                    name.to_lowercase().replace(" ", "-").replace(".", "-")
+                } else {
+                    "output".to_string()
+                }
+            }
         };
 
         // Get output directory
@@ -212,6 +237,7 @@ impl BuildStateManager {
             state.model_source = ModelSource::Registry;
             state.selected_model_id = Some(model_id);
             state.custom_model_files.clear();
+            state.selected_ollama_model = None;
             state.init_file_selections(model);
             state.update_output_path(&models);
         }
@@ -226,10 +252,25 @@ impl BuildStateManager {
         state.model_source = ModelSource::Custom;
         state.selected_model_id = None;
         state.model_file_selections.clear();
+        state.selected_ollama_model = None;
         state.custom_model_files = vec![CustomFile {
             role: "weights".to_string(),
             path,
         }];
+        state.update_output_path(&models);
+
+        state.clone()
+    }
+
+    pub fn select_ollama_model(&self, ollama_model: crate::models::OllamaModel) -> BuildState {
+        let models = self.models.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
+
+        state.model_source = ModelSource::Ollama;
+        state.selected_model_id = None;
+        state.model_file_selections.clear();
+        state.custom_model_files.clear();
+        state.selected_ollama_model = Some(ollama_model);
         state.update_output_path(&models);
 
         state.clone()

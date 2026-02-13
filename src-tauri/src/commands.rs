@@ -842,3 +842,191 @@ pub async fn set_output_path(
 ) -> Result<BuildState, String> {
     Ok(state.build_state.set_output_path(path))
 }
+
+// ============================================================================
+// Ollama Model Commands
+// ============================================================================
+
+/// Get the Ollama models directory path
+fn get_ollama_models_dir() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|home| home.join(".ollama").join("models"))
+}
+
+/// Check if Ollama models directory exists and has models
+#[tauri::command]
+pub async fn check_ollama_available() -> Result<bool, String> {
+    let models_dir = match get_ollama_models_dir() {
+        Some(dir) => dir,
+        None => return Ok(false),
+    };
+
+    let manifests_dir = models_dir
+        .join("manifests")
+        .join("registry.ollama.ai")
+        .join("library");
+
+    if !manifests_dir.exists() {
+        return Ok(false);
+    }
+
+    // Check if there's at least one model directory with manifest files
+    match std::fs::read_dir(&manifests_dir) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                if entry.path().is_dir() {
+                    // Check if this model dir has any tag files
+                    if let Ok(tags) = std::fs::read_dir(entry.path()) {
+                        if tags.into_iter().flatten().any(|t| t.path().is_file()) {
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+            Ok(false)
+        }
+        Err(_) => Ok(false),
+    }
+}
+
+/// Ollama manifest layer structure
+#[derive(serde::Deserialize)]
+struct OllamaManifestLayer {
+    #[serde(rename = "mediaType")]
+    media_type: String,
+    digest: String,
+}
+
+/// Ollama manifest structure
+#[derive(serde::Deserialize)]
+struct OllamaManifest {
+    layers: Vec<OllamaManifestLayer>,
+}
+
+/// Scan ~/.ollama/models/ and return discovered models
+#[tauri::command]
+pub async fn get_ollama_models() -> Result<Vec<OllamaModel>, String> {
+    let models_dir = match get_ollama_models_dir() {
+        Some(dir) => dir,
+        None => return Ok(vec![]),
+    };
+
+    let manifests_dir = models_dir
+        .join("manifests")
+        .join("registry.ollama.ai")
+        .join("library");
+
+    let blobs_dir = models_dir.join("blobs");
+
+    if !manifests_dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut ollama_models = Vec::new();
+
+    // Iterate over model directories
+    let model_dirs = match std::fs::read_dir(&manifests_dir) {
+        Ok(dirs) => dirs,
+        Err(_) => return Ok(vec![]),
+    };
+
+    for model_entry in model_dirs.flatten() {
+        let model_path = model_entry.path();
+        if !model_path.is_dir() {
+            continue;
+        }
+
+        let model_name = match model_path.file_name().and_then(|n| n.to_str()) {
+            Some(name) => name.to_string(),
+            None => continue,
+        };
+
+        // Iterate over tag files in this model directory
+        let tag_files = match std::fs::read_dir(&model_path) {
+            Ok(files) => files,
+            Err(_) => continue,
+        };
+
+        for tag_entry in tag_files.flatten() {
+            let tag_path = tag_entry.path();
+            if !tag_path.is_file() {
+                continue;
+            }
+
+            let tag = match tag_path.file_name().and_then(|n| n.to_str()) {
+                Some(name) => name.to_string(),
+                None => continue,
+            };
+
+            // Read and parse the manifest
+            let manifest_content = match std::fs::read_to_string(&tag_path) {
+                Ok(content) => content,
+                Err(_) => continue,
+            };
+
+            let manifest: OllamaManifest = match serde_json::from_str(&manifest_content) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+
+            // Find the model layer (application/vnd.ollama.image.model)
+            let model_layer = manifest
+                .layers
+                .iter()
+                .find(|l| l.media_type == "application/vnd.ollama.image.model");
+
+            let model_layer = match model_layer {
+                Some(layer) => layer,
+                None => continue,
+            };
+
+            // Extract hash from digest (format: "sha256:hash")
+            let hash = match model_layer.digest.strip_prefix("sha256:") {
+                Some(h) => h,
+                None => continue,
+            };
+
+            // Construct blob path and verify it exists
+            let blob_path = blobs_dir.join(format!("sha256-{}", hash));
+            if !blob_path.exists() {
+                continue;
+            }
+
+            // Get file size
+            let size_bytes = match std::fs::metadata(&blob_path) {
+                Ok(meta) => meta.len(),
+                Err(_) => continue,
+            };
+
+            ollama_models.push(OllamaModel {
+                model_name: model_name.clone(),
+                tag: tag.clone(),
+                display_name: format!("{}:{}", model_name, tag),
+                weights_path: blob_path.to_string_lossy().to_string(),
+                size_bytes,
+            });
+        }
+    }
+
+    // Sort by display name
+    ollama_models.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+
+    Ok(ollama_models)
+}
+
+/// Select an Ollama model
+#[tauri::command(rename_all = "camelCase")]
+pub async fn select_ollama_model(
+    model_name: String,
+    tag: String,
+    state: State<'_, AppState>,
+) -> Result<BuildState, String> {
+    // Get all Ollama models and find the matching one
+    let models = get_ollama_models().await?;
+
+    let ollama_model = models
+        .into_iter()
+        .find(|m| m.model_name == model_name && m.tag == tag)
+        .ok_or_else(|| format!("Ollama model {}:{} not found", model_name, tag))?;
+
+    Ok(state.build_state.select_ollama_model(ollama_model))
+}

@@ -314,3 +314,14 @@ pub struct SystemInfo {
     pub has_amd_gpu: bool,
     pub has_metal: bool,
 }
+
+/// An Ollama model discovered from local cache
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OllamaModel {
+    pub model_name: String,     // e.g., "qwen3"
+    pub tag: String,            // e.g., "8b"
+    pub display_name: String,   // e.g., "qwen3:8b"
+    pub weights_path: String,   // Full path to blob file
+    pub size_bytes: u64,        // File size
+}
