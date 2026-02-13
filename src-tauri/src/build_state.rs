@@ -76,6 +76,12 @@ pub struct BuildState {
 
     // Derived/resolved paths (computed from selections)
     pub resolved_llamafile_path: Option<String>,
+
+    // Resolved model file paths (computed from current selection)
+    pub resolved_weights_path: Option<String>,
+    pub resolved_weights_filename: Option<String>,
+    pub resolved_mmproj_path: Option<String>,
+    pub resolved_mmproj_filename: Option<String>,
 }
 
 impl Default for BuildState {
@@ -95,6 +101,10 @@ impl Default for BuildState {
             config_values: HashMap::new(),
             output_path: String::new(),
             resolved_llamafile_path: None,
+            resolved_weights_path: None,
+            resolved_weights_filename: None,
+            resolved_mmproj_path: None,
+            resolved_mmproj_filename: None,
         }
     }
 }
@@ -216,6 +226,101 @@ impl BuildState {
         }
         // Context length defaults come from config.json schema, not overridden here
     }
+
+    /// Update resolved model file paths based on current selection
+    /// This should be called after any model selection change
+    pub fn update_resolved_model_paths(&mut self, models: &[crate::models::Model]) {
+        // Clear existing
+        self.resolved_weights_path = None;
+        self.resolved_weights_filename = None;
+        self.resolved_mmproj_path = None;
+        self.resolved_mmproj_filename = None;
+
+        match self.model_source {
+            ModelSource::Custom => {
+                // Custom mode: get from custom_model_files
+                for file in &self.custom_model_files {
+                    let filename = get_filename_from_path(&file.path);
+                    if file.role == "weights" {
+                        self.resolved_weights_path = Some(file.path.clone());
+                        self.resolved_weights_filename = Some(filename);
+                    } else if file.role == "mmproj" {
+                        self.resolved_mmproj_path = Some(file.path.clone());
+                        self.resolved_mmproj_filename = Some(filename);
+                    }
+                }
+            }
+            ModelSource::Ollama => {
+                // Ollama: only has weights (the blob path)
+                if let Some(ref ollama) = self.selected_ollama_model {
+                    self.resolved_weights_path = Some(ollama.weights_path.clone());
+                    self.resolved_weights_filename = Some(get_filename_from_path(&ollama.weights_path));
+                }
+            }
+            ModelSource::LMStudio => {
+                // LM Studio: get from selected files
+                if let Some(ref model) = self.selected_lmstudio_model {
+                    // Get weights file
+                    let weights_idx = self.lmstudio_file_selections.get("weights").copied().unwrap_or(0);
+                    if let Some(file) = model.files.iter().filter(|f| f.role == "weights").nth(weights_idx) {
+                        self.resolved_weights_path = Some(file.path.clone());
+                        self.resolved_weights_filename = Some(file.filename.clone());
+                    }
+
+                    // Get mmproj file if present
+                    let mmproj_idx = self.lmstudio_file_selections.get("mmproj").copied().unwrap_or(0);
+                    if let Some(file) = model.files.iter().filter(|f| f.role == "mmproj").nth(mmproj_idx) {
+                        self.resolved_mmproj_path = Some(file.path.clone());
+                        self.resolved_mmproj_filename = Some(file.filename.clone());
+                    }
+                }
+            }
+            ModelSource::Registry => {
+                // Registry: check for custom paths first, then construct from registry data
+                let model_id = match self.selected_model_id.as_ref() {
+                    Some(id) => id,
+                    None => return,
+                };
+                let model = match models.iter().find(|m| &m.id == model_id) {
+                    Some(m) => m,
+                    None => return,
+                };
+
+                for file in &model.files {
+                    let sel = match self.model_file_selections.get(&file.role) {
+                        Some(s) => s,
+                        None => continue,
+                    };
+
+                    let (path, filename) = if sel.source == FileSource::Custom {
+                        if let Some(ref custom_path) = sel.custom_path {
+                            (custom_path.clone(), get_filename_from_path(custom_path))
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        // Registry file - path will be computed during build
+                        // Just set the filename from the download URL
+                        if let Some(quant) = file.quantizations.get(sel.quantization_idx) {
+                            let filename = get_filename_from_url(&quant.download_url);
+                            // Path is not known until download - leave as None
+                            (String::new(), filename)
+                        } else {
+                            continue;
+                        }
+                    };
+
+                    if file.role == "weights" {
+                        self.resolved_weights_path = if path.is_empty() { None } else { Some(path) };
+                        self.resolved_weights_filename = Some(filename);
+                    } else if file.role == "mmproj" {
+                        self.resolved_mmproj_path = if path.is_empty() { None } else { Some(path) };
+                        self.resolved_mmproj_filename = Some(filename);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Thread-safe wrapper for BuildState
@@ -265,6 +370,7 @@ impl BuildStateManager {
             state.lmstudio_file_selections.clear();
             state.init_file_selections(model);
             state.update_output_path(&models);
+            state.update_resolved_model_paths(&models);
         }
 
         state.clone()
@@ -285,6 +391,7 @@ impl BuildStateManager {
             path,
         }];
         state.update_output_path(&models);
+        state.update_resolved_model_paths(&models);
 
         state.clone()
     }
@@ -301,6 +408,7 @@ impl BuildStateManager {
         state.selected_lmstudio_model = None;
         state.lmstudio_file_selections.clear();
         state.update_output_path(&models);
+        state.update_resolved_model_paths(&models);
 
         state.clone()
     }
@@ -328,6 +436,7 @@ impl BuildStateManager {
         state.selected_ollama_model = None;
         state.selected_lmstudio_model = Some(lmstudio_model);
         state.update_output_path(&models);
+        state.update_resolved_model_paths(&models);
 
         state.clone()
     }
@@ -342,6 +451,7 @@ impl BuildStateManager {
         if role == "weights" {
             state.update_output_path(&models);
         }
+        state.update_resolved_model_paths(&models);
 
         state.clone()
     }
@@ -354,6 +464,7 @@ impl BuildStateManager {
         state.custom_model_files.retain(|f| f.role != role);
         state.custom_model_files.push(CustomFile { role, path });
         state.update_output_path(&models);
+        state.update_resolved_model_paths(&models);
 
         state.clone()
     }
@@ -364,6 +475,7 @@ impl BuildStateManager {
 
         state.custom_model_files.retain(|f| f.role != role);
         state.update_output_path(&models);
+        state.update_resolved_model_paths(&models);
 
         state.clone()
     }
@@ -381,6 +493,7 @@ impl BuildStateManager {
         if role == "weights" {
             state.update_output_path(&models);
         }
+        state.update_resolved_model_paths(&models);
 
         state.clone()
     }
@@ -397,6 +510,7 @@ impl BuildStateManager {
         if role == "weights" {
             state.update_output_path(&models);
         }
+        state.update_resolved_model_paths(&models);
 
         state.clone()
     }
@@ -413,6 +527,7 @@ impl BuildStateManager {
         if role == "weights" {
             state.update_output_path(&models);
         }
+        state.update_resolved_model_paths(&models);
 
         state.clone()
     }

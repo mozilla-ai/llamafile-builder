@@ -43,6 +43,12 @@ const state = {
   lmstudioCacheDir: '',           // Custom LM Studio cache directory
   expandedLMStudioFiles: {},      // UI state for expanded file lists
 
+  // Resolved model file paths (computed by backend)
+  resolvedWeightsPath: null,      // Full path to selected weights file
+  resolvedWeightsFilename: null,  // Just the filename
+  resolvedMmprojPath: null,       // Full path to selected mmproj file (if any)
+  resolvedMmprojFilename: null,   // Just the filename
+
   // Step 3: Configuration (schema-driven)
   configSchema: [],
   configValues: {},
@@ -235,6 +241,10 @@ function getMockBuildState() {
     configValues: { context_length: 4096 },
     outputPath: '/mock/Desktop/output.llamafile',
     resolvedLlamafilePath: null,
+    resolvedWeightsPath: null,
+    resolvedWeightsFilename: null,
+    resolvedMmprojPath: null,
+    resolvedMmprojFilename: null,
   };
 }
 
@@ -280,6 +290,12 @@ function syncFromBuildState(buildState) {
   }
   // Output path
   state.outputPath = buildState.outputPath || state.outputPath || '';
+
+  // Resolved model file paths (computed by backend)
+  state.resolvedWeightsPath = buildState.resolvedWeightsPath || null;
+  state.resolvedWeightsFilename = buildState.resolvedWeightsFilename || null;
+  state.resolvedMmprojPath = buildState.resolvedMmprojPath || null;
+  state.resolvedMmprojFilename = buildState.resolvedMmprojFilename || null;
 }
 
 const listen = window.__TAURI__?.event?.listen || ((event, callback) => {
@@ -1717,13 +1733,10 @@ function getTotalModelSizeForModel(model) {
 
 function renderModelSummaryValue() {
   if (state.modelSource === 'custom') {
-    const files = state.customModelFiles;
-    if (files.length === 0) return 'Custom \u2014 N/A';
-    const primary = getFileName(files[0].path);
-    const companions = files.slice(1).map(f => `${f.role}: ${getFileName(f.path)}`);
-    let text = `Custom \u2014 ${primary}`;
-    if (companions.length > 0) {
-      text += ` + ${companions.join(', ')}`;
+    if (!state.resolvedWeightsFilename) return 'Custom \u2014 N/A';
+    let text = `Custom \u2014 ${state.resolvedWeightsFilename}`;
+    if (state.resolvedMmprojFilename) {
+      text += ` + mmproj: ${state.resolvedMmprojFilename}`;
     }
     return text;
   }
@@ -1733,18 +1746,9 @@ function renderModelSummaryValue() {
   }
   if (state.modelSource === 'lmstudio') {
     if (!state.selectedLMStudioModel) return 'LM Studio \u2014 N/A';
-    const model = state.selectedLMStudioModel;
-    const weightsIdx = state.lmstudioFileSelections?.weights || 0;
-    const weightsFile = model.files.filter(f => f.role === 'weights')[weightsIdx];
-    let text = `LM Studio \u2014 ${weightsFile?.filename || model.displayName}`;
-    // Show mmproj if present
-    const mmprojFiles = model.files.filter(f => f.role === 'mmproj');
-    if (mmprojFiles.length > 0) {
-      const mmprojIdx = state.lmstudioFileSelections?.mmproj || 0;
-      const mmprojFile = mmprojFiles[mmprojIdx];
-      if (mmprojFile) {
-        text += ` + mmproj: ${mmprojFile.filename}`;
-      }
+    let text = `LM Studio \u2014 ${state.resolvedWeightsFilename || state.selectedLMStudioModel.displayName}`;
+    if (state.resolvedMmprojFilename) {
+      text += ` + mmproj: ${state.resolvedMmprojFilename}`;
     }
     return text;
   }
@@ -2119,35 +2123,14 @@ function updateSystemPrompt(v) { state.systemPrompt = v; }
 
 // Get the filename for a model file by role (used to pass to Rust)
 function getModelFilename(role) {
-  if (state.modelSource === 'custom') {
-    const file = state.customModelFiles.find(f => f.role === role);
-    return file ? getFileName(file.path) : null;
+  // Use resolved filenames from backend
+  if (role === 'weights') {
+    return state.resolvedWeightsFilename || null;
   }
-  if (state.modelSource === 'ollama') {
-    // Ollama models only have weights (the blob file)
-    if (role === 'weights' && state.selectedOllamaModel) {
-      return getFileName(state.selectedOllamaModel.weightsPath);
-    }
-    return null;
+  if (role === 'mmproj') {
+    return state.resolvedMmprojFilename || null;
   }
-  if (state.modelSource === 'lmstudio') {
-    if (!state.selectedLMStudioModel) return null;
-    const filesForRole = state.selectedLMStudioModel.files.filter(f => f.role === role);
-    if (filesForRole.length === 0) return null;
-    const idx = state.lmstudioFileSelections?.[role] || 0;
-    const file = filesForRole[idx];
-    return file ? file.filename : null;
-  }
-  if (!state.selectedModel) return null;
-  const file = state.selectedModel.files.find(f => f.role === role);
-  if (!file) return null;
-  const sel = state.modelFileSelections[role];
-  if (sel?.source === 'custom' && sel.customPath) {
-    return getFileName(sel.customPath);
-  }
-  const quant = file.quantizations[sel?.quantizationIdx || 0];
-  // Extract filename from download URL
-  return quant ? getFilenameFromUrl(quant.download_url) : null;
+  return null;
 }
 
 // Regenerate args content by calling Rust backend
@@ -2820,47 +2803,17 @@ async function startBuild() {
           }
         }
       }
-    } else if (state.modelSource === 'custom') {
-      // Custom model files - just log the paths
-      for (const f of state.customModelFiles) {
-        modelFiles.push({ role: f.role, path: f.path });
-        const filename = f.path.split('/').pop();
-        state.buildLog.push(`${filename}: using custom file`);
+    } else if (state.modelSource === 'custom' || state.modelSource === 'ollama' || state.modelSource === 'lmstudio') {
+      // Use resolved paths from backend for custom, Ollama, and LM Studio models
+      if (state.resolvedWeightsPath) {
+        modelFiles.push({ role: 'weights', path: state.resolvedWeightsPath });
+        state.buildLog.push(`${state.resolvedWeightsFilename}: using local file`);
         renderBuildLog();
       }
-    } else if (state.modelSource === 'ollama') {
-      // Ollama model - use the blob path directly
-      if (state.selectedOllamaModel) {
-        modelFiles.push({ role: 'weights', path: state.selectedOllamaModel.weightsPath });
-        state.buildLog.push(`${state.selectedOllamaModel.displayName}: using Ollama cache`);
+      if (state.resolvedMmprojPath) {
+        modelFiles.push({ role: 'mmproj', path: state.resolvedMmprojPath });
+        state.buildLog.push(`${state.resolvedMmprojFilename}: using local file`);
         renderBuildLog();
-      }
-    } else if (state.modelSource === 'lmstudio') {
-      // LM Studio model - use the file paths directly
-      if (state.selectedLMStudioModel) {
-        const model = state.selectedLMStudioModel;
-
-        // Get weights file
-        const weightsFiles = model.files.filter(f => f.role === 'weights');
-        const weightsIdx = state.lmstudioFileSelections?.weights || 0;
-        const weightsFile = weightsFiles[weightsIdx];
-        if (weightsFile) {
-          modelFiles.push({ role: 'weights', path: weightsFile.path });
-          state.buildLog.push(`${weightsFile.filename}: using LM Studio cache`);
-          renderBuildLog();
-        }
-
-        // Get mmproj file if present
-        const mmprojFiles = model.files.filter(f => f.role === 'mmproj');
-        if (mmprojFiles.length > 0) {
-          const mmprojIdx = state.lmstudioFileSelections?.mmproj || 0;
-          const mmprojFile = mmprojFiles[mmprojIdx];
-          if (mmprojFile) {
-            modelFiles.push({ role: 'mmproj', path: mmprojFile.path });
-            state.buildLog.push(`${mmprojFile.filename}: using LM Studio cache`);
-            renderBuildLog();
-          }
-        }
       }
     }
 
@@ -3081,42 +3034,8 @@ function getFileName(path) {
 }
 
 function getSelectedGgufFilename() {
-  // Get GGUF filename from current model selection
-  if (state.modelSource === 'custom' && state.customModelFiles.length > 0) {
-    const weightsFile = state.customModelFiles.find(f => f.role === 'weights');
-    if (weightsFile?.path) {
-      return weightsFile.path.split('/').pop();
-    }
-  }
-
-  if (state.modelSource === 'ollama' && state.selectedOllamaModel) {
-    // Ollama models don't have GGUF filenames - return null (output path uses model_name_tag)
-    return null;
-  }
-
-  if (state.modelSource === 'lmstudio' && state.selectedLMStudioModel) {
-    // Return the selected weights filename
-    const weightsFiles = state.selectedLMStudioModel.files.filter(f => f.role === 'weights');
-    if (weightsFiles.length > 0) {
-      const idx = state.lmstudioFileSelections?.weights || 0;
-      return weightsFiles[idx]?.filename || null;
-    }
-    return null;
-  }
-
-  if (state.selectedModel && state.modelFileSelections) {
-    const sel = state.modelFileSelections['weights'];
-    if (sel?.source === 'custom' && sel.customPath) {
-      return sel.customPath.split('/').pop();
-    }
-    const weightsFile = state.selectedModel.files?.find(f => f.role === 'weights');
-    const quant = weightsFile?.quantizations[sel?.quantizationIdx || 0];
-    if (quant?.download_url) {
-      return getFilenameFromUrl(quant.download_url);
-    }
-  }
-
-  return null;
+  // Use resolved filename from backend
+  return state.resolvedWeightsFilename || null;
 }
 
 function getFilenameFromUrl(url) {
