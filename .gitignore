@@ -5,7 +5,6 @@ Cargo.lock
 
 # Tauri
 /src-tauri/WixTools/
-/src-tauri/icons/
 
 # Node (if using for dev tooling)
 node_modules/
