@@ -74,6 +74,9 @@ parts:
     override-build: |
       set -eux
       
+      # Install Tauri CLI
+      cargo install tauri-cli --version ^2.0.0 --locked
+      
       # Build the Tauri application
       cargo tauri build --bundles deb
       
