@@ -325,3 +325,24 @@ pub struct OllamaModel {
     pub weights_path: String,   // Full path to blob file
     pub size_bytes: u64,        // File size
 }
+
+/// A GGUF file within an LM Studio model directory
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LMStudioFile {
+    pub filename: String,       // e.g., "model-Q4_K_M.gguf"
+    pub path: String,           // Full path to GGUF file
+    pub size_bytes: u64,        // File size
+    pub role: String,           // "weights" or "mmproj" (inferred from filename)
+}
+
+/// An LM Studio model discovered from local cache
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LMStudioModel {
+    pub dir_name: String,       // Directory name (e.g., "Qwen2.5-7B-Instruct-GGUF")
+    pub display_name: String,   // Display name (same as dir_name, cleaned up)
+    pub dir_path: String,       // Full path to model directory
+    pub files: Vec<LMStudioFile>, // GGUF files in the directory
+    pub total_size_bytes: u64,  // Total size of all files
+}

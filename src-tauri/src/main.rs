@@ -79,9 +79,16 @@ fn main() {
             commands::set_config_value,
             commands::set_output_path,
             // Ollama commands
+            commands::get_default_ollama_cache_dir,
             commands::check_ollama_available,
             commands::get_ollama_models,
             commands::select_ollama_model,
+            // LM Studio commands
+            commands::get_default_lmstudio_cache_dir,
+            commands::check_lmstudio_available,
+            commands::get_lmstudio_models,
+            commands::select_lmstudio_model,
+            commands::select_lmstudio_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

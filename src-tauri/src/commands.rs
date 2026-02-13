@@ -847,15 +847,31 @@ pub async fn set_output_path(
 // Ollama Model Commands
 // ============================================================================
 
-/// Get the Ollama models directory path
-fn get_ollama_models_dir() -> Option<std::path::PathBuf> {
-    dirs::home_dir().map(|home| home.join(".ollama").join("models"))
+/// Get the default Ollama models directory path
+fn get_default_ollama_dir() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|home| home.join(".ollama"))
+}
+
+/// Get the Ollama models directory path, using custom_dir if provided
+fn get_ollama_models_dir(custom_dir: Option<&str>) -> Option<std::path::PathBuf> {
+    match custom_dir {
+        Some(dir) if !dir.is_empty() => Some(std::path::PathBuf::from(dir).join("models")),
+        _ => get_default_ollama_dir().map(|d| d.join("models")),
+    }
+}
+
+/// Get the default Ollama cache directory path
+#[tauri::command]
+pub async fn get_default_ollama_cache_dir() -> Result<String, String> {
+    get_default_ollama_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .ok_or_else(|| "Could not determine home directory".to_string())
 }
 
 /// Check if Ollama models directory exists and has models
-#[tauri::command]
-pub async fn check_ollama_available() -> Result<bool, String> {
-    let models_dir = match get_ollama_models_dir() {
+#[tauri::command(rename_all = "camelCase")]
+pub async fn check_ollama_available(custom_dir: Option<String>) -> Result<bool, String> {
+    let models_dir = match get_ollama_models_dir(custom_dir.as_deref()) {
         Some(dir) => dir,
         None => return Ok(false),
     };
@@ -902,10 +918,10 @@ struct OllamaManifest {
     layers: Vec<OllamaManifestLayer>,
 }
 
-/// Scan ~/.ollama/models/ and return discovered models
-#[tauri::command]
-pub async fn get_ollama_models() -> Result<Vec<OllamaModel>, String> {
-    let models_dir = match get_ollama_models_dir() {
+/// Scan Ollama models directory and return discovered models
+#[tauri::command(rename_all = "camelCase")]
+pub async fn get_ollama_models(custom_dir: Option<String>) -> Result<Vec<OllamaModel>, String> {
+    let models_dir = match get_ollama_models_dir(custom_dir.as_deref()) {
         Some(dir) => dir,
         None => return Ok(vec![]),
     };
@@ -1018,10 +1034,11 @@ pub async fn get_ollama_models() -> Result<Vec<OllamaModel>, String> {
 pub async fn select_ollama_model(
     model_name: String,
     tag: String,
+    custom_dir: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<BuildState, String> {
     // Get all Ollama models and find the matching one
-    let models = get_ollama_models().await?;
+    let models = get_ollama_models(custom_dir).await?;
 
     let ollama_model = models
         .into_iter()
@@ -1029,4 +1046,211 @@ pub async fn select_ollama_model(
         .ok_or_else(|| format!("Ollama model {}:{} not found", model_name, tag))?;
 
     Ok(state.build_state.select_ollama_model(ollama_model))
+}
+
+// ============================================================================
+// LM Studio Model Commands
+// ============================================================================
+
+/// Get the default LM Studio models directory path
+fn get_default_lmstudio_dir() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|home| home.join(".cache").join("lm-studio"))
+}
+
+/// Get the LM Studio models directory path, using custom_dir if provided
+fn get_lmstudio_models_dir(custom_dir: Option<&str>) -> Option<std::path::PathBuf> {
+    match custom_dir {
+        Some(dir) if !dir.is_empty() => {
+            Some(std::path::PathBuf::from(dir).join("models").join("lmstudio-community"))
+        }
+        _ => get_default_lmstudio_dir().map(|d| d.join("models").join("lmstudio-community")),
+    }
+}
+
+/// Get the default LM Studio cache directory path
+#[tauri::command]
+pub async fn get_default_lmstudio_cache_dir() -> Result<String, String> {
+    get_default_lmstudio_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .ok_or_else(|| "Could not determine home directory".to_string())
+}
+
+/// Check if LM Studio models directory exists and has models
+#[tauri::command(rename_all = "camelCase")]
+pub async fn check_lmstudio_available(custom_dir: Option<String>) -> Result<bool, String> {
+    let models_dir = match get_lmstudio_models_dir(custom_dir.as_deref()) {
+        Some(dir) => dir,
+        None => return Ok(false),
+    };
+
+    if !models_dir.exists() {
+        return Ok(false);
+    }
+
+    // Check if there's at least one model directory with GGUF files
+    match std::fs::read_dir(&models_dir) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                if entry.path().is_dir() {
+                    // Check if this model dir has any GGUF files
+                    if let Ok(files) = std::fs::read_dir(entry.path()) {
+                        for file in files.flatten() {
+                            let path = file.path();
+                            if path.is_file() {
+                                if let Some(ext) = path.extension() {
+                                    if ext.to_string_lossy().to_lowercase() == "gguf" {
+                                        return Ok(true);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(false)
+        }
+        Err(_) => Ok(false),
+    }
+}
+
+/// Infer the role of a GGUF file from its filename
+fn infer_gguf_role(filename: &str) -> String {
+    let lower = filename.to_lowercase();
+    if lower.contains("mmproj") || lower.contains("clip") || lower.contains("vision") {
+        "mmproj".to_string()
+    } else {
+        "weights".to_string()
+    }
+}
+
+/// Scan LM Studio models directory and return discovered models
+#[tauri::command(rename_all = "camelCase")]
+pub async fn get_lmstudio_models(custom_dir: Option<String>) -> Result<Vec<LMStudioModel>, String> {
+    let models_dir = match get_lmstudio_models_dir(custom_dir.as_deref()) {
+        Some(dir) => dir,
+        None => return Ok(vec![]),
+    };
+
+    if !models_dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut lmstudio_models = Vec::new();
+
+    // Iterate over model directories
+    let model_dirs = match std::fs::read_dir(&models_dir) {
+        Ok(dirs) => dirs,
+        Err(_) => return Ok(vec![]),
+    };
+
+    for model_entry in model_dirs.flatten() {
+        let model_path = model_entry.path();
+        if !model_path.is_dir() {
+            continue;
+        }
+
+        let dir_name = match model_path.file_name().and_then(|n| n.to_str()) {
+            Some(name) => name.to_string(),
+            None => continue,
+        };
+
+        // Scan for GGUF files in this directory
+        let mut files = Vec::new();
+        let mut total_size: u64 = 0;
+
+        let file_entries = match std::fs::read_dir(&model_path) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
+        for file_entry in file_entries.flatten() {
+            let file_path = file_entry.path();
+            if !file_path.is_file() {
+                continue;
+            }
+
+            // Check if it's a GGUF file
+            let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if ext.to_lowercase() != "gguf" {
+                continue;
+            }
+
+            let filename = match file_path.file_name().and_then(|n| n.to_str()) {
+                Some(name) => name.to_string(),
+                None => continue,
+            };
+
+            let size_bytes = match std::fs::metadata(&file_path) {
+                Ok(meta) => meta.len(),
+                Err(_) => continue,
+            };
+
+            let role = infer_gguf_role(&filename);
+            total_size += size_bytes;
+
+            files.push(LMStudioFile {
+                filename,
+                path: file_path.to_string_lossy().to_string(),
+                size_bytes,
+                role,
+            });
+        }
+
+        // Only add model if it has at least one GGUF file
+        if files.is_empty() {
+            continue;
+        }
+
+        // Sort files: weights first, then by filename
+        files.sort_by(|a, b| {
+            if a.role == "weights" && b.role != "weights" {
+                std::cmp::Ordering::Less
+            } else if a.role != "weights" && b.role == "weights" {
+                std::cmp::Ordering::Greater
+            } else {
+                a.filename.cmp(&b.filename)
+            }
+        });
+
+        lmstudio_models.push(LMStudioModel {
+            dir_name: dir_name.clone(),
+            display_name: dir_name,
+            dir_path: model_path.to_string_lossy().to_string(),
+            files,
+            total_size_bytes: total_size,
+        });
+    }
+
+    // Sort by display name
+    lmstudio_models.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+
+    Ok(lmstudio_models)
+}
+
+/// Select an LM Studio model
+#[tauri::command(rename_all = "camelCase")]
+pub async fn select_lmstudio_model(
+    dir_name: String,
+    custom_dir: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<BuildState, String> {
+    // Get all LM Studio models and find the matching one
+    let models = get_lmstudio_models(custom_dir).await?;
+
+    let lmstudio_model = models
+        .into_iter()
+        .find(|m| m.dir_name == dir_name)
+        .ok_or_else(|| format!("LM Studio model {} not found", dir_name))?;
+
+    Ok(state.build_state.select_lmstudio_model(lmstudio_model))
+}
+
+/// Select a file within an LM Studio model
+#[tauri::command]
+pub async fn select_lmstudio_file(
+    role: String,
+    idx: usize,
+    state: State<'_, AppState>,
+) -> Result<BuildState, String> {
+    Ok(state.build_state.select_lmstudio_file(role, idx))
 }

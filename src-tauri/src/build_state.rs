@@ -9,6 +9,7 @@ pub enum ModelSource {
     Registry,
     Custom,
     Ollama,
+    LMStudio,
 }
 
 /// Source of a specific file (within a registry model)
@@ -56,6 +57,10 @@ pub struct BuildState {
     pub custom_model_files: Vec<CustomFile>,
     /// Selected Ollama model (when model_source is Ollama)
     pub selected_ollama_model: Option<crate::models::OllamaModel>,
+    /// Selected LM Studio model (when model_source is LMStudio)
+    pub selected_lmstudio_model: Option<crate::models::LMStudioModel>,
+    /// Selected file indices for LM Studio model (keyed by role: "weights", "mmproj")
+    pub lmstudio_file_selections: HashMap<String, usize>,
 
     // Llamafile selection
     pub llamafile_source: LlamafileSource,
@@ -81,6 +86,8 @@ impl Default for BuildState {
             model_file_selections: HashMap::new(),
             custom_model_files: Vec::new(),
             selected_ollama_model: None,
+            selected_lmstudio_model: None,
+            lmstudio_file_selections: HashMap::new(),
             llamafile_source: LlamafileSource::Registry,
             selected_version_group: None,
             selected_release_version: None,
@@ -106,6 +113,18 @@ impl BuildState {
             ModelSource::Ollama => {
                 // In Ollama mode, return None (we use model_name_tag for output)
                 None
+            }
+            ModelSource::LMStudio => {
+                // In LM Studio mode, return the selected weights filename
+                if let Some(ref model) = self.selected_lmstudio_model {
+                    let weights_idx = self.lmstudio_file_selections.get("weights").copied().unwrap_or(0);
+                    model.files.iter()
+                        .filter(|f| f.role == "weights")
+                        .nth(weights_idx)
+                        .map(|f| f.filename.clone())
+                } else {
+                    None
+                }
             }
             ModelSource::Registry => {
                 // In registry mode, check for custom path first, then registry
@@ -134,6 +153,10 @@ impl BuildState {
             ModelSource::Ollama => {
                 // For Ollama, return the display name (model_name:tag)
                 self.selected_ollama_model.as_ref().map(|m| m.display_name.clone())
+            }
+            ModelSource::LMStudio => {
+                // For LM Studio, return the display name
+                self.selected_lmstudio_model.as_ref().map(|m| m.display_name.clone())
             }
             ModelSource::Registry => {
                 let model_id = self.selected_model_id.as_ref()?;
@@ -238,6 +261,8 @@ impl BuildStateManager {
             state.selected_model_id = Some(model_id);
             state.custom_model_files.clear();
             state.selected_ollama_model = None;
+            state.selected_lmstudio_model = None;
+            state.lmstudio_file_selections.clear();
             state.init_file_selections(model);
             state.update_output_path(&models);
         }
@@ -253,6 +278,8 @@ impl BuildStateManager {
         state.selected_model_id = None;
         state.model_file_selections.clear();
         state.selected_ollama_model = None;
+        state.selected_lmstudio_model = None;
+        state.lmstudio_file_selections.clear();
         state.custom_model_files = vec![CustomFile {
             role: "weights".to_string(),
             path,
@@ -271,7 +298,50 @@ impl BuildStateManager {
         state.model_file_selections.clear();
         state.custom_model_files.clear();
         state.selected_ollama_model = Some(ollama_model);
+        state.selected_lmstudio_model = None;
+        state.lmstudio_file_selections.clear();
         state.update_output_path(&models);
+
+        state.clone()
+    }
+
+    pub fn select_lmstudio_model(&self, lmstudio_model: crate::models::LMStudioModel) -> BuildState {
+        let models = self.models.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
+
+        // Initialize file selections - select first file of each role
+        // Note: indices are within the filtered array for each role, not the full files array
+        state.lmstudio_file_selections.clear();
+        let has_weights = lmstudio_model.files.iter().any(|f| f.role == "weights");
+        let has_mmproj = lmstudio_model.files.iter().any(|f| f.role == "mmproj");
+        if has_weights {
+            state.lmstudio_file_selections.insert("weights".to_string(), 0);
+        }
+        if has_mmproj {
+            state.lmstudio_file_selections.insert("mmproj".to_string(), 0);
+        }
+
+        state.model_source = ModelSource::LMStudio;
+        state.selected_model_id = None;
+        state.model_file_selections.clear();
+        state.custom_model_files.clear();
+        state.selected_ollama_model = None;
+        state.selected_lmstudio_model = Some(lmstudio_model);
+        state.update_output_path(&models);
+
+        state.clone()
+    }
+
+    pub fn select_lmstudio_file(&self, role: String, idx: usize) -> BuildState {
+        let models = self.models.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
+
+        state.lmstudio_file_selections.insert(role.clone(), idx);
+
+        // Update output path if weights changed
+        if role == "weights" {
+            state.update_output_path(&models);
+        }
 
         state.clone()
     }
