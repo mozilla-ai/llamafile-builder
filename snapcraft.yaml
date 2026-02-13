@@ -15,7 +15,7 @@ description: |
 
 license: MIT
 grade: devel
-confinement: strict
+confinement: classic
 base: core24
 
 platforms:
@@ -26,18 +26,7 @@ platforms:
 apps:
   llamafile-builder:
     command: bin/llamafile-builder
-    extensions: [gnome]
-    plugs:
-      - home
-      - network
-      - removable-media
-      - desktop
-      - desktop-legacy
-      - wayland
-      - x11
-      - opengl
-    environment:
-      WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+    # Classic confinement - no plugs needed, full system access
 
 parts:
   llamafile-builder:
@@ -70,6 +59,14 @@ parts:
       - libpango-1.0-0
       - libcairo2
       - libsoup-3.0-0
+      # NEW: Additional GTK/WebKit dependencies
+      - libglib2.0-0
+      - libgobject-2.0-0
+      - libgio-2.0-0
+      - dbus-x11
+      - libdbus-1-3
+      # Fix canberra-gtk-module warnings
+      - libcanberra-gtk3-module
     
     override-build: |
       set -eux
@@ -83,6 +80,10 @@ parts:
       # Install the main binary
       install -Dm755 src-tauri/target/release/llamafile-builder \
         $SNAPCRAFT_PART_INSTALL/bin/llamafile-builder
+      
+      # Install zipalign binary
+      install -Dm755 src-tauri/bin/zipalign \
+        $SNAPCRAFT_PART_INSTALL/bin/zipalign
       
       # Find and install desktop file from Tauri's deb bundle
       DESKTOP_FILE=$(find src-tauri/target/release/bundle/deb -name "*.desktop" 2>/dev/null | head -n1)

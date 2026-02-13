@@ -22,32 +22,13 @@ const state = {
   models: [],
   filteredModels: [],
   selectedModel: null,
-  modelSource: 'registry',       // 'registry', 'custom', or 'ollama'
+  modelSource: 'registry',       // 'registry' or 'custom'
   modelFileSelections: {},        // keyed by file role: { source, quantizationIdx, customPath }
   expandedModelFiles: {},         // keyed by file role: bool
   modelDownloadDir: '',
   customModelFiles: [],           // array of { role, path }
   searchQuery: '',
   activeFilter: 'all',
-  // Ollama model support
-  ollamaAvailable: false,         // Whether ~/.ollama exists with models
-  ollamaModels: [],               // Array of OllamaModel objects from backend
-  selectedOllamaModel: null,      // Currently selected Ollama model
-  ollamaCacheDir: '',             // Custom Ollama cache directory (default: ~/.ollama)
-
-  // LM Studio model support
-  lmstudioAvailable: false,       // Whether LM Studio cache exists with models
-  lmstudioModels: [],             // Array of LMStudioModel objects from backend
-  selectedLMStudioModel: null,    // Currently selected LM Studio model
-  lmstudioFileSelections: {},     // File selections keyed by role: { weights: idx, mmproj: idx }
-  lmstudioCacheDir: '',           // Custom LM Studio cache directory
-  expandedLMStudioFiles: {},      // UI state for expanded file lists
-
-  // Resolved model file paths (computed by backend)
-  resolvedWeightsPath: null,      // Full path to selected weights file
-  resolvedWeightsFilename: null,  // Just the filename
-  resolvedMmprojPath: null,       // Full path to selected mmproj file (if any)
-  resolvedMmprojFilename: null,   // Just the filename
 
   // Step 3: Configuration (schema-driven)
   configSchema: [],
@@ -202,26 +183,6 @@ const invoke = window.__TAURI__?.core?.invoke || (async (cmd, args) => {
       return getMockBuildState();
     case 'set_output_path':
       return { ...getMockBuildState(), outputPath: args?.path };
-    // Ollama commands
-    case 'get_default_ollama_cache_dir':
-      return '~/.ollama';
-    case 'check_ollama_available':
-      return false; // Mock: Ollama not available in browser dev
-    case 'get_ollama_models':
-      return []; // Mock: no Ollama models in browser dev
-    case 'select_ollama_model':
-      return { ...getMockBuildState(), modelSource: 'ollama', selectedOllamaModel: { modelName: args?.modelName, tag: args?.tag, displayName: `${args?.modelName}:${args?.tag}`, weightsPath: '/mock/ollama/blob', sizeBytes: 0 }, outputPath: `/mock/Desktop/${args?.modelName}_${args?.tag}.llamafile` };
-    // LM Studio commands
-    case 'get_default_lmstudio_cache_dir':
-      return '~/.cache/lm-studio';
-    case 'check_lmstudio_available':
-      return false; // Mock: LM Studio not available in browser dev
-    case 'get_lmstudio_models':
-      return []; // Mock: no LM Studio models in browser dev
-    case 'select_lmstudio_model':
-      return { ...getMockBuildState(), modelSource: 'lmstudio', selectedLmstudioModel: { dirName: args?.dirName, displayName: args?.dirName, files: [] }, lmstudioFileSelections: {}, outputPath: `/mock/Desktop/${args?.dirName}.llamafile` };
-    case 'select_lmstudio_file':
-      return getMockBuildState();
     default:
       return null;
   }
@@ -233,9 +194,6 @@ function getMockBuildState() {
     selectedModelId: null,
     modelFileSelections: {},
     customModelFiles: [],
-    selectedOllamaModel: null,
-    selectedLmstudioModel: null,
-    lmstudioFileSelections: {},
     llamafileSource: 'registry',
     selectedVersionGroup: null,
     selectedReleaseVersion: null,
@@ -243,10 +201,6 @@ function getMockBuildState() {
     configValues: { context_length: 4096 },
     outputPath: '/mock/Desktop/output.llamafile',
     resolvedLlamafilePath: null,
-    resolvedWeightsPath: null,
-    resolvedWeightsFilename: null,
-    resolvedMmprojPath: null,
-    resolvedMmprojFilename: null,
   };
 }
 
@@ -259,14 +213,11 @@ function syncFromBuildState(buildState) {
   state.modelSource = buildState.modelSource;
   state.modelFileSelections = buildState.modelFileSelections || {};
   state.customModelFiles = buildState.customModelFiles || [];
-  state.selectedOllamaModel = buildState.selectedOllamaModel || null;
-  state.selectedLMStudioModel = buildState.selectedLmstudioModel || null;
-  state.lmstudioFileSelections = buildState.lmstudioFileSelections || {};
 
   // If model source is registry and we have a model ID, find the model
   if (buildState.modelSource === 'registry' && buildState.selectedModelId) {
     state.selectedModel = state.models.find(m => m.id === buildState.selectedModelId) || null;
-  } else if (buildState.modelSource === 'custom' || buildState.modelSource === 'ollama' || buildState.modelSource === 'lmstudio') {
+  } else if (buildState.modelSource === 'custom') {
     state.selectedModel = null;
   }
 
@@ -292,12 +243,6 @@ function syncFromBuildState(buildState) {
   }
   // Output path
   state.outputPath = buildState.outputPath || state.outputPath || '';
-
-  // Resolved model file paths (computed by backend)
-  state.resolvedWeightsPath = buildState.resolvedWeightsPath || null;
-  state.resolvedWeightsFilename = buildState.resolvedWeightsFilename || null;
-  state.resolvedMmprojPath = buildState.resolvedMmprojPath || null;
-  state.resolvedMmprojFilename = buildState.resolvedMmprojFilename || null;
 }
 
 const listen = window.__TAURI__?.event?.listen || ((event, callback) => {
@@ -387,38 +332,6 @@ async function init() {
       state.modelDownloadDir = '~/.llamafile/models';
     }
 
-    // Check for Ollama models
-    try {
-      state.ollamaCacheDir = await invoke('get_default_ollama_cache_dir');
-      state.ollamaAvailable = await invoke('check_ollama_available', { customDir: null });
-      console.log('Ollama available:', state.ollamaAvailable, 'at', state.ollamaCacheDir);
-      if (state.ollamaAvailable) {
-        state.ollamaModels = await invoke('get_ollama_models', { customDir: null });
-        console.log('Found Ollama models:', state.ollamaModels.length, state.ollamaModels);
-      }
-    } catch (e) {
-      console.log('Ollama check failed (expected in browser dev):', e);
-      state.ollamaAvailable = false;
-      state.ollamaModels = [];
-      state.ollamaCacheDir = '~/.ollama';
-    }
-
-    // Check for LM Studio models
-    try {
-      state.lmstudioCacheDir = await invoke('get_default_lmstudio_cache_dir');
-      state.lmstudioAvailable = await invoke('check_lmstudio_available', { customDir: null });
-      console.log('LM Studio available:', state.lmstudioAvailable, 'at', state.lmstudioCacheDir);
-      if (state.lmstudioAvailable) {
-        state.lmstudioModels = await invoke('get_lmstudio_models', { customDir: null });
-        console.log('Found LM Studio models:', state.lmstudioModels.length, state.lmstudioModels);
-      }
-    } catch (e) {
-      console.log('LM Studio check failed (expected in browser dev):', e);
-      state.lmstudioAvailable = false;
-      state.lmstudioModels = [];
-      state.lmstudioCacheDir = '~/.cache/lm-studio';
-    }
-
     // Load config schema and initialize defaults
     state.configSchema = await invoke('get_config_schema');
     state.configValues = {};
@@ -499,6 +412,12 @@ async function init() {
     }
   });
 
+  // Event delegation system - handles all clicks via data-action attributes
+  document.addEventListener('click', handleGlobalClick, true);
+  document.addEventListener('input', handleGlobalInput, false);
+  document.addEventListener('change', handleGlobalChange, false);
+  document.addEventListener('keydown', handleGlobalKeydown, false);
+
   renderSidebar();
   renderCurrentStep();
 }
@@ -520,7 +439,7 @@ function renderSidebar() {
     if (isDisabled) classes += ' disabled';
 
     return `
-      <li class="${classes}" data-step="${step.id}" onclick="goToStep(${step.id})">
+      <li class="${classes}" data-action="goToStep" data-step="${step.id}">
         <div class="step-num">${isCompleted ? '\u2713' : step.icon}</div>
         ${step.name}
       </li>
@@ -701,7 +620,7 @@ function renderVersionStep() {
           return `
             <div class="version-group ${isGroupSelected ? 'selected' : ''}">
               <div class="selection-card ${isGroupSelected ? 'selected' : ''}"
-                   onclick="selectVersionGroup('${g.name}')">
+                   data-action="selectVersionGroup" data-group-name="${g.name}">
                 <div class="radio-dot"></div>
                 <div class="card-icon" style="${iconBg(g.tag)}">
                   <span style="font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 700;">${shortVersion}</span>
@@ -711,10 +630,12 @@ function renderVersionStep() {
                   <div class="card-desc">${g.description ? renderSimpleMarkdown(g.description) : ''}</div>
                 </div>
                 <div class="card-badge ${badgeClass(g.tag)}">${g.tag}</div>
-                <div class="expand-toggle" onclick="event.stopPropagation(); toggleVersionGroup('${g.name}')">
-                  <span class="expand-icon ${isExpanded ? 'expanded' : ''}">&#9654;</span>
-                  ${hasMultiple ? `<span class="expand-count">${g.releases.length}</span>` : ''}
-                </div>
+                ${hasMultiple ? `
+                  <div class="expand-toggle" data-action="toggleVersionGroup" data-group-name="${g.name}" data-stop-propagation="true">
+                    <span class="expand-icon ${isExpanded ? 'expanded' : ''}">&#9654;</span>
+                    <span class="expand-count">${g.releases.length}</span>
+                  </div>
+                ` : ''}
               </div>
               ${isExpanded ? `
                 <div class="version-releases">
@@ -722,7 +643,7 @@ function renderVersionStep() {
                     const isSelected = state.selectedRelease?.version === r.version;
                     return `
                       <div class="release-row ${isSelected ? 'selected' : ''}"
-                           onclick="selectSpecificRelease('${g.name}', '${r.version}')">
+                           data-action="selectSpecificRelease" data-group-name="${g.name}" data-version="${r.version}">
                         <div class="release-radio"></div>
                         <div class="release-info">
                           <span class="release-version">${r.version}</span>
@@ -741,7 +662,7 @@ function renderVersionStep() {
         <div class="version-divider"><span>or</span></div>
 
         <div class="custom-llamafile-card ${state.llamafileSource === 'custom' ? 'active' : ''}"
-             onclick="${state.llamafileSource === 'custom' ? '' : 'selectCustomLlamafile()'}">
+             ${state.llamafileSource === 'custom' ? '' : 'data-action="selectCustomLlamafile"'}>
           <div class="card-icon" style="background: var(--bg-card-active); font-size: 18px;">\ud83d\udcc2</div>
           <div class="card-info">
             <div class="card-title">Load from disk</div>
@@ -752,8 +673,8 @@ function renderVersionStep() {
             `}
           </div>
           ${state.llamafileSource === 'custom' ? `
-            <button class="custom-clear-btn" onclick="event.stopPropagation(); selectCustomLlamafile()">Change</button>
-            <button class="custom-clear-btn" onclick="event.stopPropagation(); clearCustomLlamafile()">Clear</button>
+            <button class="custom-clear-btn" data-action="selectCustomLlamafile" data-stop-propagation="true">Change</button>
+            <button class="custom-clear-btn" data-action="clearCustomLlamafile" data-stop-propagation="true">Clear</button>
           ` : `
             <div class="card-meta" style="color: var(--text-secondary);">Browse&hellip;</div>
           `}
@@ -761,7 +682,7 @@ function renderVersionStep() {
       </div>
       <div class="footer">
         <div></div>
-        <button class="btn btn-primary" onclick="nextStep()">Next &rarr;</button>
+        <button class="btn btn-primary" data-action="nextStep">Next &rarr;</button>
       </div>
     </div>
   `;
@@ -898,7 +819,7 @@ function initModelFileSelections(model) {
 
 function renderModelStep() {
   const chips = getModelFilterChips();
-  const isRegistryMode = state.modelSource === 'registry';
+  const isCustomMode = state.modelSource === 'custom';
 
   return `
     <div class="step-panel active">
@@ -910,27 +831,23 @@ function renderModelStep() {
         <div class="search-bar">
           <span class="search-icon">\ud83d\udd0d</span>
           <input type="text" class="search-input" placeholder="Search models\u2026"
-                 value="${state.searchQuery}" oninput="searchModels(this.value)">
+                 value="${state.searchQuery}" data-action="searchModels">
         </div>
 
         <div class="filter-row">
           ${chips.map(c => `
             <div class="filter-chip ${state.activeFilter === c.value ? 'active' : ''}"
-                 onclick="filterModels('${c.value}')">${c.label}</div>
+                 data-action="filterModels" data-filter="${c.value}">${c.label}</div>
           `).join('')}
         </div>
 
-        <div class="download-dir-row" style="flex-wrap: wrap; gap: 4px;">
-          <span style="color: var(--text-secondary); font-size: 12px; margin-right: 4px;">Download models in:</span>
-          <input type="text" class="path-input" value="${state.modelDownloadDir}"
-                 onchange="updateModelDownloadDir(this.value)"
-                 onclick="event.stopPropagation()"
-                 style="flex: 1; min-width: 150px; padding: 4px 8px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
-          <button class="download-dir-btn" onclick="event.stopPropagation(); selectDownloadDir()" title="Browse...">📂</button>
+        <div class="download-dir-row">
+          <span class="download-dir-path" title="${state.modelDownloadDir}">Download model files in: ${state.modelDownloadDir}</span>
+          <button class="download-dir-btn" data-action="selectDownloadDir" data-stop-propagation="true">\ud83d\udcc2</button>
         </div>
 
         ${state.filteredModels.map(m => {
-          const isSelected = isRegistryMode && state.selectedModel?.id === m.id;
+          const isSelected = !isCustomMode && state.selectedModel?.id === m.id;
           const weightsFile = m.files.find(f => f.role === 'weights');
           const firstQuant = weightsFile?.quantizations[0];
           const totalSize = getTotalModelSizeForModel(m);
@@ -938,11 +855,11 @@ function renderModelStep() {
           return `
             <div class="model-card-wrapper">
               <div class="selection-card ${isSelected ? 'selected' : ''}"
-                   onclick="selectModel('${m.id}')">
+                   data-action="selectModel" data-model-id="${m.id}">
                 <div class="radio-dot"></div>
                 <div class="card-info">
                   <div class="card-title">${m.huggingface_url
-                    ? `<a href="${m.huggingface_url}" class="model-link" onclick="openExternalLink(event, '${m.huggingface_url}')">${m.name}</a>`
+                    ? `<a href="${m.huggingface_url}" class="model-link" data-action="openExternalLink" data-url="${m.huggingface_url}" data-stop-propagation="true">${m.name}</a>`
                     : m.name
                   }</div>
                   <div class="model-detail">
@@ -962,16 +879,6 @@ function renderModelStep() {
         <div class="version-divider"><span>or</span></div>
 
         ${renderCustomModelCard()}
-
-        ${(state.ollamaAvailable || state.modelSource === 'ollama') ? `
-        <div class="version-divider"><span>or</span></div>
-        ${renderOllamaModelCard()}
-        ` : ''}
-
-        ${(state.lmstudioAvailable || state.modelSource === 'lmstudio') ? `
-        <div class="version-divider"><span>or</span></div>
-        ${renderLMStudioModelCard()}
-        ` : ''}
 
         ${state.shaVerifyProgress ? `
           <div class="hf-token-modal">
@@ -994,7 +901,7 @@ function renderModelStep() {
                 <span style="color: var(--green)">File will be used as ${state.shaVerifyPrompt.quantName} quantization.</span>
               </div>
               <div class="hf-token-buttons" style="margin-top: 16px;">
-                <button class="btn btn-primary" onclick="handleShaVerifyChoice('ok')">OK</button>
+                <button class="btn btn-primary" data-action="handleShaVerifyChoice" data-choice="ok">OK</button>
               </div>
             </div>
           </div>
@@ -1010,9 +917,9 @@ function renderModelStep() {
                 Would you like to verify your file matches?
               </div>
               <div class="hf-token-buttons" style="margin-top: 16px;">
-                <button class="btn btn-primary" onclick="handleShaVerifyChoice('verify')">Verify SHA256</button>
-                <button class="btn btn-secondary" onclick="handleShaVerifyChoice('skip')">Skip (use as custom)</button>
-                <button class="btn btn-secondary" onclick="handleShaVerifyChoice('cancel')" style="margin-left: auto;">Cancel</button>
+                <button class="btn btn-primary" data-action="handleShaVerifyChoice" data-choice="verify">Verify SHA256</button>
+                <button class="btn btn-secondary" data-action="handleShaVerifyChoice" data-choice="skip">Skip (use as custom)</button>
+                <button class="btn btn-secondary" data-action="handleShaVerifyChoice" data-choice="cancel" style="margin-left: auto;">Cancel</button>
               </div>
             </div>
           </div>
@@ -1031,15 +938,15 @@ function renderModelStep() {
                 <span style="color: var(--accent)">This file will be used as a custom model instead.</span>
               </div>
               <div class="hf-token-buttons" style="margin-top: 16px;">
-                <button class="btn btn-primary" onclick="handleShaVerifyChoice('use_custom')">OK, Use as Custom</button>
+                <button class="btn btn-primary" data-action="handleShaVerifyChoice" data-choice="use_custom">OK, Use as Custom</button>
               </div>
             </div>
           </div>
         ` : ''}
       </div>
       <div class="footer">
-        <button class="btn btn-secondary" onclick="prevStep()">\u2190 Back</button>
-        <button class="btn btn-primary" onclick="nextStep()" ${!isModelStepValid() ? 'disabled' : ''}>Next \u2192</button>
+        <button class="btn btn-secondary" data-action="prevStep">\u2190 Back</button>
+        <button class="btn btn-primary" data-action="nextStep" ${!isModelStepValid() ? 'disabled' : ''}>Next \u2192</button>
       </div>
     </div>
   `;
@@ -1066,15 +973,15 @@ function renderModelFileConfig(model) {
                 <span class="quant-badge">${currentQuant.name}</span>
                 <span class="file-size-label">${formatBytes(currentQuant.size_bytes)}</span>
                 ${hasMultipleQuants ? `
-                  <div class="expand-toggle" onclick="event.stopPropagation(); toggleModelFileExpand('${f.role}')">
+                  <div class="expand-toggle" data-action="toggleModelFileExpand" data-role="${f.role}" data-stop-propagation="true">
                     <span class="expand-icon ${isExpanded ? 'expanded' : ''}">\u25b6</span>
                     <span class="expand-count">${f.quantizations.length}</span>
                   </div>
                 ` : ''}
-                <button class="file-or-disk" onclick="event.stopPropagation(); selectCustomFileForRole('${f.role}')">or load from disk</button>
+                <button class="file-or-disk" data-action="selectCustomFileForRole" data-role="${f.role}" data-stop-propagation="true">or load from disk</button>
               ` : `
                 <span class="custom-path-display" title="${sel.customPath || ''}">${getFileName(sel.customPath)}</span>
-                <button class="custom-clear-btn" onclick="event.stopPropagation(); clearCustomFileForRole('${f.role}')">Clear</button>
+                <button class="custom-clear-btn" data-action="clearCustomFileForRole" data-role="${f.role}" data-stop-propagation="true">Clear</button>
               `}
             </div>
             ${!isCustomFile && hasMultipleQuants && isExpanded ? `
@@ -1083,7 +990,7 @@ function renderModelFileConfig(model) {
                   const isQSelected = sel.quantizationIdx === qi;
                   return `
                     <div class="release-row ${isQSelected ? 'selected' : ''}"
-                         onclick="selectFileQuantization('${f.role}', ${qi})">
+                         data-action="selectFileQuantization" data-role="${f.role}" data-index="${qi}">
                       <div class="release-radio"></div>
                       <div class="release-info">
                         <span class="release-version">${q.name}</span>
@@ -1107,7 +1014,7 @@ function renderCustomModelCard() {
 
   if (isActive && hasFiles) {
     return `
-      <div class="custom-llamafile-card active" onclick="">
+      <div class="custom-llamafile-card active">
         <div class="card-icon" style="background: var(--bg-card-active); font-size: 18px;">\ud83d\udcc2</div>
         <div class="card-info">
           <div class="card-title">Load from disk</div>
@@ -1119,234 +1026,22 @@ function renderCustomModelCard() {
               </div>
             `).join('')}
           </div>
-          <button class="custom-add-btn" onclick="event.stopPropagation(); addCompanionFile()">+ Add file</button>
+          <button class="custom-add-btn" data-action="addCompanionFile" data-stop-propagation="true">+ Add file</button>
         </div>
-        <button class="custom-clear-btn" onclick="event.stopPropagation(); clearCustomModel()">Clear</button>
+        <button class="custom-clear-btn" data-action="clearCustomModel" data-stop-propagation="true">Clear</button>
       </div>
     `;
   }
 
   return `
     <div class="custom-llamafile-card ${isActive ? 'active' : ''}"
-         onclick="selectCustomModel()">
+         data-action="selectCustomModel">
       <div class="card-icon" style="background: var(--bg-card-active); font-size: 18px;">\ud83d\udcc2</div>
       <div class="card-info">
         <div class="card-title">Load from disk</div>
         <div class="card-desc">Use a custom GGUF model file from your filesystem</div>
       </div>
       <div class="card-meta" style="color: var(--text-secondary);">Browse&hellip;</div>
-    </div>
-  `;
-}
-
-function renderOllamaModelCard() {
-  const isActive = state.modelSource === 'ollama';
-  const hasSelection = state.selectedOllamaModel !== null;
-
-  // If Ollama is selected and we have a model, show the expanded state
-  if (isActive && hasSelection) {
-    return `
-      <div class="custom-llamafile-card active" onclick="">
-        <div class="card-icon" style="background: var(--purple-dim); color: var(--purple); font-size: 18px;">🦙</div>
-        <div class="card-info">
-          <div class="card-title">Load from Ollama</div>
-          <div class="custom-file-list">
-            <div class="custom-file-entry">
-              <span class="file-role-tag">model</span>
-              <span class="custom-path-display" title="${state.selectedOllamaModel.weightsPath}">${state.selectedOllamaModel.displayName}</span>
-              <span class="file-size-label">${formatBytes(state.selectedOllamaModel.sizeBytes)}</span>
-            </div>
-          </div>
-          <button class="custom-add-btn" onclick="event.stopPropagation(); expandOllamaSelection()">Change model</button>
-        </div>
-        <button class="custom-clear-btn" onclick="event.stopPropagation(); clearOllamaModel()">Clear</button>
-      </div>
-    `;
-  }
-
-  // If Ollama is selected but no model yet, show the list of available models
-  if (isActive && !hasSelection) {
-    return `
-      <div class="custom-llamafile-card active" onclick="">
-        <div class="card-icon" style="background: var(--purple-dim); color: var(--purple); font-size: 18px;">🦙</div>
-        <div class="card-info">
-          <div class="card-title">Load from Ollama</div>
-          <div class="card-desc">Select a model from your local Ollama cache. <span style="color: var(--accent);">Note: not all Ollama models work with llama.cpp/llamafile.</span></div>
-        </div>
-        <button class="custom-clear-btn" onclick="event.stopPropagation(); clearOllamaModel()">Cancel</button>
-      </div>
-      <div class="download-dir-row" style="margin-top: 8px; flex-wrap: wrap; gap: 4px;">
-        <span style="color: var(--text-secondary); font-size: 12px; margin-right: 4px;">Ollama cache:</span>
-        <input type="text" class="path-input" value="${state.ollamaCacheDir}"
-               onchange="updateOllamaCacheDir(this.value)"
-               onclick="event.stopPropagation()"
-               style="flex: 1; min-width: 150px; padding: 4px 8px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
-        <button class="download-dir-btn" onclick="event.stopPropagation(); selectOllamaCacheDir()" title="Browse...">📂</button>
-      </div>
-      <div class="version-releases" style="margin-top: 8px;">
-        ${state.ollamaModels.map(m => `
-          <div class="release-row" onclick="selectOllamaModel('${m.modelName}', '${m.tag}')">
-            <div class="release-radio"></div>
-            <div class="release-info">
-              <span class="release-version">${m.displayName}</span>
-            </div>
-            <span class="release-date">${formatBytes(m.sizeBytes)}</span>
-          </div>
-        `).join('')}
-        ${state.ollamaModels.length === 0 ? '<div class="card-desc" style="padding: 12px; color: var(--text-secondary);">No Ollama models found.<br><span style="font-size: 11px;">Make sure this is an Ollama cache directory containing a <code>models/</code> subfolder.</span></div>' : ''}
-      </div>
-    `;
-  }
-
-  // Default collapsed state - show the card to click
-  return `
-    <div class="custom-llamafile-card"
-         onclick="selectOllamaSource()">
-      <div class="card-icon" style="background: var(--purple-dim); color: var(--purple); font-size: 18px;">🦙</div>
-      <div class="card-info">
-        <div class="card-title">Load from Ollama</div>
-        <div class="card-desc">Use a model from your local Ollama cache. <span style="color: var(--accent);">Note: not all Ollama models work with llama.cpp/llamafile.</span></div>
-      </div>
-      <div class="card-meta" style="color: var(--text-secondary);">${state.ollamaModels.length} models</div>
-    </div>
-  `;
-}
-
-function renderLMStudioModelCard() {
-  const isActive = state.modelSource === 'lmstudio';
-  const hasSelection = state.selectedLMStudioModel !== null;
-
-  // If LM Studio is selected and we have a model, show the expanded state with file selection
-  if (isActive && hasSelection) {
-    const model = state.selectedLMStudioModel;
-    const weightsFiles = model.files.filter(f => f.role === 'weights');
-    const mmprojFiles = model.files.filter(f => f.role === 'mmproj');
-    const selectedWeightsIdx = state.lmstudioFileSelections.weights || 0;
-    const selectedMmprojIdx = state.lmstudioFileSelections.mmproj || 0;
-
-    return `
-      <div class="custom-llamafile-card active" onclick="">
-        <div class="card-icon" style="background: var(--blue-dim); color: var(--blue); font-size: 18px;">📦</div>
-        <div class="card-info">
-          <div class="card-title">Load from LM Studio</div>
-          <div class="custom-file-list">
-            <div class="custom-file-entry">
-              <span class="file-role-tag">model</span>
-              <span class="custom-path-display">${model.displayName}</span>
-            </div>
-          </div>
-        </div>
-        <button class="custom-clear-btn" onclick="event.stopPropagation(); clearLMStudioModel()">Clear</button>
-      </div>
-      <div class="model-file-config" style="margin-top: 8px;">
-        ${weightsFiles.length > 0 ? `
-          <div class="file-role-section">
-            <div class="file-role-header">
-              <span class="file-role-label">Weights</span>
-              <span class="quant-badge">${weightsFiles[selectedWeightsIdx]?.filename || 'N/A'}</span>
-              <span class="file-size-label">${formatBytes(weightsFiles[selectedWeightsIdx]?.sizeBytes || 0)}</span>
-              ${weightsFiles.length > 1 ? `
-                <div class="expand-toggle" onclick="event.stopPropagation(); toggleLMStudioFileExpand('weights')">
-                  <span class="expand-icon ${state.expandedLMStudioFiles?.weights ? 'expanded' : ''}">▶</span>
-                  <span class="expand-count">${weightsFiles.length}</span>
-                </div>
-              ` : ''}
-            </div>
-            ${weightsFiles.length > 1 && state.expandedLMStudioFiles?.weights ? `
-              <div class="version-releases">
-                ${weightsFiles.map((f, idx) => `
-                  <div class="release-row ${idx === selectedWeightsIdx ? 'selected' : ''}"
-                       onclick="selectLMStudioFile('weights', ${idx})">
-                    <div class="release-radio"></div>
-                    <div class="release-info">
-                      <span class="release-version">${f.filename}</span>
-                    </div>
-                    <span class="release-date">${formatBytes(f.sizeBytes)}</span>
-                  </div>
-                `).join('')}
-              </div>
-            ` : ''}
-          </div>
-        ` : ''}
-        ${mmprojFiles.length > 0 ? `
-          <div class="file-role-section">
-            <div class="file-role-header">
-              <span class="file-role-label">Vision Adapter (mmproj)</span>
-              <span class="quant-badge">${mmprojFiles[selectedMmprojIdx]?.filename || 'N/A'}</span>
-              <span class="file-size-label">${formatBytes(mmprojFiles[selectedMmprojIdx]?.sizeBytes || 0)}</span>
-              ${mmprojFiles.length > 1 ? `
-                <div class="expand-toggle" onclick="event.stopPropagation(); toggleLMStudioFileExpand('mmproj')">
-                  <span class="expand-icon ${state.expandedLMStudioFiles?.mmproj ? 'expanded' : ''}">▶</span>
-                  <span class="expand-count">${mmprojFiles.length}</span>
-                </div>
-              ` : ''}
-            </div>
-            ${mmprojFiles.length > 1 && state.expandedLMStudioFiles?.mmproj ? `
-              <div class="version-releases">
-                ${mmprojFiles.map((f, idx) => `
-                  <div class="release-row ${idx === selectedMmprojIdx ? 'selected' : ''}"
-                       onclick="selectLMStudioFile('mmproj', ${idx})">
-                    <div class="release-radio"></div>
-                    <div class="release-info">
-                      <span class="release-version">${f.filename}</span>
-                    </div>
-                    <span class="release-date">${formatBytes(f.sizeBytes)}</span>
-                  </div>
-                `).join('')}
-              </div>
-            ` : ''}
-          </div>
-        ` : ''}
-      </div>
-      <button class="custom-add-btn" style="margin-top: 8px;" onclick="event.stopPropagation(); expandLMStudioSelection()">Change model</button>
-    `;
-  }
-
-  // If LM Studio is selected but no model yet, show the list of available models
-  if (isActive && !hasSelection) {
-    return `
-      <div class="custom-llamafile-card active" onclick="">
-        <div class="card-icon" style="background: var(--blue-dim); color: var(--blue); font-size: 18px;">📦</div>
-        <div class="card-info">
-          <div class="card-title">Load from LM Studio</div>
-          <div class="card-desc">Select a model from your LM Studio cache. <span style="color: var(--accent);">Note: not all models work with llama.cpp/llamafile.</span></div>
-        </div>
-        <button class="custom-clear-btn" onclick="event.stopPropagation(); clearLMStudioModel()">Cancel</button>
-      </div>
-      <div class="download-dir-row" style="margin-top: 8px; flex-wrap: wrap; gap: 4px;">
-        <span style="color: var(--text-secondary); font-size: 12px; margin-right: 4px;">LM Studio cache:</span>
-        <input type="text" class="path-input" value="${state.lmstudioCacheDir}"
-               onchange="updateLMStudioCacheDir(this.value)"
-               onclick="event.stopPropagation()"
-               style="flex: 1; min-width: 150px; padding: 4px 8px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
-        <button class="download-dir-btn" onclick="event.stopPropagation(); selectLMStudioCacheDir()" title="Browse...">📂</button>
-      </div>
-      <div class="version-releases" style="margin-top: 8px;">
-        ${state.lmstudioModels.map(m => `
-          <div class="release-row" onclick="selectLMStudioModel('${m.dirName}')">
-            <div class="release-radio"></div>
-            <div class="release-info">
-              <span class="release-version">${m.displayName}</span>
-              <span style="color: var(--text-secondary); font-size: 11px; margin-left: 8px;">${m.files.length} file${m.files.length !== 1 ? 's' : ''}</span>
-            </div>
-            <span class="release-date">${formatBytes(m.totalSizeBytes)}</span>
-          </div>
-        `).join('')}
-        ${state.lmstudioModels.length === 0 ? '<div class="card-desc" style="padding: 12px; color: var(--text-secondary);">No LM Studio models found.<br><span style="font-size: 11px;">Make sure this is an LM Studio cache directory containing <code>models/lmstudio-community/</code>.</span></div>' : ''}
-      </div>
-    `;
-  }
-
-  // Default collapsed state - show the card to click
-  return `
-    <div class="custom-llamafile-card"
-         onclick="selectLMStudioSource()">
-      <div class="card-icon" style="background: var(--blue-dim); color: var(--blue); font-size: 18px;">📦</div>
-      <div class="card-info">
-        <div class="card-title">Load from LM Studio</div>
-        <div class="card-desc">Use a model from your LM Studio cache. <span style="color: var(--accent);">Note: not all models work with llama.cpp/llamafile.</span></div>
-      </div>
-      <div class="card-meta" style="color: var(--text-secondary);">${state.lmstudioModels.length} models</div>
     </div>
   `;
 }
@@ -1574,245 +1269,21 @@ async function clearCustomModel() {
   }
 }
 
-// -- Ollama model interaction functions --
-
-async function selectOllamaSource() {
-  console.log('selectOllamaSource called, ollamaModels:', state.ollamaModels);
-
-  // Switch to Ollama mode without selecting a model yet
-  state.modelSource = 'ollama';
-  state.selectedModel = null;
-  state.selectedOllamaModel = null;
-  state.customModelFiles = [];
-  state.modelFileSelections = {};
-  state.expandedModelFiles = {};
-
-  // If only one Ollama model, auto-select it
-  if (state.ollamaModels.length === 1) {
-    await selectOllamaModel(state.ollamaModels[0].modelName, state.ollamaModels[0].tag);
-    return;
-  }
-
-  renderCurrentStep();
-}
-
-async function selectOllamaModel(modelName, tag) {
-  console.log('selectOllamaModel called:', modelName, tag);
-  try {
-    const customDir = state.ollamaCacheDir !== '~/.ollama' ? state.ollamaCacheDir : null;
-    const buildState = await invoke('select_ollama_model', { modelName, tag, customDir });
-    console.log('select_ollama_model returned:', buildState);
-    syncFromBuildState(buildState);
-
-    // Clear UI-only state
-    state.selectedModel = null;
-    state.modelFileSelections = {};
-    state.expandedModelFiles = {};
-    renderCurrentStep();
-  } catch (err) {
-    console.error('Failed to select Ollama model:', err);
-  }
-}
-
-function expandOllamaSelection() {
-  // Show the model list again (clear selection but stay in Ollama mode)
-  state.selectedOllamaModel = null;
-  renderCurrentStep();
-}
-
-async function clearOllamaModel() {
-  // Re-select first model if available (this will switch back to registry mode)
-  if (state.models.length > 0) {
-    await selectModel(state.models[0].id);
-  } else {
-    state.modelSource = 'registry';
-    state.selectedModel = null;
-    state.selectedOllamaModel = null;
-    renderCurrentStep();
-  }
-}
-
-async function selectOllamaCacheDir() {
-  try {
-    const path = await invoke('select_model_download_dir'); // Reuse directory picker
-    if (path) {
-      await updateOllamaCacheDir(path);
-    }
-  } catch (err) {
-    console.error('Failed to select Ollama cache directory:', err);
-  }
-}
-
-async function updateOllamaCacheDir(path) {
-  if (!path || path.trim() === '') return;
-
-  path = path.trim();
-  state.ollamaCacheDir = path;
-
-  // Rescan for models in the new directory
-  // Always try to get models, even if check_ollama_available returns false
-  // (the check might be too strict, and get_ollama_models handles missing dirs gracefully)
-  try {
-    state.ollamaModels = await invoke('get_ollama_models', { customDir: path });
-    state.ollamaAvailable = state.ollamaModels.length > 0;
-    console.log('Found Ollama models in custom dir:', state.ollamaModels.length);
-  } catch (e) {
-    console.log('Failed to get Ollama models:', e);
-    state.ollamaModels = [];
-    state.ollamaAvailable = false;
-  }
-  // Clear any previous selection since models list changed
-  state.selectedOllamaModel = null;
-  renderCurrentStep();
-}
-
-// LM Studio functions
-async function selectLMStudioSource() {
-  console.log('selectLMStudioSource called, lmstudioModels:', state.lmstudioModels);
-
-  // Switch to LM Studio mode without selecting a model yet
-  state.modelSource = 'lmstudio';
-  state.selectedModel = null;
-  state.selectedOllamaModel = null;
-  state.selectedLMStudioModel = null;
-  state.customModelFiles = [];
-  state.modelFileSelections = {};
-  state.expandedModelFiles = {};
-  state.lmstudioFileSelections = {};
-  state.expandedLMStudioFiles = {};
-
-  // If only one LM Studio model, auto-select it
-  if (state.lmstudioModels.length === 1) {
-    await selectLMStudioModel(state.lmstudioModels[0].dirName);
-    return;
-  }
-
-  renderCurrentStep();
-}
-
-async function selectLMStudioModel(dirName) {
-  console.log('selectLMStudioModel called:', dirName);
-  try {
-    const customDir = state.lmstudioCacheDir !== '~/.cache/lm-studio' ? state.lmstudioCacheDir : null;
-    const buildState = await invoke('select_lmstudio_model', { dirName, customDir });
-    console.log('select_lmstudio_model returned:', buildState);
-    syncFromBuildState(buildState);
-
-    // Clear UI-only state
-    state.selectedModel = null;
-    state.modelFileSelections = {};
-    state.expandedModelFiles = {};
-    state.expandedLMStudioFiles = {};
-    renderCurrentStep();
-  } catch (err) {
-    console.error('Failed to select LM Studio model:', err);
-  }
-}
-
-async function selectLMStudioFile(role, idx) {
-  console.log('selectLMStudioFile called:', role, idx);
-  try {
-    const buildState = await invoke('select_lmstudio_file', { role, idx });
-    syncFromBuildState(buildState);
-    renderCurrentStep();
-  } catch (err) {
-    console.error('Failed to select LM Studio file:', err);
-  }
-}
-
-function toggleLMStudioFileExpand(role) {
-  if (!state.expandedLMStudioFiles) {
-    state.expandedLMStudioFiles = {};
-  }
-  state.expandedLMStudioFiles[role] = !state.expandedLMStudioFiles[role];
-  renderCurrentStep();
-}
-
-function expandLMStudioSelection() {
-  // Show the model list again (clear selection but stay in LM Studio mode)
-  state.selectedLMStudioModel = null;
-  state.lmstudioFileSelections = {};
-  state.expandedLMStudioFiles = {};
-  renderCurrentStep();
-}
-
-async function clearLMStudioModel() {
-  // Re-select first model if available (this will switch back to registry mode)
-  if (state.models.length > 0) {
-    await selectModel(state.models[0].id);
-  } else {
-    state.modelSource = 'registry';
-    state.selectedModel = null;
-    state.selectedLMStudioModel = null;
-    state.lmstudioFileSelections = {};
-    state.expandedLMStudioFiles = {};
-    renderCurrentStep();
-  }
-}
-
-async function selectLMStudioCacheDir() {
-  try {
-    const path = await invoke('select_model_download_dir'); // Reuse directory picker
-    if (path) {
-      await updateLMStudioCacheDir(path);
-    }
-  } catch (err) {
-    console.error('Failed to select LM Studio cache directory:', err);
-  }
-}
-
-async function updateLMStudioCacheDir(path) {
-  if (!path || path.trim() === '') return;
-
-  path = path.trim();
-  state.lmstudioCacheDir = path;
-
-  // Rescan for models in the new directory
-  try {
-    state.lmstudioModels = await invoke('get_lmstudio_models', { customDir: path });
-    state.lmstudioAvailable = state.lmstudioModels.length > 0;
-    console.log('Found LM Studio models in custom dir:', state.lmstudioModels.length);
-  } catch (e) {
-    console.log('Failed to get LM Studio models:', e);
-    state.lmstudioModels = [];
-    state.lmstudioAvailable = false;
-  }
-  // Clear any previous selection since models list changed
-  state.selectedLMStudioModel = null;
-  state.lmstudioFileSelections = {};
-  state.expandedLMStudioFiles = {};
-  renderCurrentStep();
-}
-
 async function selectDownloadDir() {
   try {
     const path = await invoke('select_model_download_dir');
     if (path) {
-      updateModelDownloadDir(path);
+      state.modelDownloadDir = path;
+      renderCurrentStep();
     }
   } catch (err) {
     console.error('Failed to select download directory:', err);
   }
 }
 
-function updateModelDownloadDir(path) {
-  if (!path || path.trim() === '') return;
-  state.modelDownloadDir = path.trim();
-  renderCurrentStep();
-}
-
 function isModelStepValid() {
   if (state.modelSource === 'custom') {
     return state.customModelFiles.length > 0 && state.customModelFiles[0].path;
-  }
-  if (state.modelSource === 'ollama') {
-    return !!state.selectedOllamaModel;
-  }
-  if (state.modelSource === 'lmstudio') {
-    // LM Studio is valid if we have a model selected and at least one weights file
-    if (!state.selectedLMStudioModel) return false;
-    const weightsFiles = state.selectedLMStudioModel.files.filter(f => f.role === 'weights');
-    return weightsFiles.length > 0;
   }
   return !!state.selectedModel;
 }
@@ -1844,22 +1315,13 @@ function getTotalModelSizeForModel(model) {
 
 function renderModelSummaryValue() {
   if (state.modelSource === 'custom') {
-    if (!state.resolvedWeightsFilename) return 'Custom \u2014 N/A';
-    let text = `Custom \u2014 ${state.resolvedWeightsFilename}`;
-    if (state.resolvedMmprojFilename) {
-      text += ` + mmproj: ${state.resolvedMmprojFilename}`;
-    }
-    return text;
-  }
-  if (state.modelSource === 'ollama') {
-    if (!state.selectedOllamaModel) return 'Ollama \u2014 N/A';
-    return `Ollama \u2014 ${state.selectedOllamaModel.displayName}`;
-  }
-  if (state.modelSource === 'lmstudio') {
-    if (!state.selectedLMStudioModel) return 'LM Studio \u2014 N/A';
-    let text = `LM Studio \u2014 ${state.resolvedWeightsFilename || state.selectedLMStudioModel.displayName}`;
-    if (state.resolvedMmprojFilename) {
-      text += ` + mmproj: ${state.resolvedMmprojFilename}`;
+    const files = state.customModelFiles;
+    if (files.length === 0) return 'Custom \u2014 N/A';
+    const primary = getFileName(files[0].path);
+    const companions = files.slice(1).map(f => `${f.role}: ${getFileName(f.path)}`);
+    let text = `Custom \u2014 ${primary}`;
+    if (companions.length > 0) {
+      text += ` + ${companions.join(', ')}`;
     }
     return text;
   }
@@ -1943,8 +1405,8 @@ function renderConfigStep() {
         ${renderConfigItems()}
       </div>
       <div class="footer">
-        <button class="btn btn-secondary" onclick="prevStep()">\u2190 Back</button>
-        <button class="btn btn-primary" onclick="nextStep()">Next \u2192</button>
+        <button class="btn btn-secondary" data-action="prevStep">\u2190 Back</button>
+        <button class="btn btn-primary" data-action="nextStep">Next \u2192</button>
       </div>
     </div>
   `;
@@ -1967,7 +1429,7 @@ function renderConfigItemsRecursive(items) {
         const enabled = state.configValues[item.key] ?? item.default ?? true;
         html += `
           <div class="config-section config-section-toggleable">
-            <div class="config-section-header" onclick="toggleConfig('${item.key}')">
+            <div class="config-section-header" data-action="toggleConfig" data-config-key="${item.key}">
               <div class="config-section-info">
                 <div class="config-section-title">${item.label}</div>
                 ${item.description ? `<div class="config-section-desc">${item.description}</div>` : ''}
@@ -2003,13 +1465,11 @@ function renderConfigItemsRecursive(items) {
 function renderTextItem(item) {
   const val = state.configValues[item.key];
   const inputType = item.value_type === 'number' ? 'number' : 'text';
-  const handler = item.value_type === 'number'
-    ? `updateConfig('${item.key}', parseInt(this.value))`
-    : `updateConfig('${item.key}', this.value)`;
+  const valueType = item.value_type === 'number' ? 'number' : 'text';
   return `
     <div class="config-row">
       <div class="config-label">${item.label}<div class="config-label-sub">${item.description}</div></div>
-      <input class="config-input" type="${inputType}" value="${val}" onchange="${handler}">
+      <input class="config-input" type="${inputType}" value="${val}" data-action="updateConfig" data-config-key="${item.key}" data-value-type="${valueType}">
     </div>
   `;
 }
@@ -2017,13 +1477,11 @@ function renderTextItem(item) {
 function renderDropdownItem(item) {
   const val = state.configValues[item.key];
   const isNumeric = item.options.length > 0 && typeof item.options[0] === 'number';
-  const handler = isNumeric
-    ? `updateConfig('${item.key}', parseInt(this.value))`
-    : `updateConfig('${item.key}', this.value)`;
+  const valueType = isNumeric ? 'number' : 'text';
   return `
     <div class="config-row">
       <div class="config-label">${item.label}<div class="config-label-sub">${item.description}</div></div>
-      <select class="config-select" onchange="${handler}">
+      <select class="config-select" data-action="updateConfig" data-config-key="${item.key}" data-value-type="${valueType}">
         ${item.options.map(o => {
           const display = typeof o === 'number' ? o.toLocaleString() : o;
           return `<option value="${o}" ${val === o ? 'selected' : ''}>${display}</option>`;
@@ -2036,7 +1494,7 @@ function renderDropdownItem(item) {
 function renderBoolItem(item) {
   const val = state.configValues[item.key];
   return `
-    <div class="toggle-row" onclick="toggleConfig('${item.key}')">
+    <div class="toggle-row" data-action="toggleConfig" data-config-key="${item.key}">
       <div class="toggle-info">
         <div class="toggle-title">${item.label}</div>
         <div class="toggle-desc">${item.description}</div>
@@ -2056,7 +1514,7 @@ function renderSliderItem(item) {
       <div class="slider-container">
         <input type="range" class="config-slider"
           min="${item.min}" max="${item.max}" step="${step}" value="${val}"
-          oninput="updateSlider('${item.key}', this.value, ${isInteger})">
+          data-action="updateSlider" data-config-key="${item.key}" data-is-integer="${isInteger}">
         <span class="slider-value" id="slider-value-${item.key}">${isInteger ? Math.round(val) : val}</span>
       </div>
     </div>
@@ -2118,7 +1576,7 @@ function renderComputeStep() {
       </div>
       <div class="content-body">
         <div class="compute-grid">
-          <div class="compute-card ${state.computeMode === 'cpu' ? 'selected' : ''}" onclick="selectComputeMode('cpu')">
+          <div class="compute-card ${state.computeMode === 'cpu' ? 'selected' : ''}" data-action="selectComputeMode" data-mode="cpu">
             <div class="compute-card-icon">\ud83e\uddf3</div>
             <div class="compute-card-title">CPU Only</div>
             <div class="compute-card-desc">Lean build, runs on any x86_64 or ARM64 machine. Passes --gpu DISABLE to prevent Metal compilation.</div>
@@ -2127,7 +1585,7 @@ function renderComputeStep() {
               <span class="meta-chip">ARM64</span>
             </div>
           </div>
-          <div class="compute-card ${state.computeMode === 'gpu' ? 'selected' : ''}" onclick="selectComputeMode('gpu')">
+          <div class="compute-card ${state.computeMode === 'gpu' ? 'selected' : ''}" data-action="selectComputeMode" data-mode="gpu">
             <div class="compute-card-icon">\ud83d\udd25</div>
             <div class="compute-card-title">GPU Accelerated</div>
             <div class="compute-card-desc">Bundle GPU libraries for target platforms.</div>
@@ -2141,12 +1599,12 @@ function renderComputeStep() {
 
         <div class="config-section" style="opacity: ${state.computeMode === 'gpu' ? 1 : 0.3}; pointer-events: ${state.computeMode === 'gpu' ? 'all' : 'none'};">
           <div class="config-section-title">GPU Options</div>
-          <div class="toggle-row" onclick="toggleGpuOption('metal')">
+          <div class="toggle-row" data-action="toggleGpuOption" data-option="metal">
             <div class="toggle-info"><div class="toggle-title">Apple Metal</div><div class="toggle-desc">macOS — Built-in (compiles on first run)</div></div>
             <div class="toggle-switch ${state.gpuOptions.metal ? 'on' : ''}"></div>
           </div>
           ${availableGpuLibs.cuda ? `
-            <div class="toggle-row" onclick="toggleGpuOption('cuda')">
+            <div class="toggle-row" data-action="toggleGpuOption" data-option="cuda">
               <div class="toggle-info"><div class="toggle-title">NVIDIA CUDA</div><div class="toggle-desc">${cudaPlatforms} — ${formatBytes(cudaSize)}</div></div>
               <div class="toggle-switch ${state.gpuOptions.cuda ? 'on' : ''}"></div>
             </div>
@@ -2157,7 +1615,7 @@ function renderComputeStep() {
             </div>
           `}
           ${availableGpuLibs.rocm ? `
-            <div class="toggle-row" onclick="toggleGpuOption('rocm')">
+            <div class="toggle-row" data-action="toggleGpuOption" data-option="rocm">
               <div class="toggle-info"><div class="toggle-title">AMD ROCm</div><div class="toggle-desc">${rocmPlatforms} — ${formatBytes(rocmSize)}</div></div>
               <div class="toggle-switch ${state.gpuOptions.rocm ? 'on' : ''}"></div>
             </div>
@@ -2176,8 +1634,8 @@ function renderComputeStep() {
         </div>
       </div>
       <div class="footer">
-        <button class="btn btn-secondary" onclick="prevStep()">\u2190 Back</button>
-        <button class="btn btn-primary" onclick="nextStep()">Next \u2192</button>
+        <button class="btn btn-secondary" data-action="prevStep">\u2190 Back</button>
+        <button class="btn btn-primary" data-action="nextStep">Next \u2192</button>
       </div>
     </div>
   `;
@@ -2231,7 +1689,7 @@ function renderAgentStep() {
         <div class="content-subtitle">Optionally build an agentfile with tools and custom instructions.</div>
       </div>
       <div class="content-body">
-        <div class="agent-toggle-big ${state.agentEnabled ? 'active' : ''}" onclick="toggleAgent()">
+        <div class="agent-toggle-big ${state.agentEnabled ? 'active' : ''}" data-action="toggleAgent">
           <div>
             <div style="font-size: 13px; font-weight: 600; margin-bottom: 2px;">Enable Agentfile Mode</div>
             <div style="font-size: 11px; color: var(--text-secondary);">Bundle tool definitions and agent instructions</div>
@@ -2243,7 +1701,7 @@ function renderAgentStep() {
           <div class="config-section-title">Available Tools</div>
           <div class="tool-grid">
             ${state.agentTools.map(t => `
-              <div class="tool-card ${t.enabled ? 'selected' : ''}" onclick="toggleTool('${t.id}')">
+              <div class="tool-card ${t.enabled ? 'selected' : ''}" data-action="toggleTool" data-tool-id="${t.id}">
                 <div class="tool-icon">${t.icon}</div>
                 <div class="tool-name">${t.name}</div>
                 <div class="tool-check">${t.enabled ? '\u2713' : ''}</div>
@@ -2257,14 +1715,14 @@ function renderAgentStep() {
               <div class="code-editor-tab">\ud83d\udcc4 system_prompt.md</div>
             </div>
             <div class="code-editor-body">
-              <textarea onchange="updateSystemPrompt(this.value)">${state.systemPrompt}</textarea>
+              <textarea data-action="updateSystemPrompt">${state.systemPrompt}</textarea>
             </div>
           </div>
         </div>
       </div>
       <div class="footer">
-        <button class="btn btn-secondary" onclick="prevStep()">\u2190 Back</button>
-        <button class="btn btn-primary" onclick="nextStep()">Next \u2192</button>
+        <button class="btn btn-secondary" data-action="prevStep">\u2190 Back</button>
+        <button class="btn btn-primary" data-action="nextStep">Next \u2192</button>
       </div>
     </div>
   `;
@@ -2280,14 +1738,20 @@ function updateSystemPrompt(v) { state.systemPrompt = v; }
 
 // Get the filename for a model file by role (used to pass to Rust)
 function getModelFilename(role) {
-  // Use resolved filenames from backend
-  if (role === 'weights') {
-    return state.resolvedWeightsFilename || null;
+  if (state.modelSource === 'custom') {
+    const file = state.customModelFiles.find(f => f.role === role);
+    return file ? getFileName(file.path) : null;
   }
-  if (role === 'mmproj') {
-    return state.resolvedMmprojFilename || null;
+  if (!state.selectedModel) return null;
+  const file = state.selectedModel.files.find(f => f.role === role);
+  if (!file) return null;
+  const sel = state.modelFileSelections[role];
+  if (sel?.source === 'custom' && sel.customPath) {
+    return getFileName(sel.customPath);
   }
-  return null;
+  const quant = file.quantizations[sel?.quantizationIdx || 0];
+  // Extract filename from download URL
+  return quant ? getFilenameFromUrl(quant.download_url) : null;
 }
 
 // Regenerate args content by calling Rust backend
@@ -2330,49 +1794,45 @@ function renderBuildStep() {
                 ? `Custom \u2014 <span class="custom-path-display" style="display:inline" title="${state.customLlamafilePath || ''}">${state.customLlamafilePath || 'N/A'}</span>`
                 : `llamafile ${state.selectedRelease?.version || 'N/A'}`
             }</div>
-            <div class="summary-edit" onclick="goToStep(1)">edit</div>
+            <div class="summary-edit" data-action="goToStep" data-step="1">edit</div>
           </div>
           <div class="summary-row">
             <div class="summary-label">Model</div>
             <div class="summary-value">${renderModelSummaryValue()}</div>
-            <div class="summary-edit" onclick="goToStep(2)">edit</div>
+            <div class="summary-edit" data-action="goToStep" data-step="2">edit</div>
           </div>
           <div class="summary-row">
             <div class="summary-label">Context</div>
             <div class="summary-value">${(state.configValues.context_length || 4096).toLocaleString()} tokens</div>
-            <div class="summary-edit" onclick="goToStep(3)">edit</div>
+            <div class="summary-edit" data-action="goToStep" data-step="3">edit</div>
           </div>
           <div class="summary-row">
             <div class="summary-label">Compute</div>
             <div class="summary-value">${state.computeMode === 'gpu' ? 'GPU (' + getGpuSummary() + ')' : 'CPU Only'}</div>
-            <div class="summary-edit" onclick="goToStep(4)">edit</div>
+            <div class="summary-edit" data-action="goToStep" data-step="4">edit</div>
           </div>
           <div class="summary-row">
             <div class="summary-label">Agent</div>
             <div class="summary-value">${state.agentEnabled ? `Enabled \u2014 ${enabledTools.length} tools` : 'Disabled'}</div>
-            <div class="summary-edit" onclick="goToStep(5)">edit</div>
+            <div class="summary-edit" data-action="goToStep" data-step="5">edit</div>
           </div>
         </div>
 
-        <div class="download-dir-row" style="flex-wrap: wrap; gap: 4px; margin-bottom: 16px;">
-          <span style="color: var(--text-secondary); font-size: 12px; margin-right: 4px;">Output:</span>
-          <input type="text" class="path-input" value="${state.outputPath || ''}"
-                 onchange="updateOutputPath(this.value)"
-                 placeholder="Select output location..."
-                 style="flex: 1; min-width: 200px; padding: 4px 8px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
-          <button class="download-dir-btn" onclick="selectOutputPath()" title="Browse...">📂</button>
+        <div class="output-path" data-action="selectOutputPath">
+          <div class="output-path-label">Output:</div>
+          <div class="output-path-value">${state.outputPath || 'Select location...'}</div>
+          <div class="output-path-btn">Browse\u2026</div>
         </div>
 
         <div class="args-preview">
           <div class="args-preview-header">
             <div class="args-preview-label">.args Configuration</div>
-            <button class="args-preview-refresh" onclick="refreshArgsContent().then(() => renderCurrentStep())" title="Regenerate from settings">Refresh</button>
+            <button class="args-preview-refresh" data-action="refreshArgsContent" title="Regenerate from settings">Refresh</button>
           </div>
           <textarea
             class="args-preview-editor"
             spellcheck="false"
-            onchange="updateArgsContent(this.value)"
-            oninput="updateArgsContent(this.value)"
+            data-action="updateArgsContent"
           >${escapeHtml(state.argsContent)}</textarea>
         </div>
 
@@ -2395,9 +1855,84 @@ function renderBuildStep() {
           </div>
         ` : ''}
 
+        ${state.hfTokenPromptVisible ? `
+          <div class="hf-token-modal">
+            <div class="hf-token-content">
+              <div class="hf-token-title">Authentication Required</div>
+              <div class="hf-token-desc">This model requires a Hugging Face token. You can get one at <a href="https://huggingface.co/settings/tokens" target="_blank">huggingface.co/settings/tokens</a></div>
+              <input type="password" class="hf-token-input" id="hf-token-input" placeholder="hf_..." data-action="submitHfToken">
+              <div class="hf-token-buttons">
+                <button class="btn btn-secondary" data-action="cancelHfTokenPrompt">Cancel</button>
+                <button class="btn btn-primary" data-action="submitHfToken">Save &amp; Retry</button>
+              </div>
+            </div>
+          </div>
+        ` : ''}
+
+        ${state.fileExistsPrompt ? `
+          <div class="hf-token-modal">
+            <div class="hf-token-content">
+              ${state.fileExistsPrompt.isPartial ? `
+                <div class="hf-token-title">Incomplete Download Found</div>
+                <div class="hf-token-desc">
+                  <code>${state.fileExistsPrompt.filename}</code> appears to be a partial download.<br>
+                  <span style="color: var(--text-muted)">
+                    ${formatBytes(state.fileExistsPrompt.currentSize)} of ${formatBytes(state.fileExistsPrompt.expectedSize)} downloaded
+                  </span>
+                </div>
+                <div class="hf-token-buttons" style="margin-top: 16px;">
+                  <button class="btn btn-primary" data-action="handleFileExistsChoice" data-choice="resume">Resume Download</button>
+                  <button class="btn btn-secondary" data-action="handleFileExistsChoice" data-choice="download">Start Fresh</button>
+                  <button class="btn btn-secondary" data-action="handleFileExistsChoice" data-choice="cancel" style="margin-left: auto;">Cancel</button>
+                </div>
+              ` : state.fileExistsPrompt.checksumMismatch ? `
+                <div class="hf-token-title">Checksum Mismatch</div>
+                <div class="hf-token-desc">
+                  <code>${state.fileExistsPrompt.filename}</code> exists but the checksum doesn't match.<br>
+                  <span style="color: var(--accent)">The file may be corrupted or from a different version.</span>
+                </div>
+                <div class="hf-token-buttons" style="margin-top: 16px;">
+                  <button class="btn btn-primary" data-action="handleFileExistsChoice" data-choice="download">Re-download</button>
+                  <button class="btn btn-secondary" data-action="handleFileExistsChoice" data-choice="skip">Use Anyway</button>
+                  <button class="btn btn-secondary" data-action="handleFileExistsChoice" data-choice="cancel" style="margin-left: auto;">Cancel</button>
+                </div>
+              ` : `
+                <div class="hf-token-title">File Already Exists</div>
+                <div class="hf-token-desc">
+                  <code>${state.fileExistsPrompt.filename}</code> already exists in the cache.${
+                    state.fileExistsPrompt.isComplete
+                      ? (state.fileExistsPrompt.checksumVerified
+                          ? '<br><span style="color: var(--green)">File is complete and checksum verified.</span>'
+                          : '<br><span style="color: var(--text-secondary)">File size matches (no checksum available to verify).</span>')
+                      : ''
+                  }
+                </div>
+                <div class="hf-token-buttons" style="margin-top: 16px;">
+                  <button class="btn btn-primary" data-action="handleFileExistsChoice" data-choice="skip">Use Existing</button>
+                  <button class="btn btn-secondary" data-action="handleFileExistsChoice" data-choice="download">Re-download</button>
+                </div>
+              `}
+            </div>
+          </div>
+        ` : ''}
+
+        ${state.cancelConfirmVisible ? `
+          <div class="hf-token-modal">
+            <div class="hf-token-content">
+              <div class="hf-token-title">Cancel Build?</div>
+              <div class="hf-token-desc">
+                Are you sure you want to cancel the build?${state.downloadProgress ? '<br><br><span style="color: var(--accent)">The current download will be stopped and the partial file will be deleted.</span>' : ''}
+              </div>
+              <div class="hf-token-buttons" style="margin-top: 16px;">
+                <button class="btn btn-secondary" data-action="dismissCancelConfirm">Continue Build</button>
+                <button class="btn btn-primary" style="background: var(--red);" data-action="confirmCancelBuild">Cancel Build</button>
+              </div>
+            </div>
+          </div>
+        ` : ''}
       </div>
       <div class="footer">
-        <button class="btn btn-secondary" onclick="prevStep()" ${state.isBuilding ? 'disabled' : ''}>\u2190 Back</button>
+        <button class="btn btn-secondary" data-action="prevStep" ${state.isBuilding ? 'disabled' : ''}>\u2190 Back</button>
         ${renderBuildButton()}
       </div>
     </div>
@@ -2415,19 +1950,19 @@ function getGpuSummary() {
 function renderBuildButton() {
   if (state.buildProgress?.stage === 'complete') {
     return `
-      <button class="btn btn-success" onclick="openOutputFolder()"><img src="llamafile-icon.png" style="width:16px;height:16px;"> Show in Finder</button>
-      <button class="btn btn-primary" onclick="resetBuild()" style="margin-left: 8px;">Build Another</button>
+      <button class="btn btn-success" data-action="openOutputFolder"><img src="llamafile-icon.png" style="width:16px;height:16px;"> Show in Finder</button>
+      <button class="btn btn-primary" data-action="resetBuild" style="margin-left: 8px;">Build Another</button>
     `;
   }
   if (state.buildProgress?.stage === 'error') {
     return `
-      <button class="btn btn-primary" onclick="resetBuild()">Try Again</button>
+      <button class="btn btn-primary" data-action="resetBuild">Try Again</button>
     `;
   }
   if (state.isBuilding) {
-    return `<button class="btn btn-secondary" onclick="cancelBuild()">Cancel</button>`;
+    return `<button class="btn btn-secondary" data-action="cancelBuild">Cancel</button>`;
   }
-  return `<button class="btn btn-primary" onclick="startBuild()">\u26a1 Build llamafile</button>`;
+  return `<button class="btn btn-primary" data-action="startBuild">\u26a1 Build llamafile</button>`;
 }
 
 function resetBuild() {
@@ -2590,12 +2125,11 @@ function cancelHfTokenPrompt() {
 // Check if file exists and prompt user for action
 // Returns: 'skip' (use existing), 'download' (fresh download), 'resume' (continue partial), or throws on cancel
 async function checkFileExistsWithPrompt(path, expectedSize, sha256) {
-  // First, check file info WITHOUT checksum verification (fast)
   const fileInfo = await invoke('get_file_info', {
     path,
     expectedSize,
     expectedSha256: sha256,
-    verifyChecksum: false,
+    verifyChecksum: true,
   });
 
   const filename = path.split('/').pop();
@@ -2624,82 +2158,33 @@ async function checkFileExistsWithPrompt(path, expectedSize, sha256) {
     });
   }
 
-  // File is complete (size matches)
+  // File is complete - check if checksum is valid
   if (fileInfo.isComplete) {
-    // If we have a SHA256 to verify, ask user if they want to verify
-    if (sha256) {
-      state.buildLog.push(`${filename}: found, size matches (${formatBytes(fileInfo.size)})`);
+    if (fileInfo.checksumValid === false) {
+      // Checksum mismatch - offer re-download or use anyway
+      state.buildLog.push(`${filename}: checksum mismatch (file may be corrupted)`);
       renderBuildLog();
-
-      // Ask user if they want to verify checksum
-      const userChoice = await new Promise((resolve) => {
+      return new Promise((resolve) => {
         state.fileExistsPrompt = {
           filename,
           path,
-          isComplete: true,
-          askVerifyChecksum: true,
-          expectedSize: fileInfo.size,
+          checksumMismatch: true,
           resolve,
         };
         renderCurrentStep();
       });
-
-      if (userChoice === 'verify') {
-        // User wants to verify - show progress and calculate
-        state.fileExistsPrompt = null;
-        state.buildLog.push(`${filename}: calculating SHA256...`);
-        renderBuildLog();
-        renderCurrentStep();
-
-        const actualSha = await invoke('calculate_sha256', { path });
-
-        if (actualSha === sha256) {
-          state.buildLog.push(`${filename}: checksum verified ✓`);
-          renderBuildLog();
-          return new Promise((resolve) => {
-            state.fileExistsPrompt = {
-              filename,
-              path,
-              isComplete: true,
-              checksumVerified: true,
-              resolve,
-            };
-            renderCurrentStep();
-          });
-        } else {
-          // Checksum mismatch
-          state.buildLog.push(`${filename}: checksum mismatch!`);
-          renderBuildLog();
-          return new Promise((resolve) => {
-            state.fileExistsPrompt = {
-              filename,
-              path,
-              checksumMismatch: true,
-              resolve,
-            };
-            renderCurrentStep();
-          });
-        }
-      } else if (userChoice === 'skip') {
-        // User skipped verification - use file without verifying
-        return 'skip';
-      } else if (userChoice === 'download') {
-        return 'download';
-      } else {
-        // cancelled
-        return 'cancel';
-      }
     }
-
-    // No SHA256 available - just show size verified
-    state.buildLog.push(`${filename}: found and size verified (${formatBytes(fileInfo.size)})`);
+    // File is complete and valid (or no checksum to verify)
+    const checksumVerified = fileInfo.checksumValid === true;
+    const validationMsg = checksumVerified ? 'checksum verified' : 'size verified';
+    state.buildLog.push(`${filename}: found and ${validationMsg}`);
     renderBuildLog();
     return new Promise((resolve) => {
       state.fileExistsPrompt = {
         filename,
         path,
         isComplete: true,
-        checksumVerified: false,
+        checksumVerified,
         resolve,
       };
       renderCurrentStep();
@@ -2740,18 +2225,12 @@ async function selectOutputPath() {
     const defaultPath = state.outputPath || '/output.llamafile';
     const path = await invoke('select_output_path', { defaultPath });
     if (path) {
-      await updateOutputPath(path);
+      // Update Rust build state
+      const buildState = await invoke('set_output_path', { path });
+      syncFromBuildState(buildState);
+      renderCurrentStep();
     }
   } catch (err) { console.error('Failed to select output path:', err); }
-}
-
-async function updateOutputPath(path) {
-  if (!path || path.trim() === '') return;
-  path = path.trim();
-  // Update Rust build state
-  const buildState = await invoke('set_output_path', { path });
-  syncFromBuildState(buildState);
-  renderCurrentStep();
 }
 
 async function startBuild() {
@@ -2873,16 +2352,12 @@ async function startBuild() {
           }
         }
       }
-    } else if (state.modelSource === 'custom' || state.modelSource === 'ollama' || state.modelSource === 'lmstudio') {
-      // Use resolved paths from backend for custom, Ollama, and LM Studio models
-      if (state.resolvedWeightsPath) {
-        modelFiles.push({ role: 'weights', path: state.resolvedWeightsPath });
-        state.buildLog.push(`${state.resolvedWeightsFilename}: using local file`);
-        renderBuildLog();
-      }
-      if (state.resolvedMmprojPath) {
-        modelFiles.push({ role: 'mmproj', path: state.resolvedMmprojPath });
-        state.buildLog.push(`${state.resolvedMmprojFilename}: using local file`);
+    } else if (state.modelSource === 'custom') {
+      // Custom model files - just log the paths
+      for (const f of state.customModelFiles) {
+        modelFiles.push({ role: f.role, path: f.path });
+        const filename = f.path.split('/').pop();
+        state.buildLog.push(`${filename}: using custom file`);
         renderBuildLog();
       }
     }
@@ -3218,8 +2693,27 @@ function getFileName(path) {
 }
 
 function getSelectedGgufFilename() {
-  // Use resolved filename from backend
-  return state.resolvedWeightsFilename || null;
+  // Get GGUF filename from current model selection
+  if (state.modelSource === 'custom' && state.customModelFiles.length > 0) {
+    const weightsFile = state.customModelFiles.find(f => f.role === 'weights');
+    if (weightsFile?.path) {
+      return weightsFile.path.split('/').pop();
+    }
+  }
+
+  if (state.selectedModel && state.modelFileSelections) {
+    const sel = state.modelFileSelections['weights'];
+    if (sel?.source === 'custom' && sel.customPath) {
+      return sel.customPath.split('/').pop();
+    }
+    const weightsFile = state.selectedModel.files?.find(f => f.role === 'weights');
+    const quant = weightsFile?.quantizations[sel?.quantizationIdx || 0];
+    if (quant?.download_url) {
+      return getFilenameFromUrl(quant.download_url);
+    }
+  }
+
+  return null;
 }
 
 function getFilenameFromUrl(url) {
@@ -3294,64 +2788,274 @@ async function openExternalLink(event, url) {
   }
 }
 
-// Global exports
-window.goToStep = goToStep;
-window.nextStep = nextStep;
-window.prevStep = prevStep;
-window.selectVersionGroup = selectVersionGroup;
-window.selectSpecificRelease = selectSpecificRelease;
-window.toggleVersionGroup = toggleVersionGroup;
-window.selectModel = selectModel;
-window.searchModels = searchModels;
-window.filterModels = filterModels;
-window.updateConfig = updateConfig;
-window.updateSlider = updateSlider;
-window.toggleConfig = toggleConfig;
-window.selectComputeMode = selectComputeMode;
-window.toggleGpuOption = toggleGpuOption;
-window.toggleAgent = toggleAgent;
-window.toggleTool = toggleTool;
-window.updateSystemPrompt = updateSystemPrompt;
-window.selectCustomLlamafile = selectCustomLlamafile;
-window.clearCustomLlamafile = clearCustomLlamafile;
-window.selectOutputPath = selectOutputPath;
-window.refreshArgsContent = refreshArgsContent;
-window.updateArgsContent = updateArgsContent;
-window.startBuild = startBuild;
-window.resetBuild = resetBuild;
-window.cancelBuild = cancelBuild;
-window.confirmCancelBuild = confirmCancelBuild;
-window.dismissCancelConfirm = dismissCancelConfirm;
-window.openOutputFolder = openOutputFolder;
-window.toggleModelFileExpand = toggleModelFileExpand;
-window.selectFileQuantization = selectFileQuantization;
-window.selectCustomFileForRole = selectCustomFileForRole;
-window.clearCustomFileForRole = clearCustomFileForRole;
-window.handleShaVerifyChoice = handleShaVerifyChoice;
-window.selectCustomModel = selectCustomModel;
-window.addCompanionFile = addCompanionFile;
-window.removeCompanionFile = removeCompanionFile;
-window.clearCustomModel = clearCustomModel;
-window.selectDownloadDir = selectDownloadDir;
-window.updateModelDownloadDir = updateModelDownloadDir;
-window.updateOutputPath = updateOutputPath;
-window.submitHfToken = submitHfToken;
-window.cancelHfTokenPrompt = cancelHfTokenPrompt;
-window.handleFileExistsChoice = handleFileExistsChoice;
-window.openExternalLink = openExternalLink;
-window.selectOllamaSource = selectOllamaSource;
-window.selectOllamaModel = selectOllamaModel;
-window.expandOllamaSelection = expandOllamaSelection;
-window.clearOllamaModel = clearOllamaModel;
-window.selectOllamaCacheDir = selectOllamaCacheDir;
-window.updateOllamaCacheDir = updateOllamaCacheDir;
-window.selectLMStudioSource = selectLMStudioSource;
-window.selectLMStudioModel = selectLMStudioModel;
-window.selectLMStudioFile = selectLMStudioFile;
-window.toggleLMStudioFileExpand = toggleLMStudioFileExpand;
-window.expandLMStudioSelection = expandLMStudioSelection;
-window.clearLMStudioModel = clearLMStudioModel;
-window.selectLMStudioCacheDir = selectLMStudioCacheDir;
-window.updateLMStudioCacheDir = updateLMStudioCacheDir;
+// ============================================================================
+// Event Delegation System
+// ============================================================================
+
+/**
+ * Extract data attributes as parameters
+ * Converts data-kebab-case to camelCase
+ */
+function extractParams(element) {
+  const params = {};
+  for (const attr of element.attributes) {
+    if (attr.name.startsWith('data-') && 
+        attr.name !== 'data-action' && 
+        attr.name !== 'data-stop-propagation') {
+      // Convert data-model-id to modelId, data-group-name to groupName, etc.
+      const key = attr.name
+        .replace('data-', '')
+        .replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+      params[key] = attr.value;
+    }
+  }
+  return params;
+}
+
+/**
+ * Global click handler for all click events
+ * Uses data-action attribute to determine which function to call
+ */
+async function handleGlobalClick(event) {
+  const target = event.target.closest('[data-action]');
+  if (!target) return;
+  
+  const action = target.getAttribute('data-action');
+  const stopProp = target.getAttribute('data-stop-propagation') === 'true';
+  
+  if (stopProp) {
+    event.stopPropagation();
+  }
+  
+  event.preventDefault();
+  
+  const params = extractParams(target);
+  
+  try {
+    switch (action) {
+      // Navigation
+      case 'goToStep':
+        await goToStep(parseInt(params.step));
+        break;
+      case 'nextStep':
+        await nextStep();
+        break;
+      case 'prevStep':
+        prevStep();
+        break;
+      
+      // Version Selection
+      case 'selectVersionGroup':
+        await selectVersionGroup(params.groupName);
+        break;
+      case 'selectSpecificRelease':
+        await selectSpecificRelease(params.groupName, params.version);
+        break;
+      case 'toggleVersionGroup':
+        toggleVersionGroup(params.groupName);
+        break;
+      case 'selectCustomLlamafile':
+        await selectCustomLlamafile();
+        break;
+      case 'clearCustomLlamafile':
+        await clearCustomLlamafile();
+        break;
+      
+      // Model Selection
+      case 'selectModel':
+        await selectModel(params.modelId);
+        break;
+      case 'filterModels':
+        filterModels(params.filter);
+        break;
+      case 'selectDownloadDir':
+        await selectDownloadDir();
+        break;
+      case 'toggleModelFileExpand':
+        toggleModelFileExpand(params.role);
+        break;
+      case 'selectFileQuantization':
+        await selectFileQuantization(params.role, parseInt(params.index));
+        break;
+      case 'selectCustomFileForRole':
+        await selectCustomFileForRole(params.role);
+        break;
+      case 'clearCustomFileForRole':
+        await clearCustomFileForRole(params.role);
+        break;
+      case 'selectCustomModel':
+        await selectCustomModel();
+        break;
+      case 'addCompanionFile':
+        await addCompanionFile();
+        break;
+      case 'removeCompanionFile':
+        await removeCompanionFile(parseInt(params.index));
+        break;
+      case 'clearCustomModel':
+        await clearCustomModel();
+        break;
+      
+      // Configuration
+      case 'toggleConfig':
+        await toggleConfig(params.configKey);
+        break;
+      
+      // Compute
+      case 'selectComputeMode':
+        selectComputeMode(params.mode);
+        break;
+      case 'toggleGpuOption':
+        toggleGpuOption(params.option);
+        break;
+      
+      // Agent
+      case 'toggleAgent':
+        toggleAgent();
+        break;
+      case 'toggleTool':
+        toggleTool(params.toolId);
+        break;
+      
+      // Build
+      case 'startBuild':
+        await startBuild();
+        break;
+      case 'cancelBuild':
+        cancelBuild();
+        break;
+      case 'resetBuild':
+        resetBuild();
+        break;
+      case 'openOutputFolder':
+        await openOutputFolder();
+        break;
+      case 'refreshArgsContent':
+        await refreshArgsContent();
+        renderCurrentStep();
+        break;
+      case 'selectOutputPath':
+        await selectOutputPath();
+        break;
+      
+      // Modals
+      case 'submitHfToken':
+        {
+          const input = document.getElementById('hf-token-input');
+          await submitHfToken(input ? input.value : '');
+        }
+        break;
+      case 'cancelHfTokenPrompt':
+        cancelHfTokenPrompt();
+        break;
+      case 'handleFileExistsChoice':
+        handleFileExistsChoice(params.choice);
+        break;
+      case 'handleShaVerifyChoice':
+        await handleShaVerifyChoice(params.choice);
+        break;
+      case 'confirmCancelBuild':
+        await confirmCancelBuild();
+        break;
+      case 'dismissCancelConfirm':
+        dismissCancelConfirm();
+        break;
+      
+      // External links
+      case 'openExternalLink':
+        await openExternalLink(event, params.url);
+        break;
+      
+      default:
+        console.warn('Unknown action:', action, params);
+    }
+  } catch (err) {
+    console.error('Error handling action:', action, err);
+  }
+}
+
+/**
+ * Global input handler for oninput events
+ */
+function handleGlobalInput(event) {
+  const target = event.target.closest('[data-action]');
+  if (!target) return;
+  
+  const action = target.getAttribute('data-action');
+  const params = extractParams(target);
+  
+  try {
+    switch (action) {
+      case 'searchModels':
+        searchModels(event.target.value);
+        break;
+      case 'updateSlider':
+        {
+          const isInteger = params.isInteger === 'true';
+          updateSlider(params.configKey, event.target.value, isInteger);
+        }
+        break;
+      case 'updateArgsContent':
+        updateArgsContent(event.target.value);
+        break;
+      default:
+        // Ignore unknown input actions
+        break;
+    }
+  } catch (err) {
+    console.error('Error handling input:', action, err);
+  }
+}
+
+/**
+ * Global change handler for onchange events
+ */
+function handleGlobalChange(event) {
+  const target = event.target.closest('[data-action]');
+  if (!target) return;
+  
+  const action = target.getAttribute('data-action');
+  const params = extractParams(target);
+  
+  try {
+    switch (action) {
+      case 'updateConfig':
+        {
+          const valueType = params.valueType;
+          const value = valueType === 'number' ? parseInt(event.target.value) : event.target.value;
+          updateConfig(params.configKey, value);
+        }
+        break;
+      case 'updateSystemPrompt':
+        updateSystemPrompt(event.target.value);
+        break;
+      case 'updateArgsContent':
+        updateArgsContent(event.target.value);
+        break;
+      default:
+        // Ignore unknown change actions
+        break;
+    }
+  } catch (err) {
+    console.error('Error handling change:', action, err);
+  }
+}
+
+/**
+ * Global keydown handler for special keys (e.g., Enter in HF token input)
+ */
+function handleGlobalKeydown(event) {
+  if (event.key !== 'Enter') return;
+  
+  const target = event.target.closest('[data-action]');
+  if (!target) return;
+  
+  const action = target.getAttribute('data-action');
+  
+  if (action === 'submitHfToken') {
+    event.preventDefault();
+    submitHfToken(event.target.value);
+  }
+}
 
 document.addEventListener('DOMContentLoaded', init);

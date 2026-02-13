@@ -5,6 +5,52 @@ use std::sync::Arc;
 use tauri::Emitter;
 use tauri::State;
 
+/// Find zipalign binary in multiple possible locations
+fn find_zipalign_binary() -> Result<std::path::PathBuf, String> {
+    // 1. Check if running in snap environment
+    if let Ok(snap_dir) = std::env::var("SNAP") {
+        let snap_path = std::path::Path::new(&snap_dir).join("bin").join("zipalign");
+        if snap_path.exists() {
+            return Ok(snap_path);
+        }
+    }
+    
+    // 2. Check in development mode (relative to CARGO_MANIFEST_DIR)
+    let dev_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("bin").join("zipalign");
+    if dev_path.exists() {
+        return Ok(dev_path);
+    }
+    
+    // 3. Check in PATH
+    if let Ok(output) = std::process::Command::new("which").arg("zipalign").output() {
+        if output.status.success() {
+            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path_str.is_empty() {
+                return Ok(std::path::PathBuf::from(path_str));
+            }
+        }
+    }
+    
+    // 4. Check next to the executable
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let sibling_path = exe_dir.join("zipalign");
+            if sibling_path.exists() {
+                return Ok(sibling_path);
+            }
+        }
+    }
+    
+    Err(format!(
+        "zipalign not found. Searched in:\n  \
+        - $SNAP/bin/zipalign (snap mode)\n  \
+        - {} (dev mode)\n  \
+        - $PATH\n  \
+        - Next to executable",
+        dev_path.display()
+    ))
+}
+
 /// Global app state
 pub struct AppState {
     pub build_state: BuildStateManager,
@@ -318,14 +364,11 @@ pub async fn run_zipalign(
     use tokio::process::Command;
     use tokio::io::{AsyncBufReadExt, BufReader};
 
-    let bin_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("bin");
-    let zipalign_path = bin_dir.join("zipalign");
-
-    if !zipalign_path.exists() {
-        let msg = format!("zipalign not found at {}", zipalign_path.display());
-        app_handle.emit("build-log", &msg).ok();
-        return Err(msg);
-    }
+    // Try to find zipalign in multiple locations
+    let zipalign_path = find_zipalign_binary()?;
+    
+    let debug_msg = format!("Using zipalign at: {}", zipalign_path.display());
+    app_handle.emit("build-log", &debug_msg).ok();
 
     // Log the command being run
     let cmd_line = format!("$ zipalign {}", args.join(" "));
