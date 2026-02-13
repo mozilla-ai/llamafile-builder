@@ -81,7 +81,10 @@ parts:
       install -Dm755 src-tauri/target/release/llamafile-builder \
         $SNAPCRAFT_PART_INSTALL/bin/llamafile-builder
       
-      # Install zipalign binary
+      # Assimilate and install zipalign binary
+      # Convert APE (Actually Portable Executable) to native ELF for snap compatibility
+      echo "Converting zipalign APE to native ELF..."
+      src-tauri/bin/zipalign --assimilate || true
       install -Dm755 src-tauri/bin/zipalign \
         $SNAPCRAFT_PART_INSTALL/bin/zipalign
       
