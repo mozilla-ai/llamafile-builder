@@ -1,0 +1,139 @@
+name: llamafile-builder
+version: git
+summary: Build custom llamafiles with bundled models and configurations
+description: |
+  A desktop application for building custom llamafiles with bundled 
+  models and configurations.
+  
+  Features:
+  • Version Selection — Choose from stable, latest, or legacy llamafile versions
+  • Model Browser — Search and filter models from Hugging Face
+  • Configuration — Set server parameters (host, port, context length, threads)
+  • Compute Target — Build CPU-only or GPU-accelerated llamafiles
+  • Agent Mode — Create agentfiles with bundled tools and system instructions
+  • One-Click Build — Downloads weights, bundles runtime, creates executable
+
+license: MIT
+grade: devel
+confinement: strict
+base: core24
+
+platforms:
+  amd64:
+  arm64:
+  armhf:
+
+apps:
+  llamafile-builder:
+    command: bin/llamafile-builder
+    extensions: [gnome]
+    plugs:
+      - home
+      - network
+      - removable-media
+      - desktop
+      - desktop-legacy
+      - wayland
+      - x11
+      - opengl
+    environment:
+      WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+
+parts:
+  llamafile-builder:
+    plugin: rust
+    source: .
+    rust-channel: stable
+    
+    build-packages:
+      - libwebkit2gtk-4.1-dev
+      - libgtk-3-dev
+      - libayatana-appindicator3-dev
+      - libjavascriptcoregtk-4.1-dev
+      - librsvg2-dev
+      - libssl-dev
+      - libpango1.0-dev
+      - libgdk-pixbuf2.0-dev
+      - libsoup-3.0-dev
+      - patchelf
+      - file
+      - pkg-config
+      - imagemagick
+    
+    stage-packages:
+      - libwebkit2gtk-4.1-0
+      - libgtk-3-0
+      - libayatana-appindicator3-1
+      - libjavascriptcoregtk-4.1-0
+      - librsvg2-2
+      - libgdk-pixbuf2.0-0
+      - libpango-1.0-0
+      - libcairo2
+      - libsoup-3.0-0
+    
+    override-build: |
+      set -eux
+      
+      # Build the Tauri application
+      cargo tauri build --bundles deb
+      
+      # Install the main binary
+      install -Dm755 src-tauri/target/release/llamafile-builder \
+        $SNAPCRAFT_PART_INSTALL/bin/llamafile-builder
+      
+      # Find and install desktop file from Tauri's deb bundle
+      DESKTOP_FILE=$(find src-tauri/target/release/bundle/deb -name "*.desktop" 2>/dev/null | head -n1)
+      
+      if [ -n "$DESKTOP_FILE" ] && [ -f "$DESKTOP_FILE" ]; then
+        echo "Found Tauri-generated desktop file: $DESKTOP_FILE"
+        install -Dm644 "$DESKTOP_FILE" \
+          $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop
+        
+        # Fix desktop file paths for snap
+        sed -i 's|Exec=.*|Exec=llamafile-builder|g' \
+          $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop
+        sed -i 's|Icon=.*|Icon=${SNAP}/share/icons/hicolor/512x512/apps/llamafile-builder.png|g' \
+          $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop
+      else
+        echo "Tauri did not generate desktop file, creating fallback..."
+        mkdir -p $SNAPCRAFT_PART_INSTALL/share/applications
+        cat > $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop <<EOF
+      [Desktop Entry]
+      Version=1.0
+      Type=Application
+      Name=llamafile Builder
+      Comment=Build custom llamafiles with bundled models and configurations
+      Exec=llamafile-builder
+      Icon=\${SNAP}/share/icons/hicolor/512x512/apps/llamafile-builder.png
+      Terminal=false
+      Categories=Development;Utility;
+      Keywords=llamafile;ai;llm;builder;
+      StartupWMClass=llamafile-builder
+      EOF
+      fi
+      
+      # Generate and install icons at multiple sizes
+      mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/32x32/apps
+      mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/64x64/apps
+      mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/128x128/apps
+      mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/256x256/apps
+      mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/512x512/apps
+      
+      if [ -f src/llamafile-icon.png ]; then
+        # Generate various sizes using ImageMagick
+        convert src/llamafile-icon.png -resize 32x32 \
+          $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/32x32/apps/llamafile-builder.png
+        convert src/llamafile-icon.png -resize 64x64 \
+          $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/64x64/apps/llamafile-builder.png
+        convert src/llamafile-icon.png -resize 128x128 \
+          $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/128x128/apps/llamafile-builder.png
+        convert src/llamafile-icon.png -resize 256x256 \
+          $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/256x256/apps/llamafile-builder.png
+        convert src/llamafile-icon.png -resize 512x512 \
+          $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/512x512/apps/llamafile-builder.png
+        echo "Icons generated successfully!"
+      else
+        echo "Warning: Icon not found at src/llamafile-icon.png"
+      fi
+      
+      echo "Build completed successfully!"
