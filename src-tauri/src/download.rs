@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::fs::{File, OpenOptions};
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use thiserror::Error;
 use serde::{Deserialize, Serialize};
 
@@ -324,34 +324,9 @@ pub async fn delete_file(path: &Path) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-/// Format bytes as human-readable string
-pub fn format_bytes(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = KB * 1024;
-    const GB: u64 = MB * 1024;
-
-    if bytes >= GB {
-        format!("{:.2} GB", bytes as f64 / GB as f64)
-    } else if bytes >= MB {
-        format!("{:.1} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.0} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{} B", bytes)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_format_bytes() {
-        assert_eq!(format_bytes(500), "500 B");
-        assert_eq!(format_bytes(1500), "1 KB");
-        assert_eq!(format_bytes(1_500_000), "1.4 MB");
-        assert_eq!(format_bytes(5_000_000_000), "4.66 GB");
-    }
 
     #[test]
     fn test_is_huggingface_url() {

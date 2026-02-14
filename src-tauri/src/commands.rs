@@ -695,11 +695,11 @@ fn get_stored_hf_token(app_handle: &tauri::AppHandle) -> Result<Option<String>, 
 /// Open a URL in the system's default browser
 #[tauri::command]
 pub async fn open_url(url: String, app_handle: tauri::AppHandle) -> Result<(), String> {
-    use tauri_plugin_shell::ShellExt;
+    use tauri_plugin_opener::OpenerExt;
 
     app_handle
-        .shell()
-        .open(&url, None)
+        .opener()
+        .open_url(&url, None::<&str>)
         .map_err(|e| e.to_string())
 }
 

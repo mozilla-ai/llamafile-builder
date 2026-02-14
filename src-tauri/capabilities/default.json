@@ -11,6 +11,7 @@
     "dialog:allow-confirm",
     "dialog:allow-message",
     "fs:default",
-    "shell:allow-open"
+    "shell:allow-open",
+    "opener:default"
   ]
 }

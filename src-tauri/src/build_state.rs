@@ -349,14 +349,6 @@ impl BuildStateManager {
         self.state.lock().unwrap().clone()
     }
 
-    pub fn get_models(&self) -> Vec<crate::models::Model> {
-        self.models.lock().unwrap().clone()
-    }
-
-    pub fn get_versions(&self) -> Vec<crate::models::LlamafileVersionGroup> {
-        self.versions.lock().unwrap().clone()
-    }
-
     pub fn select_registry_model(&self, model_id: String) -> BuildState {
         let models = self.models.lock().unwrap();
         let mut state = self.state.lock().unwrap();
