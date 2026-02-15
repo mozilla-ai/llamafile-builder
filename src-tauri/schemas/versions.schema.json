@@ -69,6 +69,63 @@
           "type": "string",
           "pattern": "^[a-f0-9]{64}$",
           "description": "SHA-256 checksum of the file for integrity verification"
+        },
+        "gpu_libs": {
+          "$ref": "#/$defs/GpuLibs",
+          "description": "Optional GPU library downloads for this release"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GpuLibs": {
+      "type": "object",
+      "description": "GPU libraries available for different backends",
+      "properties": {
+        "cuda": {
+          "$ref": "#/$defs/GpuLibsByPlatform",
+          "description": "CUDA libraries for NVIDIA GPUs"
+        },
+        "rocm": {
+          "$ref": "#/$defs/GpuLibsByPlatform",
+          "description": "ROCm libraries for AMD GPUs"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GpuLibsByPlatform": {
+      "type": "object",
+      "description": "GPU library downloads by platform",
+      "properties": {
+        "linux": {
+          "$ref": "#/$defs/GpuLibrary",
+          "description": "Linux shared library (.so)"
+        },
+        "windows": {
+          "$ref": "#/$defs/GpuLibrary",
+          "description": "Windows DLL (.dll)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GpuLibrary": {
+      "type": "object",
+      "description": "A downloadable GPU library",
+      "required": ["download_url", "size_bytes"],
+      "properties": {
+        "download_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Direct download URL for the library"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "File size in bytes"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 checksum for integrity verification"
         }
       },
       "additionalProperties": false

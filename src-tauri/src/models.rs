@@ -1,5 +1,32 @@
 use serde::{Deserialize, Serialize};
 
+/// GPU library download info for a specific platform
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GpuLibrary {
+    pub download_url: String,
+    pub size_bytes: u64,
+    #[serde(default)]
+    pub sha256: Option<String>,
+}
+
+/// GPU libraries available for different platforms
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GpuLibsByPlatform {
+    #[serde(default)]
+    pub linux: Option<GpuLibrary>,
+    #[serde(default)]
+    pub windows: Option<GpuLibrary>,
+}
+
+/// GPU libraries for a release (CUDA and ROCm)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GpuLibs {
+    #[serde(default)]
+    pub cuda: Option<GpuLibsByPlatform>,
+    #[serde(default)]
+    pub rocm: Option<GpuLibsByPlatform>,
+}
+
 /// Individual llamafile release within a version group
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlamafileRelease {
@@ -10,6 +37,9 @@ pub struct LlamafileRelease {
     pub download_url: String,
     pub size_bytes: u64,
     pub sha256: String,
+    /// GPU libraries available for this release
+    #[serde(default)]
+    pub gpu_libs: Option<GpuLibs>,
 }
 
 /// Grouped llamafile version (e.g. "llamafile 0.9" containing multiple releases)

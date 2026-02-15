@@ -129,6 +129,8 @@ const invoke = window.__TAURI__?.core?.invoke || (async (cmd, args) => {
       return '/mock/.llamafile/bin';
     case 'get_model_cache_dir':
       return '/mock/.llamafile/models';
+    case 'get_gpu_lib_cache_dir':
+      return `/mock/.llamafile/v/${args?.version || 'unknown'}`;
     case 'select_model_file_path':
       return '/mock/models/custom-model.gguf';
     case 'select_model_download_dir':
@@ -1983,54 +1985,79 @@ async function toggleConfig(key) {
 // ============================================================================
 
 function renderComputeStep() {
-  const modelSize = getTotalModelSize();
   const estimatedSize = estimateTotalSize();
   const sizePercent = Math.min((estimatedSize / 10e9) * 100, 100);
+
+  // Check if GPU libs are available for the selected release (any platform)
+  const availableGpuLibs = getGpuLibsForRelease(state.selectedRelease);
+  const hasAnyCudaOrRocm = availableGpuLibs.cuda || availableGpuLibs.rocm;
+
+  // Get actual sizes and platform info from release metadata
+  const cudaSize = availableGpuLibs.cuda?.totalSize;
+  const cudaPlatforms = availableGpuLibs.cuda?.platforms.join(', ') || '';
+  const rocmSize = availableGpuLibs.rocm?.totalSize;
+  const rocmPlatforms = availableGpuLibs.rocm?.platforms.join(', ') || '';
+
+  // GPU is always available: Metal (macOS) is built-in, CUDA/ROCm depend on release
+  const gpuAvailable = true;
 
   return `
     <div class="step-panel active">
       <div class="content-header">
         <div class="content-title">Compute Target</div>
-        <div class="content-subtitle">Choose whether to bundle GPU acceleration libraries.</div>
+        <div class="content-subtitle">Choose whether to bundle GPU acceleration libraries for your target platforms.</div>
       </div>
       <div class="content-body">
         <div class="compute-grid">
           <div class="compute-card ${state.computeMode === 'cpu' ? 'selected' : ''}" onclick="selectComputeMode('cpu')">
             <div class="compute-card-icon">\ud83e\uddf3</div>
             <div class="compute-card-title">CPU Only</div>
-            <div class="compute-card-desc">Lean build, runs on any x86_64 or ARM64 machine.</div>
+            <div class="compute-card-desc">Lean build, runs on any x86_64 or ARM64 machine. Passes --gpu DISABLE to prevent Metal compilation.</div>
             <div class="compute-card-meta">
               <span class="meta-chip">x86_64</span>
               <span class="meta-chip">ARM64</span>
-              <span class="meta-chip">~5 MB</span>
             </div>
           </div>
           <div class="compute-card ${state.computeMode === 'gpu' ? 'selected' : ''}" onclick="selectComputeMode('gpu')">
             <div class="compute-card-icon">\ud83d\udd25</div>
             <div class="compute-card-title">GPU Accelerated</div>
-            <div class="compute-card-desc">Bundles CUDA, ROCm, and Metal support.</div>
+            <div class="compute-card-desc">Bundle GPU libraries for target platforms.</div>
             <div class="compute-card-meta">
-              <span class="meta-chip">CUDA</span>
-              <span class="meta-chip">ROCm</span>
               <span class="meta-chip">Metal</span>
+              ${availableGpuLibs.cuda ? '<span class="meta-chip">CUDA</span>' : ''}
+              ${availableGpuLibs.rocm ? '<span class="meta-chip">ROCm</span>' : ''}
             </div>
           </div>
         </div>
 
         <div class="config-section" style="opacity: ${state.computeMode === 'gpu' ? 1 : 0.3}; pointer-events: ${state.computeMode === 'gpu' ? 'all' : 'none'};">
           <div class="config-section-title">GPU Options</div>
-          <div class="toggle-row" onclick="toggleGpuOption('cuda')">
-            <div class="toggle-info"><div class="toggle-title">NVIDIA CUDA</div><div class="toggle-desc">~180 MB</div></div>
-            <div class="toggle-switch ${state.gpuOptions.cuda ? 'on' : ''}"></div>
-          </div>
-          <div class="toggle-row" onclick="toggleGpuOption('rocm')">
-            <div class="toggle-info"><div class="toggle-title">AMD ROCm</div><div class="toggle-desc">~60 MB</div></div>
-            <div class="toggle-switch ${state.gpuOptions.rocm ? 'on' : ''}"></div>
-          </div>
           <div class="toggle-row" onclick="toggleGpuOption('metal')">
-            <div class="toggle-info"><div class="toggle-title">Apple Metal</div><div class="toggle-desc">~10 MB</div></div>
+            <div class="toggle-info"><div class="toggle-title">Apple Metal</div><div class="toggle-desc">macOS — Built-in (compiles on first run)</div></div>
             <div class="toggle-switch ${state.gpuOptions.metal ? 'on' : ''}"></div>
           </div>
+          ${availableGpuLibs.cuda ? `
+            <div class="toggle-row" onclick="toggleGpuOption('cuda')">
+              <div class="toggle-info"><div class="toggle-title">NVIDIA CUDA</div><div class="toggle-desc">${cudaPlatforms} — ${formatBytes(cudaSize)}</div></div>
+              <div class="toggle-switch ${state.gpuOptions.cuda ? 'on' : ''}"></div>
+            </div>
+          ` : `
+            <div class="toggle-row" style="opacity: 0.5; cursor: not-allowed;">
+              <div class="toggle-info"><div class="toggle-title">NVIDIA CUDA</div><div class="toggle-desc">Not available for this version</div></div>
+              <div class="toggle-switch"></div>
+            </div>
+          `}
+          ${availableGpuLibs.rocm ? `
+            <div class="toggle-row" onclick="toggleGpuOption('rocm')">
+              <div class="toggle-info"><div class="toggle-title">AMD ROCm</div><div class="toggle-desc">${rocmPlatforms} — ${formatBytes(rocmSize)}</div></div>
+              <div class="toggle-switch ${state.gpuOptions.rocm ? 'on' : ''}"></div>
+            </div>
+          ` : `
+            <div class="toggle-row" style="opacity: 0.5; cursor: not-allowed;">
+              <div class="toggle-info"><div class="toggle-title">AMD ROCm</div><div class="toggle-desc">Not available for this version</div></div>
+              <div class="toggle-switch"></div>
+            </div>
+          `}
         </div>
 
         <div class="size-estimate">
@@ -2047,16 +2074,37 @@ function renderComputeStep() {
   `;
 }
 
-function selectComputeMode(mode) { state.computeMode = mode; renderCurrentStep(); }
-function toggleGpuOption(opt) { state.gpuOptions[opt] = !state.gpuOptions[opt]; renderCurrentStep(); }
+function selectComputeMode(mode) {
+  state.computeMode = mode;
+  renderCurrentStep();
+}
+
+function toggleGpuOption(opt) {
+  // Only toggle if the option is available
+  const availableGpuLibs = getGpuLibsForRelease(state.selectedRelease);
+  if (opt === 'cuda' && !availableGpuLibs.cuda) return;
+  if (opt === 'rocm' && !availableGpuLibs.rocm) return;
+  state.gpuOptions[opt] = !state.gpuOptions[opt];
+  renderCurrentStep();
+}
 
 function estimateTotalSize() {
   const modelSize = getTotalModelSize();
-  let overhead = 5e6;
+  // Use actual runtime size from selected release
+  let overhead = state.selectedRelease?.size_bytes || 0;
+
   if (state.computeMode === 'gpu') {
-    if (state.gpuOptions.cuda) overhead += 180e6;
-    if (state.gpuOptions.rocm) overhead += 60e6;
-    if (state.gpuOptions.metal) overhead += 10e6;
+    const availableGpuLibs = getGpuLibsForRelease(state.selectedRelease);
+    // Use actual sizes from release metadata when available
+    if (state.gpuOptions.cuda && availableGpuLibs.cuda) {
+      overhead += availableGpuLibs.cuda.totalSize;
+    }
+    if (state.gpuOptions.rocm && availableGpuLibs.rocm) {
+      overhead += availableGpuLibs.rocm.totalSize;
+    }
+    if (state.gpuOptions.metal) {
+      overhead += 10e6; // Metal sources are small
+    }
   }
   if (state.agentEnabled) overhead += 1e6;
   return modelSize + overhead;
@@ -2835,9 +2883,16 @@ async function startBuild() {
     const modelFilename = weightsFile.path.split('/').pop();
     const mmprojFilename = mmprojFile ? mmprojFile.path.split('/').pop() : null;
 
+    // Prepare config values for .args generation
+    // Add gpu_mode: 'DISABLE' for CPU-only mode to prevent Metal from being used
+    const configValuesForBuild = { ...state.configValues };
+    if (state.computeMode === 'cpu') {
+      configValuesForBuild.gpu_mode = 'DISABLE';
+    }
+
     // Generate .args content
     const argsContent = await invoke('generate_args_content', {
-      configValues: state.configValues,
+      configValues: configValuesForBuild,
       modelFilename,
       mmprojFilename,
     });
@@ -2852,18 +2907,117 @@ async function startBuild() {
     state.buildLog.push(argsContent.split('\n').map(l => `  ${l}`).join('\n'));
     renderBuildLog();
 
-    // Step 4: Bundle GPU (placeholder for future)
-    state.buildProgress = { stage: 'bundling_gpu', progress_pct: 80, message: 'Bundling GPU libraries...' };
+    // Step 4: Download and prepare GPU libraries
+    state.buildProgress = { stage: 'bundling_gpu', progress_pct: 80, message: 'Preparing GPU libraries...' };
     renderCurrentStep();
     state.buildLog.push(`Compute mode: ${state.computeMode}`);
-    if (state.computeMode === 'gpu') {
-      const gpus = [];
-      if (state.gpuOptions.cuda) gpus.push('CUDA');
-      if (state.gpuOptions.rocm) gpus.push('ROCm');
-      if (state.gpuOptions.metal) gpus.push('Metal');
-      state.buildLog.push(`GPU targets: ${gpus.join(', ') || 'none'} (not yet implemented)`);
-    }
     renderBuildLog();
+
+    // Track all GPU lib paths for zipalign (can have multiple per lib type for different platforms)
+    const gpuLibPaths = [];
+
+    if (state.computeMode === 'gpu') {
+      const gpuTargets = [];
+      if (state.gpuOptions.metal) gpuTargets.push('Metal (built-in)');
+
+      // Check if GPU libs are available for selected release
+      const availableGpuLibs = getGpuLibsForRelease(state.selectedRelease);
+      const version = state.selectedRelease?.version || 'unknown';
+      const cacheDir = await invoke('get_gpu_lib_cache_dir', { version });
+
+      // Helper to download a GPU lib for a specific platform
+      async function downloadGpuLib(libType, platform, libInfo, progressPct) {
+        const platformSuffix = platform === 'windows' ? '.dll' : '.so';
+        const filename = `ggml-${libType}${platformSuffix}`;
+        const cachePath = `${cacheDir}/${filename}`;
+
+        state.buildProgress = { stage: 'bundling_gpu', progress_pct: progressPct, message: `Downloading ${libType.toUpperCase()} library (${platform})...` };
+        renderCurrentStep();
+
+        const action = await checkFileExistsWithPrompt(
+          cachePath,
+          libInfo.size_bytes,
+          libInfo.sha256
+        );
+
+        if (action === 'cancel') {
+          throw new Error(`${libType.toUpperCase()} library download cancelled`);
+        } else if (action === 'download' || action === 'resume') {
+          const isResume = action === 'resume';
+          state.buildLog.push(`${isResume ? 'Resuming' : 'Downloading'} ${libType.toUpperCase()} library (${platform})...`);
+          renderBuildLog();
+          state.currentDownloadPath = cachePath;
+          try {
+            const downloadedPath = await downloadWithAuth(
+              libInfo.download_url,
+              cachePath,
+              libInfo.size_bytes,
+              libInfo.sha256,
+              isResume
+            );
+            state.currentDownloadPath = null;
+            state.downloadProgress = null;
+            state.buildLog.push(`${libType.toUpperCase()} (${platform}): downloaded`);
+            renderBuildLog();
+            return downloadedPath;
+          } catch (err) {
+            state.currentDownloadPath = null;
+            state.downloadProgress = null;
+            state.buildLog.push(`${libType.toUpperCase()} (${platform}) download failed: ${err}`);
+            renderBuildLog();
+            const continueWithout = confirm(`${libType.toUpperCase()} library (${platform}) download failed: ${err}\n\nContinue without this library?`);
+            if (!continueWithout) {
+              throw new Error(`${libType.toUpperCase()} library download failed: ${err}`);
+            }
+            return null;
+          }
+        } else {
+          state.buildLog.push(`${libType.toUpperCase()} (${platform}): using cached`);
+          renderBuildLog();
+          return cachePath;
+        }
+      }
+
+      // Download CUDA libraries for all available platforms
+      if (state.gpuOptions.cuda && availableGpuLibs.cuda) {
+        let progressPct = 82;
+        for (const platform of availableGpuLibs.cuda.platforms) {
+          const libInfo = availableGpuLibs.cuda.libs[platform];
+          if (libInfo) {
+            const path = await downloadGpuLib('cuda', platform, libInfo, progressPct);
+            if (path) gpuLibPaths.push(path);
+            progressPct += 1;
+          }
+        }
+        if (gpuLibPaths.length > 0) gpuTargets.push('CUDA');
+      } else if (state.gpuOptions.cuda && !availableGpuLibs.cuda) {
+        state.buildLog.push('CUDA: not available for this llamafile version');
+        renderBuildLog();
+      }
+
+      // Download ROCm libraries for all available platforms
+      if (state.gpuOptions.rocm && availableGpuLibs.rocm) {
+        let progressPct = 84;
+        for (const platform of availableGpuLibs.rocm.platforms) {
+          const libInfo = availableGpuLibs.rocm.libs[platform];
+          if (libInfo) {
+            const path = await downloadGpuLib('rocm', platform, libInfo, progressPct);
+            if (path) gpuLibPaths.push(path);
+            progressPct += 1;
+          }
+        }
+        gpuTargets.push('ROCm');
+      } else if (state.gpuOptions.rocm && !availableGpuLibs.rocm) {
+        state.buildLog.push('ROCm: not available for this llamafile version/platform');
+        renderBuildLog();
+      }
+
+      state.buildLog.push(`GPU targets: ${gpuTargets.join(', ') || 'none'}`);
+      renderBuildLog();
+    } else {
+      state.buildLog.push('GPU acceleration disabled (--gpu DISABLE)');
+      renderBuildLog();
+    }
 
     // Step 5: Create executable
     state.buildProgress = { stage: 'creating_executable', progress_pct: 85, message: 'Creating executable...' };
@@ -2889,6 +3043,14 @@ async function startBuild() {
     if (mmprojFile) {
       zipalignArgs.push(mmprojFile.path);
       state.buildLog.push(`Adding mmproj: ${mmprojFilename}`);
+      renderBuildLog();
+    }
+
+    // Add GPU libraries if downloaded
+    for (const gpuLibPath of gpuLibPaths) {
+      zipalignArgs.push(gpuLibPath);
+      const libName = gpuLibPath.split('/').pop();
+      state.buildLog.push(`Adding GPU library: ${libName}`);
       renderBuildLog();
     }
 
@@ -2986,7 +3148,7 @@ async function goToStep(step) {
 async function nextStep() {
   if (state.currentStep < STEPS.length) {
     // Skip steps 4, 5 (Compute, Agent) - go from Configuration to Build
-    if (state.currentStep === 3) {
+    if (state.currentStep === 4) {
       state.currentStep = 6;
     } else {
       state.currentStep++;
@@ -3046,6 +3208,57 @@ function getFilenameFromUrl(url) {
   } catch {
     return url.split('/').pop() || 'file';
   }
+}
+
+// Get current platform for GPU library selection
+function getCurrentPlatform() {
+  // In Tauri, we can detect via navigator.platform or system info
+  // For now, use a simple heuristic that works in browser and Tauri
+  const platform = navigator.platform?.toLowerCase() || '';
+  if (platform.includes('win')) return 'windows';
+  if (platform.includes('linux')) return 'linux';
+  if (platform.includes('mac')) return 'darwin';
+  // Fallback based on userAgent
+  const ua = navigator.userAgent?.toLowerCase() || '';
+  if (ua.includes('windows')) return 'windows';
+  if (ua.includes('linux')) return 'linux';
+  return 'darwin'; // Default to macOS
+}
+
+// Get GPU library info for a release (all platforms, for cross-platform bundling)
+function getGpuLibsForRelease(release) {
+  if (!release?.gpu_libs) return { cuda: null, rocm: null };
+
+  const cuda = release.gpu_libs.cuda;
+  const rocm = release.gpu_libs.rocm;
+
+  // Aggregate CUDA libs across platforms
+  let cudaInfo = null;
+  if (cuda && (cuda.linux || cuda.windows)) {
+    const platforms = [];
+    let totalSize = 0;
+    if (cuda.linux) {
+      platforms.push('linux');
+      totalSize += cuda.linux.size_bytes;
+    }
+    if (cuda.windows) {
+      platforms.push('windows');
+      totalSize += cuda.windows.size_bytes;
+    }
+    cudaInfo = { platforms, totalSize, libs: cuda };
+  }
+
+  // Aggregate ROCm libs (Linux only)
+  let rocmInfo = null;
+  if (rocm && rocm.linux) {
+    rocmInfo = {
+      platforms: ['linux'],
+      totalSize: rocm.linux.size_bytes,
+      libs: rocm,
+    };
+  }
+
+  return { cuda: cudaInfo, rocm: rocmInfo };
 }
 
 async function openExternalLink(event, url) {

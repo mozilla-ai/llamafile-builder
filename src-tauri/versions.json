@@ -10,7 +10,23 @@
         "release_date": "2026-02-10",
         "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10.0_alpha/resolve/main/llamafile_0.10.0.alpha",
         "size_bytes": 28135696,
-        "sha256": "a139e6f13802ba855301a3042f675ef6f401c3eb9e876a4b42c7847e7124bf91"
+        "sha256": "a139e6f13802ba855301a3042f675ef6f401c3eb9e876a4b42c7847e7124bf91",
+        "gpu_libs": {
+          "cuda": {
+            "linux": {
+              "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10.0_alpha/resolve/main/ggml-cuda.so",
+              "size_bytes": 683016248,
+              "sha256": "ebf39eb42325416e8d41261f364ad8c319d56e9d5ab9e8b19657dc8272b9ff8c"
+            }
+          },
+          "rocm": {
+            "linux": {
+              "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10.0_alpha/resolve/main/ggml-rocm.so",
+              "size_bytes": 454744712,
+              "sha256": "f3af314669d2d8c5228ad2c1d68eb25e21bad90e620c049585ebd2466ca23f0d"
+            }
+          }
+        }
       }
     ]
   },

@@ -122,6 +122,11 @@ fn process_schema_items(items: &[ConfigSchemaItem], ctx: &ArgsContext, lines: &m
                     continue;
                 }
 
+                // Skip empty strings (e.g., gpu_mode when not set)
+                if value_str.is_empty() {
+                    continue;
+                }
+
                 // Resolve placeholders
                 let resolved = value_str
                     .replace("${MODEL_FILENAME}", ctx.model_filename)

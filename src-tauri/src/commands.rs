@@ -91,67 +91,6 @@ pub async fn get_model_details(model_id: String) -> Result<Option<Model>, String
     Ok(models.into_iter().find(|m| m.id == model_id))
 }
 
-/// Start the build process
-#[tauri::command]
-pub async fn start_build(
-    config: BuildConfig,
-    app_handle: tauri::AppHandle,
-) -> Result<(), String> {
-    use std::time::Duration;
-    use tokio::time::sleep;
-
-    let stages = vec![
-        (BuildStage::DownloadingModel, "Downloading model weights...", 60.0),
-        (BuildStage::DownloadingRuntime, "Fetching llamafile runtime...", 75.0),
-        (BuildStage::WritingConfig, "Writing .args configuration...", 82.0),
-        (BuildStage::BundlingGpu, "Bundling GPU libraries...", 95.0),
-        (BuildStage::CreatingExecutable, "Creating executable...", 100.0),
-    ];
-
-    for (stage, message, progress) in stages {
-        let progress_update = BuildProgress {
-            stage: stage.clone(),
-            progress_pct: progress,
-            message: message.to_string(),
-            bytes_downloaded: 0,
-            bytes_total: 0,
-            error: None,
-        };
-
-        app_handle.emit("build-progress", &progress_update)
-            .map_err(|e| e.to_string())?;
-
-        // Simulate work
-        sleep(Duration::from_millis(1500)).await;
-    }
-
-    // Final completion
-    let complete = BuildProgress {
-        stage: BuildStage::Complete,
-        progress_pct: 100.0,
-        message: "Build complete!".to_string(),
-        bytes_downloaded: 0,
-        bytes_total: 0,
-        error: None,
-    };
-
-    app_handle.emit("build-progress", &complete)
-        .map_err(|e| e.to_string())?;
-
-    Ok(())
-}
-
-/// Cancel the current build (placeholder - build cancellation handled in JS)
-#[tauri::command]
-pub async fn cancel_build() -> Result<(), String> {
-    Ok(())
-}
-
-/// Get current build status (placeholder - build status managed in JS)
-#[tauri::command]
-pub async fn get_build_status() -> Result<BuildProgress, String> {
-    Ok(BuildProgress::default())
-}
 
 /// Open file dialog to select output path
 #[tauri::command(rename_all = "camelCase")]
@@ -294,6 +233,37 @@ pub async fn get_model_cache_dir() -> Result<String, String> {
             .join(".llamafile")
             .join("models")
     };
+
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Get the cache directory for GPU libraries (versioned)
+/// Returns ~/.llamafile/v/{version}/ on Unix, %LOCALAPPDATA%/llamafile/v/{version}/ on Windows
+#[tauri::command(rename_all = "camelCase")]
+pub async fn get_gpu_lib_cache_dir(version: String) -> Result<String, String> {
+    let base = directories::BaseDirs::new()
+        .ok_or_else(|| "Could not determine home directory".to_string())?;
+
+    // Sanitize version string for use in path (replace spaces, special chars)
+    let safe_version = version
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .collect::<String>();
+
+    let path = if cfg!(target_os = "windows") {
+        base.data_local_dir()
+            .join("llamafile")
+            .join("v")
+            .join(&safe_version)
+    } else {
+        base.home_dir()
+            .join(".llamafile")
+            .join("v")
+            .join(&safe_version)
+    };
+
+    // Create directory if it doesn't exist
+    std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
 
     Ok(path.to_string_lossy().to_string())
 }
