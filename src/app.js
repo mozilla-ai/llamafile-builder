@@ -602,14 +602,12 @@ function renderVersionStep() {
                   <div class="card-desc">${g.description ? renderSimpleMarkdown(g.description) : ''}</div>
                 </div>
                 <div class="card-badge ${badgeClass(g.tag)}">${g.tag}</div>
-                ${hasMultiple ? `
-                  <div class="expand-toggle" onclick="event.stopPropagation(); toggleVersionGroup('${g.name}')">
-                    <span class="expand-icon ${isExpanded ? 'expanded' : ''}">&#9654;</span>
-                    <span class="expand-count">${g.releases.length}</span>
-                  </div>
-                ` : ''}
+                <div class="expand-toggle" onclick="event.stopPropagation(); toggleVersionGroup('${g.name}')">
+                  <span class="expand-icon ${isExpanded ? 'expanded' : ''}">&#9654;</span>
+                  ${hasMultiple ? `<span class="expand-count">${g.releases.length}</span>` : ''}
+                </div>
               </div>
-              ${hasMultiple && isExpanded ? `
+              ${isExpanded ? `
                 <div class="version-releases">
                   ${g.releases.map(r => {
                     const isSelected = state.selectedRelease?.version === r.version;
@@ -692,6 +690,8 @@ async function selectVersionGroup(name) {
   // Keep local references for UI
   state.selectedVersionGroup = group;
   state.selectedRelease = group.releases[0];
+  // Auto-expand the selected group to show specific version
+  state.expandedGroups[name] = true;
   updateResolvedPath();
   renderCurrentStep();
 }
