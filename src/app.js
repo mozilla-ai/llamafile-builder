@@ -549,6 +549,115 @@ function renderCurrentStep() {
     body.classList.add('fade-in');
     body.scrollTop = scrollTop;
   }
+
+  // Render modals to separate container (avoids re-render flicker)
+  renderModals();
+}
+
+function renderModals() {
+  const container = document.getElementById('modal-container');
+  if (!container) return;
+
+  let html = '';
+
+  // HF Token prompt modal
+  if (state.hfTokenPromptVisible) {
+    html += `
+      <div class="hf-token-modal">
+        <div class="hf-token-content">
+          <div class="hf-token-title">Authentication Required</div>
+          <div class="hf-token-desc">This model requires a Hugging Face token. You can get one at <a href="https://huggingface.co/settings/tokens" target="_blank">huggingface.co/settings/tokens</a></div>
+          <input type="password" class="hf-token-input" id="hf-token-input" placeholder="hf_..." onkeydown="if(event.key==='Enter') submitHfToken(this.value)">
+          <div class="hf-token-buttons">
+            <button class="btn btn-secondary" onclick="cancelHfTokenPrompt()">Cancel</button>
+            <button class="btn btn-primary" onclick="submitHfToken(document.getElementById('hf-token-input').value)">Save &amp; Retry</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // File exists prompt modal
+  if (state.fileExistsPrompt) {
+    html += `
+      <div class="hf-token-modal">
+        <div class="hf-token-content">
+          ${state.fileExistsPrompt.isPartial ? `
+            <div class="hf-token-title">Incomplete Download Found</div>
+            <div class="hf-token-desc">
+              <code>${state.fileExistsPrompt.filename}</code> appears to be a partial download.<br>
+              <span style="color: var(--text-muted)">
+                ${formatBytes(state.fileExistsPrompt.currentSize)} of ${formatBytes(state.fileExistsPrompt.expectedSize)} downloaded
+              </span>
+            </div>
+            <div class="hf-token-buttons" style="margin-top: 16px;">
+              <button class="btn btn-primary" onclick="handleFileExistsChoice('resume')">Resume Download</button>
+              <button class="btn btn-secondary" onclick="handleFileExistsChoice('download')">Start Fresh</button>
+              <button class="btn btn-secondary" onclick="handleFileExistsChoice('cancel')" style="margin-left: auto;">Cancel</button>
+            </div>
+          ` : state.fileExistsPrompt.checksumMismatch ? `
+            <div class="hf-token-title">Checksum Mismatch</div>
+            <div class="hf-token-desc">
+              <code>${state.fileExistsPrompt.filename}</code> exists but the checksum doesn't match.<br>
+              <span style="color: var(--accent)">The file may be corrupted or from a different version.</span>
+            </div>
+            <div class="hf-token-buttons" style="margin-top: 16px;">
+              <button class="btn btn-primary" onclick="handleFileExistsChoice('download')">Re-download</button>
+              <button class="btn btn-secondary" onclick="handleFileExistsChoice('skip')">Use Anyway</button>
+              <button class="btn btn-secondary" onclick="handleFileExistsChoice('cancel')" style="margin-left: auto;">Cancel</button>
+            </div>
+          ` : state.fileExistsPrompt.askVerifyChecksum ? `
+            <div class="hf-token-title">Verify File Integrity?</div>
+            <div class="hf-token-desc">
+              <code>${state.fileExistsPrompt.filename}</code> exists and the file size matches
+              (${formatBytes(state.fileExistsPrompt.expectedSize)}).<br>
+              <span style="color: var(--text-muted)">Would you like to verify the SHA256 checksum? This may take a moment for large files.</span>
+            </div>
+            <div class="hf-token-buttons" style="margin-top: 16px;">
+              <button class="btn btn-primary" onclick="handleFileExistsChoice('verify')">Verify SHA256</button>
+              <button class="btn btn-secondary" onclick="handleFileExistsChoice('skip')">Skip Verification</button>
+              <button class="btn btn-secondary" onclick="handleFileExistsChoice('download')">Re-download</button>
+            </div>
+          ` : `
+            <div class="hf-token-title">File Already Exists</div>
+            <div class="hf-token-desc">
+              <code>${state.fileExistsPrompt.filename}</code> already exists in the cache.${
+                state.fileExistsPrompt.isComplete
+                  ? (state.fileExistsPrompt.checksumVerified
+                      ? '<br><span style="color: var(--green)">File is complete and checksum verified.</span>'
+                      : '<br><span style="color: var(--text-secondary)">File size matches (no checksum available to verify).</span>')
+                  : ''
+              }
+            </div>
+            <div class="hf-token-buttons" style="margin-top: 16px;">
+              <button class="btn btn-primary" onclick="handleFileExistsChoice('skip')">Use Existing</button>
+              <button class="btn btn-secondary" onclick="handleFileExistsChoice('download')">Re-download</button>
+            </div>
+          `}
+        </div>
+      </div>
+    `;
+  }
+
+  // Cancel confirm modal
+  if (state.cancelConfirmVisible) {
+    html += `
+      <div class="hf-token-modal">
+        <div class="hf-token-content">
+          <div class="hf-token-title">Cancel Build?</div>
+          <div class="hf-token-desc">
+            Are you sure you want to cancel the build?${state.downloadProgress ? '<br><br><span style="color: var(--accent)">The current download will be stopped and the partial file will be deleted.</span>' : ''}
+          </div>
+          <div class="hf-token-buttons" style="margin-top: 16px;">
+            <button class="btn btn-secondary" onclick="dismissCancelConfirm()">Continue Build</button>
+            <button class="btn btn-primary" style="background: var(--red);" onclick="confirmCancelBuild()">Cancel Build</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
 }
 
 // ============================================================================
@@ -2286,93 +2395,6 @@ function renderBuildStep() {
           </div>
         ` : ''}
 
-        ${state.hfTokenPromptVisible ? `
-          <div class="hf-token-modal">
-            <div class="hf-token-content">
-              <div class="hf-token-title">Authentication Required</div>
-              <div class="hf-token-desc">This model requires a Hugging Face token. You can get one at <a href="https://huggingface.co/settings/tokens" target="_blank">huggingface.co/settings/tokens</a></div>
-              <input type="password" class="hf-token-input" id="hf-token-input" placeholder="hf_..." onkeydown="if(event.key==='Enter') submitHfToken(this.value)">
-              <div class="hf-token-buttons">
-                <button class="btn btn-secondary" onclick="cancelHfTokenPrompt()">Cancel</button>
-                <button class="btn btn-primary" onclick="submitHfToken(document.getElementById('hf-token-input').value)">Save &amp; Retry</button>
-              </div>
-            </div>
-          </div>
-        ` : ''}
-
-        ${state.fileExistsPrompt ? `
-          <div class="hf-token-modal">
-            <div class="hf-token-content">
-              ${state.fileExistsPrompt.isPartial ? `
-                <div class="hf-token-title">Incomplete Download Found</div>
-                <div class="hf-token-desc">
-                  <code>${state.fileExistsPrompt.filename}</code> appears to be a partial download.<br>
-                  <span style="color: var(--text-muted)">
-                    ${formatBytes(state.fileExistsPrompt.currentSize)} of ${formatBytes(state.fileExistsPrompt.expectedSize)} downloaded
-                  </span>
-                </div>
-                <div class="hf-token-buttons" style="margin-top: 16px;">
-                  <button class="btn btn-primary" onclick="handleFileExistsChoice('resume')">Resume Download</button>
-                  <button class="btn btn-secondary" onclick="handleFileExistsChoice('download')">Start Fresh</button>
-                  <button class="btn btn-secondary" onclick="handleFileExistsChoice('cancel')" style="margin-left: auto;">Cancel</button>
-                </div>
-              ` : state.fileExistsPrompt.checksumMismatch ? `
-                <div class="hf-token-title">Checksum Mismatch</div>
-                <div class="hf-token-desc">
-                  <code>${state.fileExistsPrompt.filename}</code> exists but the checksum doesn't match.<br>
-                  <span style="color: var(--accent)">The file may be corrupted or from a different version.</span>
-                </div>
-                <div class="hf-token-buttons" style="margin-top: 16px;">
-                  <button class="btn btn-primary" onclick="handleFileExistsChoice('download')">Re-download</button>
-                  <button class="btn btn-secondary" onclick="handleFileExistsChoice('skip')">Use Anyway</button>
-                  <button class="btn btn-secondary" onclick="handleFileExistsChoice('cancel')" style="margin-left: auto;">Cancel</button>
-                </div>
-              ` : state.fileExistsPrompt.askVerifyChecksum ? `
-                <div class="hf-token-title">Verify File Integrity?</div>
-                <div class="hf-token-desc">
-                  <code>${state.fileExistsPrompt.filename}</code> exists and the file size matches
-                  (${formatBytes(state.fileExistsPrompt.expectedSize)}).<br>
-                  <span style="color: var(--text-muted)">Would you like to verify the SHA256 checksum? This may take a moment for large files.</span>
-                </div>
-                <div class="hf-token-buttons" style="margin-top: 16px;">
-                  <button class="btn btn-primary" onclick="handleFileExistsChoice('verify')">Verify SHA256</button>
-                  <button class="btn btn-secondary" onclick="handleFileExistsChoice('skip')">Skip Verification</button>
-                  <button class="btn btn-secondary" onclick="handleFileExistsChoice('download')">Re-download</button>
-                </div>
-              ` : `
-                <div class="hf-token-title">File Already Exists</div>
-                <div class="hf-token-desc">
-                  <code>${state.fileExistsPrompt.filename}</code> already exists in the cache.${
-                    state.fileExistsPrompt.isComplete
-                      ? (state.fileExistsPrompt.checksumVerified
-                          ? '<br><span style="color: var(--green)">File is complete and checksum verified.</span>'
-                          : '<br><span style="color: var(--text-secondary)">File size matches (no checksum available to verify).</span>')
-                      : ''
-                  }
-                </div>
-                <div class="hf-token-buttons" style="margin-top: 16px;">
-                  <button class="btn btn-primary" onclick="handleFileExistsChoice('skip')">Use Existing</button>
-                  <button class="btn btn-secondary" onclick="handleFileExistsChoice('download')">Re-download</button>
-                </div>
-              `}
-            </div>
-          </div>
-        ` : ''}
-
-        ${state.cancelConfirmVisible ? `
-          <div class="hf-token-modal">
-            <div class="hf-token-content">
-              <div class="hf-token-title">Cancel Build?</div>
-              <div class="hf-token-desc">
-                Are you sure you want to cancel the build?${state.downloadProgress ? '<br><br><span style="color: var(--accent)">The current download will be stopped and the partial file will be deleted.</span>' : ''}
-              </div>
-              <div class="hf-token-buttons" style="margin-top: 16px;">
-                <button class="btn btn-secondary" onclick="dismissCancelConfirm()">Continue Build</button>
-                <button class="btn btn-primary" style="background: var(--red);" onclick="confirmCancelBuild()">Cancel Build</button>
-              </div>
-            </div>
-          </div>
-        ` : ''}
       </div>
       <div class="footer">
         <button class="btn btn-secondary" onclick="prevStep()" ${state.isBuilding ? 'disabled' : ''}>\u2190 Back</button>

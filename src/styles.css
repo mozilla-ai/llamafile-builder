@@ -1574,6 +1574,15 @@ body {
 }
 
 /* HF Token Modal */
+@keyframes modal-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .hf-token-modal {
   position: fixed;
   top: 0;
@@ -1581,19 +1590,23 @@ body {
   right: 0;
   bottom: 0;
   background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   z-index: 1000;
+  animation: modal-fade-in 0.15s ease-out;
 }
 
 .hf-token-content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   background: var(--bg-panel);
   border: 1.5px solid var(--border);
   border-radius: 12px;
   padding: 24px;
   width: 420px;
   max-width: 90%;
+  z-index: 1001;
+  animation: modal-fade-in 0.15s ease-out;
 }
 
 .hf-token-title {
