@@ -13,22 +13,68 @@ description: |
   • Agent Mode — Create agentfiles with bundled tools and system instructions
   • One-Click Build — Downloads weights, bundles runtime, creates executable
 
+title: llamafile Builder
 license: MIT
-grade: devel
-confinement: classic
+grade: stable
+confinement: strict
 base: core24
 icon: src-tauri/icons/icon.png
+
+contact: https://github.com/your-org/llamafile-builder/issues
+issues: https://github.com/your-org/llamafile-builder/issues
+source-code: https://github.com/your-org/llamafile-builder
+website: https://github.com/your-org/llamafile-builder
+
+plugs:
+  gpu-2404:
+    interface: content
+    target: $SNAP/gpu-2404
+    default-provider: mesa-2404
 
 platforms:
   amd64:
   arm64:
   armhf:
 
+layout:
+  /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1:
+    bind: $SNAP/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1
+  /usr/lib/aarch64-linux-gnu/webkit2gtk-4.1:
+    bind: $SNAP/usr/lib/aarch64-linux-gnu/webkit2gtk-4.1
+  /usr/lib/arm-linux-gnueabihf/webkit2gtk-4.1:
+    bind: $SNAP/usr/lib/arm-linux-gnueabihf/webkit2gtk-4.1
+  /usr/share/X11/XErrorDB:
+    symlink: $SNAP/gpu-2404/X11/XErrorDB
+
 apps:
   llamafile-builder:
+    command-chain:
+      - bin/gpu-2404-wrapper
     command: bin/llamafile-builder
     desktop: share/applications/llamafile-builder.desktop
-    # Classic confinement - no plugs needed, full system access
+    environment:
+      GDK_BACKEND: "x11"
+      GSK_RENDERER: "cairo"
+      GTK_PATH: $SNAP/usr/lib/$SNAPCRAFT_ARCH_TRIPLET/gtk-3.0
+      GTK_EXE_PREFIX: $SNAP/usr
+      GTK_DATA_PREFIX: $SNAP/usr
+      GTK_MODULES: ""
+      GST_PLUGIN_PATH: $SNAP/usr/lib/$SNAPCRAFT_ARCH_TRIPLET/gstreamer-1.0
+      GST_PLUGIN_SYSTEM_PATH: $SNAP/usr/lib/$SNAPCRAFT_ARCH_TRIPLET/gstreamer-1.0
+    plugs:
+      - home
+      - removable-media
+      - network
+      - network-bind
+      - desktop
+      - desktop-legacy
+      - wayland
+      - x11
+      - opengl
+      - gsettings
+      - audio-playback
+      - browser-support
+      - gpu-2404
 
 parts:
   llamafile-builder:
@@ -52,6 +98,7 @@ parts:
     
     stage-packages:
       - libwebkit2gtk-4.1-0
+      - webkit2gtk-driver
       - libgtk-3-0
       - libayatana-appindicator3-1
       - libjavascriptcoregtk-4.1-0
@@ -60,44 +107,41 @@ parts:
       - libpango-1.0-0
       - libcairo2
       - libsoup-3.0-0
-      # NEW: Additional GTK/WebKit dependencies
       - libglib2.0-0
       - libgobject-2.0-0
       - libgio-2.0-0
       - dbus-x11
       - libdbus-1-3
-      # Fix canberra-gtk-module warnings
       - libcanberra-gtk3-module
+      - gstreamer1.0-plugins-base
+      - gstreamer1.0-plugins-good
+      - gstreamer1.0-libav
+      - libenchant-2-2
+      - libgl1-mesa-dri
+      - libgl1
+      - libegl1
+      - libgbm1
+      - libdrm-common
     
     override-build: |
       set -eux
       
-      # Install Tauri CLI
       cargo install tauri-cli --version ^2.0.0 --locked
-      
-      # Build the Tauri application
       cargo tauri build --bundles deb
       
-      # Install the main binary
       install -Dm755 src-tauri/target/release/llamafile-builder \
         $SNAPCRAFT_PART_INSTALL/bin/llamafile-builder
       
-      # Assimilate and install zipalign binary
-      # Convert APE (Actually Portable Executable) to native ELF for snap compatibility
       echo "Converting zipalign APE to native ELF..."
       src-tauri/bin/zipalign --assimilate || true
       install -Dm755 src-tauri/bin/zipalign \
         $SNAPCRAFT_PART_INSTALL/bin/zipalign
-      
-      # Find and install desktop file from Tauri's deb bundle
       DESKTOP_FILE=$(find src-tauri/target/release/bundle/deb -name "*.desktop" 2>/dev/null | head -n1)
       
       if [ -n "$DESKTOP_FILE" ] && [ -f "$DESKTOP_FILE" ]; then
-        echo "Found Tauri-generated desktop file: $DESKTOP_FILE"
         install -Dm644 "$DESKTOP_FILE" \
           $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop
         
-        # Enhance desktop file with better metadata for snap
         sed -i 's|Exec=.*|Exec=llamafile-builder|g' \
           $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop
         sed -i 's|Icon=.*|Icon=${SNAP}/meta/gui/icon.png|g' \
@@ -105,7 +149,6 @@ parts:
         sed -i 's|Categories=.*|Categories=Development;Utility;Science;ArtificialIntelligence;|g' \
           $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop
         
-        # Add enhanced fields if not present
         grep -q "GenericName=" $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop || \
           sed -i '/^Name=/a GenericName=AI Model Builder' \
           $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop
@@ -119,7 +162,6 @@ parts:
           sed -i '/^Type=/a SingleMainWindow=true\nX-GNOME-SingleWindow=true' \
           $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop
       else
-        echo "Tauri did not generate desktop file, creating fallback..."
         mkdir -p $SNAPCRAFT_PART_INSTALL/share/applications
         cat > $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop <<EOF
       [Desktop Entry]
@@ -141,30 +183,26 @@ parts:
       EOF
       fi
       
-      # Install icons from src-tauri/icons directory
-      mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/32x32/apps
-      mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/64x64/apps
-      mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/128x128/apps
-      mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/256x256/apps
-      mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/512x512/apps
+      mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/{32x32,64x64,128x128,256x256,512x512}/apps
       
-      # Install pre-generated icons at their native sizes
       install -Dm644 src-tauri/icons/32x32.png \
         $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/32x32/apps/llamafile-builder.png
       install -Dm644 src-tauri/icons/64x64.png \
         $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/64x64/apps/llamafile-builder.png
       install -Dm644 src-tauri/icons/128x128.png \
         $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/128x128/apps/llamafile-builder.png
-      
-      # Use icon.png for larger sizes (it's typically 512x512 or larger)
       install -Dm644 src-tauri/icons/icon.png \
         $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/256x256/apps/llamafile-builder.png
       install -Dm644 src-tauri/icons/icon.png \
         $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/512x512/apps/llamafile-builder.png
-      
-      echo "Icons installed successfully!"
-      
-      # Desktop file and icon will be auto-installed to meta/gui by snapcraft
-      # via the 'desktop' and 'icon' keys in the snap metadata
-      
-      echo "Build completed successfully!"
+
+  gpu-2404:
+    after: [llamafile-builder]
+    source: https://github.com/canonical/gpu-snap.git
+    plugin: dump
+    override-prime: |
+      craftctl default
+      ${CRAFT_PART_SRC}/bin/gpu-2404-cleanup mesa-2404
+      mkdir -p "${CRAFT_PRIME}/gpu-2404"
+    prime:
+      - bin/gpu-2404-wrapper
