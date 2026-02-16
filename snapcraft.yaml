@@ -47,7 +47,6 @@ parts:
       - patchelf
       - file
       - pkg-config
-      - imagemagick
     
     stage-packages:
       - libwebkit2gtk-4.1-0
@@ -119,28 +118,27 @@ parts:
       EOF
       fi
       
-      # Generate and install icons at multiple sizes
+      # Install icons from src-tauri/icons directory
       mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/32x32/apps
       mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/64x64/apps
       mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/128x128/apps
       mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/256x256/apps
       mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/512x512/apps
       
-      if [ -f src/llamafile-icon.png ]; then
-        # Generate various sizes using ImageMagick
-        convert src/llamafile-icon.png -resize 32x32 \
-          $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/32x32/apps/llamafile-builder.png
-        convert src/llamafile-icon.png -resize 64x64 \
-          $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/64x64/apps/llamafile-builder.png
-        convert src/llamafile-icon.png -resize 128x128 \
-          $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/128x128/apps/llamafile-builder.png
-        convert src/llamafile-icon.png -resize 256x256 \
-          $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/256x256/apps/llamafile-builder.png
-        convert src/llamafile-icon.png -resize 512x512 \
-          $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/512x512/apps/llamafile-builder.png
-        echo "Icons generated successfully!"
-      else
-        echo "Warning: Icon not found at src/llamafile-icon.png"
-      fi
+      # Install pre-generated icons at their native sizes
+      install -Dm644 src-tauri/icons/32x32.png \
+        $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/32x32/apps/llamafile-builder.png
+      install -Dm644 src-tauri/icons/64x64.png \
+        $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/64x64/apps/llamafile-builder.png
+      install -Dm644 src-tauri/icons/128x128.png \
+        $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/128x128/apps/llamafile-builder.png
+      
+      # Use icon.png for larger sizes (it's typically 512x512 or larger)
+      install -Dm644 src-tauri/icons/icon.png \
+        $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/256x256/apps/llamafile-builder.png
+      install -Dm644 src-tauri/icons/icon.png \
+        $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/512x512/apps/llamafile-builder.png
+      
+      echo "Icons installed successfully!"
       
       echo "Build completed successfully!"
