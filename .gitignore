@@ -37,3 +37,7 @@ downloads/
 # Testing/debug files
 install.sh
 *.snap
+
+# Snapcraft credentials
+snapcraft-credentials.txt
+*-credentials.txt

@@ -1,0 +1,118 @@
+name: Build and Publish Snap
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v0.1.0, v1.2.3, etc.
+
+jobs:
+  build-and-publish:
+    name: Build Snap (${{ matrix.architecture }})
+    runs-on: ubuntu-24.04
+    
+    strategy:
+      fail-fast: false  # Continue building other architectures even if one fails
+      matrix:
+        architecture: [amd64, arm64, armhf]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for proper version detection
+      
+      - name: Install Snapcraft
+        run: |
+          sudo snap install snapcraft --classic
+          snapcraft --version
+      
+      - name: Setup LXD for Snapcraft
+        run: |
+          sudo snap refresh lxd --channel=latest/stable || sudo snap install lxd
+          sudo lxd init --auto
+          sudo usermod -aG lxd $USER
+          sudo chown root:lxd /var/snap/lxd/common/lxd/unix.socket
+          sudo chmod 0660 /var/snap/lxd/common/lxd/unix.socket
+      
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+      
+      - name: Update snapcraft.yaml version
+        run: |
+          # Update version in snapcraft.yaml (replace 'version: git' with actual version)
+          sed -i "s/^version: git$/version: '${{ steps.version.outputs.version }}'/" snapcraft.yaml
+          echo "Updated snapcraft.yaml version:"
+          grep "^version:" snapcraft.yaml
+      
+      - name: Build Snap for ${{ matrix.architecture }}
+        run: |
+          if [ "${{ matrix.architecture }}" = "amd64" ]; then
+            # Native build for amd64
+            sg lxd -c 'snapcraft --use-lxd'
+          else
+            # Cross-compile for other architectures
+            sg lxd -c 'snapcraft --use-lxd --target-arch=${{ matrix.architecture }}'
+          fi
+        timeout-minutes: 90
+      
+      - name: Verify Snap file
+        run: |
+          SNAP_FILE=$(ls *.snap | head -n1)
+          echo "Built snap: $SNAP_FILE"
+          ls -lh $SNAP_FILE
+          snap info --verbose $SNAP_FILE || true
+      
+      - name: Upload Snap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: snap-${{ matrix.architecture }}
+          path: '*.snap'
+          retention-days: 30
+      
+      - name: Publish to Snap Store (stable channel)
+        if: success()
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          # Export credentials for snapcraft
+          echo "$SNAPCRAFT_STORE_CREDENTIALS" | snapcraft login --with -
+          
+          # Get the snap filename
+          SNAP_FILE=$(ls *.snap | head -n1)
+          
+          # Upload and release to stable channel
+          snapcraft upload --release=stable $SNAP_FILE
+          
+          echo "✅ Successfully published $SNAP_FILE to Snap Store (stable channel)"
+          
+          # Logout
+          snapcraft logout
+
+  summary:
+    name: Release Summary
+    needs: build-and-publish
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Check build results
+        run: |
+          echo "## Snap Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${GITHUB_REF#refs/tags/v}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Build Status" >> $GITHUB_STEP_SUMMARY
+          echo "Check individual job results above for build status per architecture." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Snap Store" >> $GITHUB_STEP_SUMMARY
+          echo "Published to: **stable** channel" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Install with:" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "sudo snap install llamafile-builder" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
