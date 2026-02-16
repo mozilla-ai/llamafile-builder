@@ -18,8 +18,7 @@
         "minWidth": 900,
         "title": "llamafile Builder",
         "width": 1000,
-        "center": true,
-        "devtools": true
+        "center": true
       }
     ],
     "security": {

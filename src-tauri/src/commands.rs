@@ -366,9 +366,6 @@ pub async fn run_zipalign(
 
     // Try to find zipalign in multiple locations
     let zipalign_path = find_zipalign_binary()?;
-    
-    let debug_msg = format!("Using zipalign at: {}", zipalign_path.display());
-    app_handle.emit("build-log", &debug_msg).ok();
 
     // Log the command being run
     let cmd_line = format!("$ zipalign {}", args.join(" "));
