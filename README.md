@@ -38,6 +38,47 @@ cargo tauri dev
 
 The app will open with hot-reload enabled for frontend changes.
 
+## Installation from Snap
+
+### Install from Snap Store
+
+```bash
+# Install the snap
+snap install llamafile-builder
+
+# Grant home directory access (required for accessing ~/.ollama, ~/.cache/huggingface)
+snap connect llamafile-builder:home
+
+# Optional: Grant external drive access
+snap connect llamafile-builder:removable-media
+
+# Optional: Enable opening URLs in browser
+snap connect llamafile-builder:browser-support
+```
+
+### Required Permissions
+
+The snap uses **strict confinement** for security. Most permissions auto-connect, but home directory access requires manual connection:
+
+| Permission | Required? | Auto-Connect? | Command |
+|------------|-----------|---------------|---------|
+| Home directory | Yes* | No | `snap connect llamafile-builder:home` |
+| External drives | Optional | No | `snap connect llamafile-builder:removable-media` |
+| Open browser URLs | Optional | No | `snap connect llamafile-builder:browser-support` |
+| Network (downloads) | Yes | Yes ✓ | Auto-connected |
+| Desktop UI | Yes | Yes ✓ | Auto-connected |
+
+\* Required for accessing Ollama models (`~/.ollama`) and HuggingFace cache (`~/.cache/huggingface/token`)
+
+### File Access in Snap
+
+When running as a snap:
+- ✅ **Downloads:** Use file picker to select download directories
+- ✅ **Model import:** Access `~/.ollama` and `~/.cache/lm-studio` after connecting `home` plug
+- ✅ **HuggingFace token:** Automatically reads from `~/.cache/huggingface/token`
+- ✅ **Temp files:** Snap has its own isolated temp directory
+- ✅ **App cache:** Managed in snap-specific directories
+
 ## Building for Production
 
 ```bash
