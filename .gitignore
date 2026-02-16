@@ -33,3 +33,7 @@ dist/
 # Cache
 .cache/
 downloads/
+
+# Testing/debug files
+install.sh
+*.snap
