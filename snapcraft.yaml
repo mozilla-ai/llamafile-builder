@@ -17,6 +17,7 @@ license: MIT
 grade: devel
 confinement: classic
 base: core24
+icon: src-tauri/icons/icon.png
 
 platforms:
   amd64:
@@ -26,6 +27,7 @@ platforms:
 apps:
   llamafile-builder:
     command: bin/llamafile-builder
+    desktop: share/applications/llamafile-builder.desktop
     # Classic confinement - no plugs needed, full system access
 
 parts:
@@ -95,26 +97,47 @@ parts:
         install -Dm644 "$DESKTOP_FILE" \
           $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop
         
-        # Fix desktop file paths for snap
+        # Enhance desktop file with better metadata for snap
         sed -i 's|Exec=.*|Exec=llamafile-builder|g' \
           $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop
-        sed -i 's|Icon=.*|Icon=${SNAP}/share/icons/hicolor/512x512/apps/llamafile-builder.png|g' \
+        sed -i 's|Icon=.*|Icon=${SNAP}/meta/gui/icon.png|g' \
+          $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop
+        sed -i 's|Categories=.*|Categories=Development;Utility;Science;ArtificialIntelligence;|g' \
+          $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop
+        
+        # Add enhanced fields if not present
+        grep -q "GenericName=" $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop || \
+          sed -i '/^Name=/a GenericName=AI Model Builder' \
+          $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop
+        grep -q "Keywords=" $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop || \
+          sed -i '/^Categories=/a Keywords=llamafile;ai;llm;builder;machine-learning;model;inference;huggingface;' \
+          $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop
+        grep -q "StartupNotify=" $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop || \
+          sed -i '/^Terminal=/a StartupNotify=true' \
+          $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop
+        grep -q "SingleMainWindow=" $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop || \
+          sed -i '/^Type=/a SingleMainWindow=true\nX-GNOME-SingleWindow=true' \
           $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop
       else
         echo "Tauri did not generate desktop file, creating fallback..."
         mkdir -p $SNAPCRAFT_PART_INSTALL/share/applications
         cat > $SNAPCRAFT_PART_INSTALL/share/applications/llamafile-builder.desktop <<EOF
       [Desktop Entry]
-      Version=1.0
+      Version=1.5
       Type=Application
       Name=llamafile Builder
+      GenericName=AI Model Builder
       Comment=Build custom llamafiles with bundled models and configurations
       Exec=llamafile-builder
-      Icon=\${SNAP}/share/icons/hicolor/512x512/apps/llamafile-builder.png
+      Icon=\${SNAP}/meta/gui/icon.png
       Terminal=false
-      Categories=Development;Utility;
-      Keywords=llamafile;ai;llm;builder;
+      Categories=Development;Utility;Science;ArtificialIntelligence;
+      Keywords=llamafile;ai;llm;builder;machine-learning;model;inference;huggingface;
+      MimeType=application/x-llamafile;
       StartupWMClass=llamafile-builder
+      StartupNotify=true
+      SingleMainWindow=true
+      X-GNOME-SingleWindow=true
       EOF
       fi
       
@@ -140,5 +163,8 @@ parts:
         $SNAPCRAFT_PART_INSTALL/share/icons/hicolor/512x512/apps/llamafile-builder.png
       
       echo "Icons installed successfully!"
+      
+      # Desktop file and icon will be auto-installed to meta/gui by snapcraft
+      # via the 'desktop' and 'icon' keys in the snap metadata
       
       echo "Build completed successfully!"
