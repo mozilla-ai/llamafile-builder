@@ -325,6 +325,8 @@ async function init() {
       },
       updateSystemPrompt: (p, e) => updateSystemPrompt(e.target.value),
       updateArgsContent: (p, e) => updateArgsContent(e.target.value),
+      updateModelDownloadDir: (p, e) => updateModelDownloadDir(e.target.value),
+      updateOutputPath: (p, e) => updateOutputPath(e.target.value),
       updateOllamaCacheDir: (p, e) => updateOllamaCacheDir(e.target.value),
       updateLMStudioCacheDir: (p, e) => updateLMStudioCacheDir(e.target.value),
     },
@@ -2184,10 +2186,13 @@ function renderBuildStep() {
           </div>
         </div>
 
-        <div class="output-path" data-action="selectOutputPath">
-          <div class="output-path-label">Output:</div>
-          <div class="output-path-value">${state.outputPath || 'Select location...'}</div>
-          <div class="output-path-btn">Browse…</div>
+        <div class="download-dir-row" style="flex-wrap: wrap; gap: 4px; margin-bottom: 16px;">
+          <span style="color: var(--text-secondary); font-size: 12px; margin-right: 4px;">Output:</span>
+          <input type="text" class="path-input" value="${state.outputPath || ''}"
+                 data-action="updateOutputPath"
+                 placeholder="Select output location..."
+                 style="flex: 1; min-width: 200px; padding: 4px 8px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+          <button class="download-dir-btn" data-action="selectOutputPath" title="Browse...">📂</button>
         </div>
 
         <div class="args-preview">
