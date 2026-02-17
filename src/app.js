@@ -4,6 +4,8 @@
 import { state, STEPS } from './state.js';
 import { invoke, listen } from './tauri.js';
 import { attachEventDelegation } from './events.js';
+import * as ollama from './ollama.js';
+import * as lmstudio from './lmstudio.js';
 
 // ============================================================================
 // Tauri Command Helpers
@@ -142,37 +144,9 @@ async function init() {
       state.modelDownloadDir = '~/.llamafile/models';
     }
 
-    // Check for Ollama models
-    try {
-      state.ollamaCacheDir = await invoke('get_default_ollama_cache_dir');
-      state.ollamaAvailable = await invoke('check_ollama_available', { customDir: null });
-      console.log('Ollama available:', state.ollamaAvailable, 'at', state.ollamaCacheDir);
-      if (state.ollamaAvailable) {
-        state.ollamaModels = await invoke('get_ollama_models', { customDir: null });
-        console.log('Found Ollama models:', state.ollamaModels.length, state.ollamaModels);
-      }
-    } catch (e) {
-      console.log('Ollama check failed (expected in browser dev):', e);
-      state.ollamaAvailable = false;
-      state.ollamaModels = [];
-      state.ollamaCacheDir = '~/.ollama';
-    }
-
-    // Check for LM Studio models
-    try {
-      state.lmstudioCacheDir = await invoke('get_default_lmstudio_cache_dir');
-      state.lmstudioAvailable = await invoke('check_lmstudio_available', { customDir: null });
-      console.log('LM Studio available:', state.lmstudioAvailable, 'at', state.lmstudioCacheDir);
-      if (state.lmstudioAvailable) {
-        state.lmstudioModels = await invoke('get_lmstudio_models', { customDir: null });
-        console.log('Found LM Studio models:', state.lmstudioModels.length, state.lmstudioModels);
-      }
-    } catch (e) {
-      console.log('LM Studio check failed (expected in browser dev):', e);
-      state.lmstudioAvailable = false;
-      state.lmstudioModels = [];
-      state.lmstudioCacheDir = '~/.cache/lm-studio';
-    }
+    // Initialize model providers
+    await ollama.init();
+    await lmstudio.init();
 
     // Load config schema and initialize defaults
     state.configSchema = await invoke('get_config_schema');
@@ -277,18 +251,20 @@ async function init() {
       addCompanionFile: () => addCompanionFile(),
       removeCompanionFile: (p) => removeCompanionFile(parseInt(p.index)),
       clearCustomModel: () => clearCustomModel(),
-      selectOllamaSource: () => selectOllamaSource(),
-      selectOllamaModel: (p) => selectOllamaModel(p.modelName, p.tag),
-      clearOllamaModel: () => clearOllamaModel(),
-      expandOllamaSelection: () => expandOllamaSelection(),
-      selectOllamaCacheDir: () => selectOllamaCacheDir(),
-      selectLMStudioSource: () => selectLMStudioSource(),
-      selectLMStudioModel: (p) => selectLMStudioModel(p.dirName),
-      selectLMStudioFile: (p) => selectLMStudioFile(p.role, parseInt(p.index)),
-      clearLMStudioModel: () => clearLMStudioModel(),
-      expandLMStudioSelection: () => expandLMStudioSelection(),
-      toggleLMStudioFileExpand: (p) => toggleLMStudioFileExpand(p.role),
-      selectLMStudioCacheDir: () => selectLMStudioCacheDir(),
+      // Ollama actions
+      selectOllamaSource: () => ollama.selectSource((m, t) => ollama.selectModel(m, t, syncFromBuildState, renderCurrentStep), renderCurrentStep),
+      selectOllamaModel: (p) => ollama.selectModel(p.modelName, p.tag, syncFromBuildState, renderCurrentStep),
+      clearOllamaModel: () => ollama.clearModel(selectModel, renderCurrentStep),
+      expandOllamaSelection: () => ollama.expandSelection(renderCurrentStep),
+      selectOllamaCacheDir: () => ollama.selectCacheDir(renderCurrentStep),
+      // LM Studio actions
+      selectLMStudioSource: () => lmstudio.selectSource((d) => lmstudio.selectModel(d, syncFromBuildState, renderCurrentStep), renderCurrentStep),
+      selectLMStudioModel: (p) => lmstudio.selectModel(p.dirName, syncFromBuildState, renderCurrentStep),
+      selectLMStudioFile: (p) => lmstudio.selectFile(p.role, parseInt(p.index), syncFromBuildState, renderCurrentStep),
+      clearLMStudioModel: () => lmstudio.clearModel(selectModel, renderCurrentStep),
+      expandLMStudioSelection: () => lmstudio.expandSelection(renderCurrentStep),
+      toggleLMStudioFileExpand: (p) => lmstudio.toggleFileExpand(p.role, renderCurrentStep),
+      selectLMStudioCacheDir: () => lmstudio.selectCacheDir(renderCurrentStep),
       toggleConfig: (p) => toggleConfig(p.configKey),
       selectComputeMode: (p) => selectComputeMode(p.mode),
       toggleGpuOption: (p) => toggleGpuOption(p.option),
@@ -327,8 +303,8 @@ async function init() {
       updateArgsContent: (p, e) => updateArgsContent(e.target.value),
       updateModelDownloadDir: (p, e) => updateModelDownloadDir(e.target.value),
       updateOutputPath: (p, e) => updateOutputPath(e.target.value),
-      updateOllamaCacheDir: (p, e) => updateOllamaCacheDir(e.target.value),
-      updateLMStudioCacheDir: (p, e) => updateLMStudioCacheDir(e.target.value),
+      updateOllamaCacheDir: (p, e) => ollama.updateCacheDir(e.target.value, renderCurrentStep),
+      updateLMStudioCacheDir: (p, e) => lmstudio.updateCacheDir(e.target.value, renderCurrentStep),
     },
     // Keydown actions
     {
@@ -800,14 +776,14 @@ function renderModelStep() {
 
         ${renderCustomModelCard()}
 
-        ${(state.ollamaAvailable || state.modelSource === 'ollama') ? `
+        ${ollama.isAvailable() ? `
         <div class="version-divider"><span>or</span></div>
-        ${renderOllamaModelCard()}
+        ${ollama.renderModelCard(formatBytes, renderCurrentStep)}
         ` : ''}
 
-        ${(state.lmstudioAvailable || state.modelSource === 'lmstudio') ? `
+        ${lmstudio.isAvailable() ? `
         <div class="version-divider"><span>or</span></div>
-        ${renderLMStudioModelCard()}
+        ${lmstudio.renderModelCard(formatBytes, renderCurrentStep)}
         ` : ''}
 
         ${state.shaVerifyProgress ? `
@@ -972,216 +948,6 @@ function renderCustomModelCard() {
         <div class="card-desc">Use a custom GGUF model file from your filesystem</div>
       </div>
       <div class="card-meta" style="color: var(--text-secondary);">Browse&hellip;</div>
-    </div>
-  `;
-}
-
-function renderOllamaModelCard() {
-  const isActive = state.modelSource === 'ollama';
-  const hasSelection = state.selectedOllamaModel !== null;
-
-  // If Ollama is selected and we have a model, show the expanded state
-  if (isActive && hasSelection) {
-    return `
-      <div class="custom-llamafile-card active" >
-        <div class="card-icon" style="background: var(--purple-dim); color: var(--purple); font-size: 18px;">🦙</div>
-        <div class="card-info">
-          <div class="card-title">Load from Ollama</div>
-          <div class="custom-file-list">
-            <div class="custom-file-entry">
-              <span class="file-role-tag">model</span>
-              <span class="custom-path-display" title="${state.selectedOllamaModel.weightsPath}">${state.selectedOllamaModel.displayName}</span>
-              <span class="file-size-label">${formatBytes(state.selectedOllamaModel.sizeBytes)}</span>
-            </div>
-          </div>
-          <button class="custom-add-btn" data-action="expandOllamaSelection" data-stop-propagation="true">Change model</button>
-        </div>
-        <button class="custom-clear-btn" data-action="clearOllamaModel" data-stop-propagation="true">Clear</button>
-      </div>
-    `;
-  }
-
-  // If Ollama is selected but no model yet, show the list of available models
-  if (isActive && !hasSelection) {
-    return `
-      <div class="custom-llamafile-card active" >
-        <div class="card-icon" style="background: var(--purple-dim); color: var(--purple); font-size: 18px;">🦙</div>
-        <div class="card-info">
-          <div class="card-title">Load from Ollama</div>
-          <div class="card-desc">Select a model from your local Ollama cache. <span style="color: var(--accent);">Note: not all Ollama models work with llama.cpp/llamafile.</span></div>
-        </div>
-        <button class="custom-clear-btn" data-action="clearOllamaModel" data-stop-propagation="true">Cancel</button>
-      </div>
-      <div class="download-dir-row" style="margin-top: 8px; flex-wrap: wrap; gap: 4px;">
-        <span style="color: var(--text-secondary); font-size: 12px; margin-right: 4px;">Ollama cache:</span>
-        <input type="text" class="path-input" value="${state.ollamaCacheDir}"
-               data-action="updateOllamaCacheDir"
-               style="flex: 1; min-width: 150px; padding: 4px 8px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
-        <button class="download-dir-btn" data-action="selectOllamaCacheDir" data-stop-propagation="true" title="Browse...">📂</button>
-      </div>
-      <div class="version-releases" style="margin-top: 8px;">
-        ${state.ollamaModels.map(m => `
-          <div class="release-row" data-action="selectOllamaModel" data-model-name="${m.modelName}" data-tag="${m.tag}">
-            <div class="release-radio"></div>
-            <div class="release-info">
-              <span class="release-version">${m.displayName}</span>
-            </div>
-            <span class="release-date">${formatBytes(m.sizeBytes)}</span>
-          </div>
-        `).join('')}
-        ${state.ollamaModels.length === 0 ? '<div class="card-desc" style="padding: 12px; color: var(--text-secondary);">No Ollama models found.<br><span style="font-size: 11px;">Make sure this is an Ollama cache directory containing a <code>models/</code> subfolder.</span></div>' : ''}
-      </div>
-    `;
-  }
-
-  // Default collapsed state - show the card to click
-  return `
-    <div class="custom-llamafile-card"
-         data-action="selectOllamaSource">
-      <div class="card-icon" style="background: var(--purple-dim); color: var(--purple); font-size: 18px;">🦙</div>
-      <div class="card-info">
-        <div class="card-title">Load from Ollama</div>
-        <div class="card-desc">Use a model from your local Ollama cache. <span style="color: var(--accent);">Note: not all Ollama models work with llama.cpp/llamafile.</span></div>
-      </div>
-      <div class="card-meta" style="color: var(--text-secondary);">${state.ollamaModels.length} models</div>
-    </div>
-  `;
-}
-
-function renderLMStudioModelCard() {
-  const isActive = state.modelSource === 'lmstudio';
-  const hasSelection = state.selectedLMStudioModel !== null;
-
-  // If LM Studio is selected and we have a model, show the expanded state with file selection
-  if (isActive && hasSelection) {
-    const model = state.selectedLMStudioModel;
-    const weightsFiles = model.files.filter(f => f.role === 'weights');
-    const mmprojFiles = model.files.filter(f => f.role === 'mmproj');
-    const selectedWeightsIdx = state.lmstudioFileSelections.weights || 0;
-    const selectedMmprojIdx = state.lmstudioFileSelections.mmproj || 0;
-
-    return `
-      <div class="custom-llamafile-card active" >
-        <div class="card-icon" style="background: var(--blue-dim); color: var(--blue); font-size: 18px;">📦</div>
-        <div class="card-info">
-          <div class="card-title">Load from LM Studio</div>
-          <div class="custom-file-list">
-            <div class="custom-file-entry">
-              <span class="file-role-tag">model</span>
-              <span class="custom-path-display">${model.displayName}</span>
-            </div>
-          </div>
-        </div>
-        <button class="custom-clear-btn" data-action="clearLMStudioModel" data-stop-propagation="true">Clear</button>
-      </div>
-      <div class="model-file-config" style="margin-top: 8px;">
-        ${weightsFiles.length > 0 ? `
-          <div class="file-role-section">
-            <div class="file-role-header">
-              <span class="file-role-label">Weights</span>
-              <span class="quant-badge">${weightsFiles[selectedWeightsIdx]?.filename || 'N/A'}</span>
-              <span class="file-size-label">${formatBytes(weightsFiles[selectedWeightsIdx]?.sizeBytes || 0)}</span>
-              ${weightsFiles.length > 1 ? `
-                <div class="expand-toggle" data-action="toggleLMStudioFileExpand" data-stop-propagation="true">
-                  <span class="expand-icon ${state.expandedLMStudioFiles?.weights ? 'expanded' : ''}">▶</span>
-                  <span class="expand-count">${weightsFiles.length}</span>
-                </div>
-              ` : ''}
-            </div>
-            ${weightsFiles.length > 1 && state.expandedLMStudioFiles?.weights ? `
-              <div class="version-releases">
-                ${weightsFiles.map((f, idx) => `
-                  <div class="release-row ${idx === selectedWeightsIdx ? 'selected' : ''}"
-                       data-action="selectLMStudioFile" data-role="weights" data-index="${idx}">
-                    <div class="release-radio"></div>
-                    <div class="release-info">
-                      <span class="release-version">${f.filename}</span>
-                    </div>
-                    <span class="release-date">${formatBytes(f.sizeBytes)}</span>
-                  </div>
-                `).join('')}
-              </div>
-            ` : ''}
-          </div>
-        ` : ''}
-        ${mmprojFiles.length > 0 ? `
-          <div class="file-role-section">
-            <div class="file-role-header">
-              <span class="file-role-label">Vision Adapter (mmproj)</span>
-              <span class="quant-badge">${mmprojFiles[selectedMmprojIdx]?.filename || 'N/A'}</span>
-              <span class="file-size-label">${formatBytes(mmprojFiles[selectedMmprojIdx]?.sizeBytes || 0)}</span>
-              ${mmprojFiles.length > 1 ? `
-                <div class="expand-toggle" data-action="toggleLMStudioFileExpand" data-stop-propagation="true">
-                  <span class="expand-icon ${state.expandedLMStudioFiles?.mmproj ? 'expanded' : ''}">▶</span>
-                  <span class="expand-count">${mmprojFiles.length}</span>
-                </div>
-              ` : ''}
-            </div>
-            ${mmprojFiles.length > 1 && state.expandedLMStudioFiles?.mmproj ? `
-              <div class="version-releases">
-                ${mmprojFiles.map((f, idx) => `
-                  <div class="release-row ${idx === selectedMmprojIdx ? 'selected' : ''}"
-                       data-action="selectLMStudioFile" data-role="mmproj" data-index="${idx}">
-                    <div class="release-radio"></div>
-                    <div class="release-info">
-                      <span class="release-version">${f.filename}</span>
-                    </div>
-                    <span class="release-date">${formatBytes(f.sizeBytes)}</span>
-                  </div>
-                `).join('')}
-              </div>
-            ` : ''}
-          </div>
-        ` : ''}
-      </div>
-      <button class="custom-add-btn" style="margin-top: 8px;" data-action="expandLMStudioSelection" data-stop-propagation="true">Change model</button>
-    `;
-  }
-
-  // If LM Studio is selected but no model yet, show the list of available models
-  if (isActive && !hasSelection) {
-    return `
-      <div class="custom-llamafile-card active" >
-        <div class="card-icon" style="background: var(--blue-dim); color: var(--blue); font-size: 18px;">📦</div>
-        <div class="card-info">
-          <div class="card-title">Load from LM Studio</div>
-          <div class="card-desc">Select a model from your LM Studio cache. <span style="color: var(--accent);">Note: not all models work with llama.cpp/llamafile.</span></div>
-        </div>
-        <button class="custom-clear-btn" data-action="clearLMStudioModel" data-stop-propagation="true">Cancel</button>
-      </div>
-      <div class="download-dir-row" style="margin-top: 8px; flex-wrap: wrap; gap: 4px;">
-        <span style="color: var(--text-secondary); font-size: 12px; margin-right: 4px;">LM Studio cache:</span>
-        <input type="text" class="path-input" value="${state.lmstudioCacheDir}"
-               data-action="updateLMStudioCacheDir"
-               style="flex: 1; min-width: 150px; padding: 4px 8px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
-        <button class="download-dir-btn" data-action="selectLMStudioCacheDir" data-stop-propagation="true" title="Browse...">📂</button>
-      </div>
-      <div class="version-releases" style="margin-top: 8px;">
-        ${state.lmstudioModels.map(m => `
-          <div class="release-row" data-action="selectLMStudioModel" data-dir-name="${m.dirName}">
-            <div class="release-radio"></div>
-            <div class="release-info">
-              <span class="release-version">${m.displayName}</span>
-              <span style="color: var(--text-secondary); font-size: 11px; margin-left: 8px;">${m.files.length} file${m.files.length !== 1 ? 's' : ''}</span>
-            </div>
-            <span class="release-date">${formatBytes(m.totalSizeBytes)}</span>
-          </div>
-        `).join('')}
-        ${state.lmstudioModels.length === 0 ? '<div class="card-desc" style="padding: 12px; color: var(--text-secondary);">No LM Studio models found.<br><span style="font-size: 11px;">Make sure this is an LM Studio cache directory containing <code>models/lmstudio-community/</code>.</span></div>' : ''}
-      </div>
-    `;
-  }
-
-  // Default collapsed state - show the card to click
-  return `
-    <div class="custom-llamafile-card"
-         data-action="selectLMStudioSource">
-      <div class="card-icon" style="background: var(--blue-dim); color: var(--blue); font-size: 18px;">📦</div>
-      <div class="card-info">
-        <div class="card-title">Load from LM Studio</div>
-        <div class="card-desc">Use a model from your LM Studio cache. <span style="color: var(--accent);">Note: not all models work with llama.cpp/llamafile.</span></div>
-      </div>
-      <div class="card-meta" style="color: var(--text-secondary);">${state.lmstudioModels.length} models</div>
     </div>
   `;
 }
@@ -1409,216 +1175,6 @@ async function clearCustomModel() {
   }
 }
 
-// -- Ollama model interaction functions --
-
-async function selectOllamaSource() {
-  console.log('selectOllamaSource called, ollamaModels:', state.ollamaModels);
-
-  // Switch to Ollama mode without selecting a model yet
-  state.modelSource = 'ollama';
-  state.selectedModel = null;
-  state.selectedOllamaModel = null;
-  state.customModelFiles = [];
-  state.modelFileSelections = {};
-  state.expandedModelFiles = {};
-
-  // If only one Ollama model, auto-select it
-  if (state.ollamaModels.length === 1) {
-    await selectOllamaModel(state.ollamaModels[0].modelName, state.ollamaModels[0].tag);
-    return;
-  }
-
-  renderCurrentStep();
-}
-
-async function selectOllamaModel(modelName, tag) {
-  console.log('selectOllamaModel called:', modelName, tag);
-  try {
-    const customDir = state.ollamaCacheDir !== '~/.ollama' ? state.ollamaCacheDir : null;
-    const buildState = await invoke('select_ollama_model', { modelName, tag, customDir });
-    console.log('select_ollama_model returned:', buildState);
-    syncFromBuildState(buildState);
-
-    // Clear UI-only state
-    state.selectedModel = null;
-    state.modelFileSelections = {};
-    state.expandedModelFiles = {};
-    renderCurrentStep();
-  } catch (err) {
-    console.error('Failed to select Ollama model:', err);
-  }
-}
-
-function expandOllamaSelection() {
-  // Show the model list again (clear selection but stay in Ollama mode)
-  state.selectedOllamaModel = null;
-  renderCurrentStep();
-}
-
-async function clearOllamaModel() {
-  // Re-select first model if available (this will switch back to registry mode)
-  if (state.models.length > 0) {
-    await selectModel(state.models[0].id);
-  } else {
-    state.modelSource = 'registry';
-    state.selectedModel = null;
-    state.selectedOllamaModel = null;
-    renderCurrentStep();
-  }
-}
-
-async function selectOllamaCacheDir() {
-  try {
-    const path = await invoke('select_model_download_dir'); // Reuse directory picker
-    if (path) {
-      await updateOllamaCacheDir(path);
-    }
-  } catch (err) {
-    console.error('Failed to select Ollama cache directory:', err);
-  }
-}
-
-async function updateOllamaCacheDir(path) {
-  if (!path || path.trim() === '') return;
-
-  path = path.trim();
-  state.ollamaCacheDir = path;
-
-  // Rescan for models in the new directory
-  // Always try to get models, even if check_ollama_available returns false
-  // (the check might be too strict, and get_ollama_models handles missing dirs gracefully)
-  try {
-    state.ollamaModels = await invoke('get_ollama_models', { customDir: path });
-    state.ollamaAvailable = state.ollamaModels.length > 0;
-    console.log('Found Ollama models in custom dir:', state.ollamaModels.length);
-  } catch (e) {
-    console.log('Failed to get Ollama models:', e);
-    state.ollamaModels = [];
-    state.ollamaAvailable = false;
-  }
-  // Clear any previous selection since models list changed
-  state.selectedOllamaModel = null;
-  renderCurrentStep();
-}
-
-// LM Studio functions
-async function selectLMStudioSource() {
-  console.log('selectLMStudioSource called, lmstudioModels:', state.lmstudioModels);
-
-  // Switch to LM Studio mode without selecting a model yet
-  state.modelSource = 'lmstudio';
-  state.selectedModel = null;
-  state.selectedOllamaModel = null;
-  state.selectedLMStudioModel = null;
-  state.customModelFiles = [];
-  state.modelFileSelections = {};
-  state.expandedModelFiles = {};
-  state.lmstudioFileSelections = {};
-  state.expandedLMStudioFiles = {};
-
-  // If only one LM Studio model, auto-select it
-  if (state.lmstudioModels.length === 1) {
-    await selectLMStudioModel(state.lmstudioModels[0].dirName);
-    return;
-  }
-
-  renderCurrentStep();
-}
-
-async function selectLMStudioModel(dirName) {
-  console.log('selectLMStudioModel called:', dirName);
-  try {
-    const customDir = state.lmstudioCacheDir !== '~/.cache/lm-studio' ? state.lmstudioCacheDir : null;
-    const buildState = await invoke('select_lmstudio_model', { dirName, customDir });
-    console.log('select_lmstudio_model returned:', buildState);
-    syncFromBuildState(buildState);
-
-    // Clear UI-only state
-    state.selectedModel = null;
-    state.modelFileSelections = {};
-    state.expandedModelFiles = {};
-    state.expandedLMStudioFiles = {};
-    renderCurrentStep();
-  } catch (err) {
-    console.error('Failed to select LM Studio model:', err);
-  }
-}
-
-async function selectLMStudioFile(role, idx) {
-  console.log('selectLMStudioFile called:', role, idx);
-  try {
-    const buildState = await invoke('select_lmstudio_file', { role, idx });
-    syncFromBuildState(buildState);
-    renderCurrentStep();
-  } catch (err) {
-    console.error('Failed to select LM Studio file:', err);
-  }
-}
-
-function toggleLMStudioFileExpand(role) {
-  if (!state.expandedLMStudioFiles) {
-    state.expandedLMStudioFiles = {};
-  }
-  state.expandedLMStudioFiles[role] = !state.expandedLMStudioFiles[role];
-  renderCurrentStep();
-}
-
-function expandLMStudioSelection() {
-  // Show the model list again (clear selection but stay in LM Studio mode)
-  state.selectedLMStudioModel = null;
-  state.lmstudioFileSelections = {};
-  state.expandedLMStudioFiles = {};
-  renderCurrentStep();
-}
-
-async function clearLMStudioModel() {
-  // Re-select first model if available (this will switch back to registry mode)
-  if (state.models.length > 0) {
-    await selectModel(state.models[0].id);
-  } else {
-    state.modelSource = 'registry';
-    state.selectedModel = null;
-    state.selectedLMStudioModel = null;
-    state.lmstudioFileSelections = {};
-    state.expandedLMStudioFiles = {};
-    renderCurrentStep();
-  }
-}
-
-async function selectLMStudioCacheDir() {
-  try {
-    const path = await invoke('select_model_download_dir'); // Reuse directory picker
-    if (path) {
-      await updateLMStudioCacheDir(path);
-    }
-  } catch (err) {
-    console.error('Failed to select LM Studio cache directory:', err);
-  }
-}
-
-async function updateLMStudioCacheDir(path) {
-  if (!path || path.trim() === '') return;
-
-  path = path.trim();
-  state.lmstudioCacheDir = path;
-
-  // Rescan for models in the new directory
-  try {
-    state.lmstudioModels = await invoke('get_lmstudio_models', { customDir: path });
-    state.lmstudioAvailable = state.lmstudioModels.length > 0;
-    console.log('Found LM Studio models in custom dir:', state.lmstudioModels.length);
-  } catch (e) {
-    console.log('Failed to get LM Studio models:', e);
-    state.lmstudioModels = [];
-    state.lmstudioAvailable = false;
-  }
-  // Clear any previous selection since models list changed
-  state.selectedLMStudioModel = null;
-  state.lmstudioFileSelections = {};
-  state.expandedLMStudioFiles = {};
-  renderCurrentStep();
-}
-
 async function selectDownloadDir() {
   try {
     const path = await invoke('select_model_download_dir');
@@ -1641,13 +1197,10 @@ function isModelStepValid() {
     return state.customModelFiles.length > 0 && state.customModelFiles[0].path;
   }
   if (state.modelSource === 'ollama') {
-    return !!state.selectedOllamaModel;
+    return ollama.isValid();
   }
   if (state.modelSource === 'lmstudio') {
-    // LM Studio is valid if we have a model selected and at least one weights file
-    if (!state.selectedLMStudioModel) return false;
-    const weightsFiles = state.selectedLMStudioModel.files.filter(f => f.role === 'weights');
-    return weightsFiles.length > 0;
+    return lmstudio.isValid();
   }
   return !!state.selectedModel;
 }
@@ -1687,16 +1240,10 @@ function renderModelSummaryValue() {
     return text;
   }
   if (state.modelSource === 'ollama') {
-    if (!state.selectedOllamaModel) return 'Ollama \u2014 N/A';
-    return `Ollama \u2014 ${state.selectedOllamaModel.displayName}`;
+    return ollama.getModelSummary();
   }
   if (state.modelSource === 'lmstudio') {
-    if (!state.selectedLMStudioModel) return 'LM Studio \u2014 N/A';
-    let text = `LM Studio \u2014 ${state.resolvedWeightsFilename || state.selectedLMStudioModel.displayName}`;
-    if (state.resolvedMmprojFilename) {
-      text += ` + mmproj: ${state.resolvedMmprojFilename}`;
-    }
-    return text;
+    return lmstudio.getModelSummary();
   }
   if (!state.selectedModel) return 'N/A';
   const weightsFile = state.selectedModel.files.find(f => f.role === 'weights');
