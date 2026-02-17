@@ -22,13 +22,30 @@ const state = {
   models: [],
   filteredModels: [],
   selectedModel: null,
-  modelSource: 'registry',       // 'registry' or 'custom'
+  modelSource: 'registry',       // 'registry', 'custom', 'ollama', or 'lmstudio'
   modelFileSelections: {},        // keyed by file role: { source, quantizationIdx, customPath }
   expandedModelFiles: {},         // keyed by file role: bool
   modelDownloadDir: '',
   customModelFiles: [],           // array of { role, path }
   searchQuery: '',
   activeFilter: 'all',
+  // Ollama model support
+  ollamaAvailable: false,         // Whether ~/.ollama exists with models
+  ollamaModels: [],               // Array of OllamaModel objects from backend
+  selectedOllamaModel: null,      // Currently selected Ollama model
+  ollamaCacheDir: '',             // Custom Ollama cache directory (default: ~/.ollama)
+  // LM Studio model support
+  lmstudioAvailable: false,       // Whether LM Studio cache exists with models
+  lmstudioModels: [],             // Array of LMStudioModel objects from backend
+  selectedLMStudioModel: null,    // Currently selected LM Studio model
+  lmstudioFileSelections: {},     // File selections keyed by role: { weights: idx, mmproj: idx }
+  lmstudioCacheDir: '',           // Custom LM Studio cache directory
+  expandedLMStudioFiles: {},      // UI state for expanded file lists
+  // Resolved model file paths (computed by backend)
+  resolvedWeightsPath: null,      // Full path to selected weights file
+  resolvedWeightsFilename: null,  // Just the filename
+  resolvedMmprojPath: null,       // Full path to selected mmproj file (if any)
+  resolvedMmprojFilename: null,   // Just the filename
 
   // Step 3: Configuration (schema-driven)
   configSchema: [],
@@ -95,11 +112,14 @@ function syncFromBuildState(buildState) {
   state.modelSource = buildState.modelSource;
   state.modelFileSelections = buildState.modelFileSelections || {};
   state.customModelFiles = buildState.customModelFiles || [];
+  state.selectedOllamaModel = buildState.selectedOllamaModel || null;
+  state.selectedLMStudioModel = buildState.selectedLmstudioModel || null;
+  state.lmstudioFileSelections = buildState.lmstudioFileSelections || {};
 
   // If model source is registry and we have a model ID, find the model
   if (buildState.modelSource === 'registry' && buildState.selectedModelId) {
     state.selectedModel = state.models.find(m => m.id === buildState.selectedModelId) || null;
-  } else if (buildState.modelSource === 'custom') {
+  } else if (buildState.modelSource === 'custom' || buildState.modelSource === 'ollama' || buildState.modelSource === 'lmstudio') {
     state.selectedModel = null;
   }
 
@@ -125,6 +145,12 @@ function syncFromBuildState(buildState) {
   }
   // Output path
   state.outputPath = buildState.outputPath || state.outputPath || '';
+
+  // Resolved model file paths (computed by backend)
+  state.resolvedWeightsPath = buildState.resolvedWeightsPath || null;
+  state.resolvedWeightsFilename = buildState.resolvedWeightsFilename || null;
+  state.resolvedMmprojPath = buildState.resolvedMmprojPath || null;
+  state.resolvedMmprojFilename = buildState.resolvedMmprojFilename || null;
 }
 
 const listen = window.__TAURI__.event.listen;
@@ -160,6 +186,38 @@ async function init() {
       state.modelDownloadDir = await invoke('get_model_cache_dir') || '';
     } catch (e) {
       state.modelDownloadDir = '~/.llamafile/models';
+    }
+
+    // Check for Ollama models
+    try {
+      state.ollamaCacheDir = await invoke('get_default_ollama_cache_dir');
+      state.ollamaAvailable = await invoke('check_ollama_available', { customDir: null });
+      console.log('Ollama available:', state.ollamaAvailable, 'at', state.ollamaCacheDir);
+      if (state.ollamaAvailable) {
+        state.ollamaModels = await invoke('get_ollama_models', { customDir: null });
+        console.log('Found Ollama models:', state.ollamaModels.length, state.ollamaModels);
+      }
+    } catch (e) {
+      console.log('Ollama check failed:', e);
+      state.ollamaAvailable = false;
+      state.ollamaModels = [];
+      state.ollamaCacheDir = '~/.ollama';
+    }
+
+    // Check for LM Studio models
+    try {
+      state.lmstudioCacheDir = await invoke('get_default_lmstudio_cache_dir');
+      state.lmstudioAvailable = await invoke('check_lmstudio_available', { customDir: null });
+      console.log('LM Studio available:', state.lmstudioAvailable, 'at', state.lmstudioCacheDir);
+      if (state.lmstudioAvailable) {
+        state.lmstudioModels = await invoke('get_lmstudio_models', { customDir: null });
+        console.log('Found LM Studio models:', state.lmstudioModels.length, state.lmstudioModels);
+      }
+    } catch (e) {
+      console.log('LM Studio check failed:', e);
+      state.lmstudioAvailable = false;
+      state.lmstudioModels = [];
+      state.lmstudioCacheDir = '~/.cache/lm-studio';
     }
 
     // Load config schema and initialize defaults
@@ -316,10 +374,10 @@ function renderModals() {
         <div class="hf-token-content">
           <div class="hf-token-title">Authentication Required</div>
           <div class="hf-token-desc">This model requires a Hugging Face token. You can get one at <a href="https://huggingface.co/settings/tokens" target="_blank">huggingface.co/settings/tokens</a></div>
-          <input type="password" class="hf-token-input" id="hf-token-input" placeholder="hf_..." onkeydown="if(event.key==='Enter') submitHfToken(this.value)">
+          <input type="password" class="hf-token-input" id="hf-token-input" placeholder="hf_..." data-action="submitHfToken">
           <div class="hf-token-buttons">
-            <button class="btn btn-secondary" onclick="cancelHfTokenPrompt()">Cancel</button>
-            <button class="btn btn-primary" onclick="submitHfToken(document.getElementById('hf-token-input').value)">Save &amp; Retry</button>
+            <button class="btn btn-secondary" data-action="cancelHfTokenPrompt">Cancel</button>
+            <button class="btn btn-primary" data-action="submitHfToken">Save &amp; Retry</button>
           </div>
         </div>
       </div>
@@ -340,9 +398,9 @@ function renderModals() {
               </span>
             </div>
             <div class="hf-token-buttons" style="margin-top: 16px;">
-              <button class="btn btn-primary" onclick="handleFileExistsChoice('resume')">Resume Download</button>
-              <button class="btn btn-secondary" onclick="handleFileExistsChoice('download')">Start Fresh</button>
-              <button class="btn btn-secondary" onclick="handleFileExistsChoice('cancel')" style="margin-left: auto;">Cancel</button>
+              <button class="btn btn-primary" data-action="handleFileExistsChoice" data-choice="resume">Resume Download</button>
+              <button class="btn btn-secondary" data-action="handleFileExistsChoice" data-choice="download">Start Fresh</button>
+              <button class="btn btn-secondary" data-action="handleFileExistsChoice" data-choice="cancel" style="margin-left: auto;">Cancel</button>
             </div>
           ` : state.fileExistsPrompt.checksumMismatch ? `
             <div class="hf-token-title">Checksum Mismatch</div>
@@ -351,9 +409,9 @@ function renderModals() {
               <span style="color: var(--accent)">The file may be corrupted or from a different version.</span>
             </div>
             <div class="hf-token-buttons" style="margin-top: 16px;">
-              <button class="btn btn-primary" onclick="handleFileExistsChoice('download')">Re-download</button>
-              <button class="btn btn-secondary" onclick="handleFileExistsChoice('skip')">Use Anyway</button>
-              <button class="btn btn-secondary" onclick="handleFileExistsChoice('cancel')" style="margin-left: auto;">Cancel</button>
+              <button class="btn btn-primary" data-action="handleFileExistsChoice" data-choice="download">Re-download</button>
+              <button class="btn btn-secondary" data-action="handleFileExistsChoice" data-choice="skip">Use Anyway</button>
+              <button class="btn btn-secondary" data-action="handleFileExistsChoice" data-choice="cancel" style="margin-left: auto;">Cancel</button>
             </div>
           ` : state.fileExistsPrompt.askVerifyChecksum ? `
             <div class="hf-token-title">Verify File Integrity?</div>
@@ -363,9 +421,9 @@ function renderModals() {
               <span style="color: var(--text-muted)">Would you like to verify the SHA256 checksum? This may take a moment for large files.</span>
             </div>
             <div class="hf-token-buttons" style="margin-top: 16px;">
-              <button class="btn btn-primary" onclick="handleFileExistsChoice('verify')">Verify SHA256</button>
-              <button class="btn btn-secondary" onclick="handleFileExistsChoice('skip')">Skip Verification</button>
-              <button class="btn btn-secondary" onclick="handleFileExistsChoice('download')">Re-download</button>
+              <button class="btn btn-primary" data-action="handleFileExistsChoice" data-choice="verify">Verify SHA256</button>
+              <button class="btn btn-secondary" data-action="handleFileExistsChoice" data-choice="skip">Skip Verification</button>
+              <button class="btn btn-secondary" data-action="handleFileExistsChoice" data-choice="download">Re-download</button>
             </div>
           ` : `
             <div class="hf-token-title">File Already Exists</div>
@@ -379,8 +437,8 @@ function renderModals() {
               }
             </div>
             <div class="hf-token-buttons" style="margin-top: 16px;">
-              <button class="btn btn-primary" onclick="handleFileExistsChoice('skip')">Use Existing</button>
-              <button class="btn btn-secondary" onclick="handleFileExistsChoice('download')">Re-download</button>
+              <button class="btn btn-primary" data-action="handleFileExistsChoice" data-choice="skip">Use Existing</button>
+              <button class="btn btn-secondary" data-action="handleFileExistsChoice" data-choice="download">Re-download</button>
             </div>
           `}
         </div>
@@ -398,8 +456,8 @@ function renderModals() {
             Are you sure you want to cancel the build?${state.downloadProgress ? '<br><br><span style="color: var(--accent)">The current download will be stopped and the partial file will be deleted.</span>' : ''}
           </div>
           <div class="hf-token-buttons" style="margin-top: 16px;">
-            <button class="btn btn-secondary" onclick="dismissCancelConfirm()">Continue Build</button>
-            <button class="btn btn-primary" style="background: var(--red);" onclick="confirmCancelBuild()">Cancel Build</button>
+            <button class="btn btn-secondary" data-action="dismissCancelConfirm">Continue Build</button>
+            <button class="btn btn-primary" style="background: var(--red);" data-action="confirmCancelBuild">Cancel Build</button>
           </div>
         </div>
       </div>
@@ -649,7 +707,7 @@ function initModelFileSelections(model) {
 
 function renderModelStep() {
   const chips = getModelFilterChips();
-  const isCustomMode = state.modelSource === 'custom';
+  const isRegistryMode = state.modelSource === 'registry';
 
   return `
     <div class="step-panel active">
@@ -677,7 +735,7 @@ function renderModelStep() {
         </div>
 
         ${state.filteredModels.map(m => {
-          const isSelected = !isCustomMode && state.selectedModel?.id === m.id;
+          const isSelected = isRegistryMode && state.selectedModel?.id === m.id;
           const weightsFile = m.files.find(f => f.role === 'weights');
           const firstQuant = weightsFile?.quantizations[0];
           const totalSize = getTotalModelSizeForModel(m);
@@ -709,6 +767,16 @@ function renderModelStep() {
         <div class="version-divider"><span>or</span></div>
 
         ${renderCustomModelCard()}
+
+        ${(state.ollamaAvailable || state.modelSource === 'ollama') ? `
+        <div class="version-divider"><span>or</span></div>
+        ${renderOllamaModelCard()}
+        ` : ''}
+
+        ${(state.lmstudioAvailable || state.modelSource === 'lmstudio') ? `
+        <div class="version-divider"><span>or</span></div>
+        ${renderLMStudioModelCard()}
+        ` : ''}
 
         ${state.shaVerifyProgress ? `
           <div class="hf-token-modal">
@@ -872,6 +940,215 @@ function renderCustomModelCard() {
         <div class="card-desc">Use a custom GGUF model file from your filesystem</div>
       </div>
       <div class="card-meta" style="color: var(--text-secondary);">Browse&hellip;</div>
+    </div>
+  `;
+}
+
+function renderOllamaModelCard() {
+  const isActive = state.modelSource === 'ollama';
+  const hasSelection = state.selectedOllamaModel !== null;
+
+  // If Ollama is selected and we have a model, show the expanded state
+  if (isActive && hasSelection) {
+    return `
+      <div class="custom-llamafile-card active">
+        <div class="card-icon" style="background: var(--purple-dim); color: var(--purple); font-size: 18px;">🦙</div>
+        <div class="card-info">
+          <div class="card-title">Load from Ollama</div>
+          <div class="custom-file-list">
+            <div class="custom-file-entry">
+              <span class="file-role-tag">model</span>
+              <span class="custom-path-display" title="${state.selectedOllamaModel.weightsPath}">${state.selectedOllamaModel.displayName}</span>
+              <span class="file-size-label">${formatBytes(state.selectedOllamaModel.sizeBytes)}</span>
+            </div>
+          </div>
+          <button class="custom-add-btn" data-action="expandOllamaSelection" data-stop-propagation="true">Change model</button>
+        </div>
+        <button class="custom-clear-btn" data-action="clearOllamaModel" data-stop-propagation="true">Clear</button>
+      </div>
+    `;
+  }
+
+  // If Ollama is selected but no model yet, show the list of available models
+  if (isActive && !hasSelection) {
+    return `
+      <div class="custom-llamafile-card active">
+        <div class="card-icon" style="background: var(--purple-dim); color: var(--purple); font-size: 18px;">🦙</div>
+        <div class="card-info">
+          <div class="card-title">Load from Ollama</div>
+          <div class="card-desc">Select a model from your local Ollama cache. <span style="color: var(--accent);">Note: not all Ollama models work with llama.cpp/llamafile.</span></div>
+        </div>
+        <button class="custom-clear-btn" data-action="clearOllamaModel" data-stop-propagation="true">Cancel</button>
+      </div>
+      <div class="download-dir-row" style="margin-top: 8px; flex-wrap: wrap; gap: 4px;">
+        <span style="color: var(--text-secondary); font-size: 12px; margin-right: 4px;">Ollama cache:</span>
+        <input type="text" class="path-input" value="${state.ollamaCacheDir}"
+               data-action="updateOllamaCacheDir"
+               style="flex: 1; min-width: 150px; padding: 4px 8px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+        <button class="download-dir-btn" data-action="selectOllamaCacheDir" data-stop-propagation="true" title="Browse...">📂</button>
+      </div>
+      <div class="version-releases" style="margin-top: 8px;">
+        ${state.ollamaModels.map(m => `
+          <div class="release-row" data-action="selectOllamaModel" data-model-name="${m.modelName}" data-tag="${m.tag}">
+            <div class="release-radio"></div>
+            <div class="release-info">
+              <span class="release-version">${m.displayName}</span>
+            </div>
+            <span class="release-date">${formatBytes(m.sizeBytes)}</span>
+          </div>
+        `).join('')}
+        ${state.ollamaModels.length === 0 ? '<div class="card-desc" style="padding: 12px; color: var(--text-secondary);">No Ollama models found.<br><span style="font-size: 11px;">Make sure this is an Ollama cache directory containing a <code>models/</code> subfolder.</span></div>' : ''}
+      </div>
+    `;
+  }
+
+  // Default collapsed state - show the card to click
+  return `
+    <div class="custom-llamafile-card"
+         data-action="selectOllamaSource">
+      <div class="card-icon" style="background: var(--purple-dim); color: var(--purple); font-size: 18px;">🦙</div>
+      <div class="card-info">
+        <div class="card-title">Load from Ollama</div>
+        <div class="card-desc">Use a model from your local Ollama cache. <span style="color: var(--accent);">Note: not all Ollama models work with llama.cpp/llamafile.</span></div>
+      </div>
+      <div class="card-meta" style="color: var(--text-secondary);">${state.ollamaModels.length} models</div>
+    </div>
+  `;
+}
+
+function renderLMStudioModelCard() {
+  const isActive = state.modelSource === 'lmstudio';
+  const hasSelection = state.selectedLMStudioModel !== null;
+
+  // If LM Studio is selected and we have a model, show the expanded state with file selection
+  if (isActive && hasSelection) {
+    const model = state.selectedLMStudioModel;
+    const weightsFiles = model.files.filter(f => f.role === 'weights');
+    const mmprojFiles = model.files.filter(f => f.role === 'mmproj');
+    const selectedWeightsIdx = state.lmstudioFileSelections.weights || 0;
+    const selectedMmprojIdx = state.lmstudioFileSelections.mmproj || 0;
+
+    return `
+      <div class="custom-llamafile-card active">
+        <div class="card-icon" style="background: var(--blue-dim); color: var(--blue); font-size: 18px;">📦</div>
+        <div class="card-info">
+          <div class="card-title">Load from LM Studio</div>
+          <div class="custom-file-list">
+            <div class="custom-file-entry">
+              <span class="file-role-tag">model</span>
+              <span class="custom-path-display">${model.displayName}</span>
+            </div>
+          </div>
+        </div>
+        <button class="custom-clear-btn" data-action="clearLMStudioModel" data-stop-propagation="true">Clear</button>
+      </div>
+      <div class="model-file-config" style="margin-top: 8px;">
+        ${weightsFiles.length > 0 ? `
+          <div class="file-role-section">
+            <div class="file-role-header">
+              <span class="file-role-label">Weights</span>
+              <span class="quant-badge">${weightsFiles[selectedWeightsIdx]?.filename || 'N/A'}</span>
+              <span class="file-size-label">${formatBytes(weightsFiles[selectedWeightsIdx]?.sizeBytes || 0)}</span>
+              ${weightsFiles.length > 1 ? `
+                <div class="expand-toggle" data-action="toggleLMStudioFileExpand" data-role="weights" data-stop-propagation="true">
+                  <span class="expand-icon ${state.expandedLMStudioFiles?.weights ? 'expanded' : ''}">▶</span>
+                  <span class="expand-count">${weightsFiles.length}</span>
+                </div>
+              ` : ''}
+            </div>
+            ${weightsFiles.length > 1 && state.expandedLMStudioFiles?.weights ? `
+              <div class="version-releases">
+                ${weightsFiles.map((f, idx) => `
+                  <div class="release-row ${idx === selectedWeightsIdx ? 'selected' : ''}"
+                       data-action="selectLMStudioFile" data-role="weights" data-index="${idx}">
+                    <div class="release-radio"></div>
+                    <div class="release-info">
+                      <span class="release-version">${f.filename}</span>
+                    </div>
+                    <span class="release-date">${formatBytes(f.sizeBytes)}</span>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+          </div>
+        ` : ''}
+        ${mmprojFiles.length > 0 ? `
+          <div class="file-role-section">
+            <div class="file-role-header">
+              <span class="file-role-label">Vision Adapter (mmproj)</span>
+              <span class="quant-badge">${mmprojFiles[selectedMmprojIdx]?.filename || 'N/A'}</span>
+              <span class="file-size-label">${formatBytes(mmprojFiles[selectedMmprojIdx]?.sizeBytes || 0)}</span>
+              ${mmprojFiles.length > 1 ? `
+                <div class="expand-toggle" data-action="toggleLMStudioFileExpand" data-role="mmproj" data-stop-propagation="true">
+                  <span class="expand-icon ${state.expandedLMStudioFiles?.mmproj ? 'expanded' : ''}">▶</span>
+                  <span class="expand-count">${mmprojFiles.length}</span>
+                </div>
+              ` : ''}
+            </div>
+            ${mmprojFiles.length > 1 && state.expandedLMStudioFiles?.mmproj ? `
+              <div class="version-releases">
+                ${mmprojFiles.map((f, idx) => `
+                  <div class="release-row ${idx === selectedMmprojIdx ? 'selected' : ''}"
+                       data-action="selectLMStudioFile" data-role="mmproj" data-index="${idx}">
+                    <div class="release-radio"></div>
+                    <div class="release-info">
+                      <span class="release-version">${f.filename}</span>
+                    </div>
+                    <span class="release-date">${formatBytes(f.sizeBytes)}</span>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+          </div>
+        ` : ''}
+      </div>
+      <button class="custom-add-btn" style="margin-top: 8px;" data-action="expandLMStudioSelection" data-stop-propagation="true">Change model</button>
+    `;
+  }
+
+  // If LM Studio is selected but no model yet, show the list of available models
+  if (isActive && !hasSelection) {
+    return `
+      <div class="custom-llamafile-card active">
+        <div class="card-icon" style="background: var(--blue-dim); color: var(--blue); font-size: 18px;">📦</div>
+        <div class="card-info">
+          <div class="card-title">Load from LM Studio</div>
+          <div class="card-desc">Select a model from your LM Studio cache. <span style="color: var(--accent);">Note: not all models work with llama.cpp/llamafile.</span></div>
+        </div>
+        <button class="custom-clear-btn" data-action="clearLMStudioModel" data-stop-propagation="true">Cancel</button>
+      </div>
+      <div class="download-dir-row" style="margin-top: 8px; flex-wrap: wrap; gap: 4px;">
+        <span style="color: var(--text-secondary); font-size: 12px; margin-right: 4px;">LM Studio cache:</span>
+        <input type="text" class="path-input" value="${state.lmstudioCacheDir}"
+               data-action="updateLMStudioCacheDir"
+               style="flex: 1; min-width: 150px; padding: 4px 8px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+        <button class="download-dir-btn" data-action="selectLMStudioCacheDir" data-stop-propagation="true" title="Browse...">📂</button>
+      </div>
+      <div class="version-releases" style="margin-top: 8px;">
+        ${state.lmstudioModels.map(m => `
+          <div class="release-row" data-action="selectLMStudioModel" data-dir-name="${m.dirName}">
+            <div class="release-radio"></div>
+            <div class="release-info">
+              <span class="release-version">${m.displayName}</span>
+            </div>
+            <span class="release-date">${m.files.length} files</span>
+          </div>
+        `).join('')}
+        ${state.lmstudioModels.length === 0 ? '<div class="card-desc" style="padding: 12px; color: var(--text-secondary);">No LM Studio models found.<br><span style="font-size: 11px;">Make sure this is an LM Studio cache directory.</span></div>' : ''}
+      </div>
+    `;
+  }
+
+  // Default collapsed state - show the card to click
+  return `
+    <div class="custom-llamafile-card"
+         data-action="selectLMStudioSource">
+      <div class="card-icon" style="background: var(--blue-dim); color: var(--blue); font-size: 18px;">📦</div>
+      <div class="card-info">
+        <div class="card-title">Load from LM Studio</div>
+        <div class="card-desc">Use a model from your LM Studio cache. <span style="color: var(--accent);">Note: not all models work with llama.cpp/llamafile.</span></div>
+      </div>
+      <div class="card-meta" style="color: var(--text-secondary);">${state.lmstudioModels.length} models</div>
     </div>
   `;
 }
@@ -1099,6 +1376,164 @@ async function clearCustomModel() {
   }
 }
 
+// -- Ollama model functions --
+
+function selectOllamaSource() {
+  state.modelSource = 'ollama';
+  state.selectedModel = null;
+  state.selectedOllamaModel = null;
+  renderCurrentStep();
+}
+
+async function selectOllamaModel(modelName, tag) {
+  try {
+    const buildState = await invoke('select_ollama_model', {
+      modelName,
+      tag,
+      customDir: state.ollamaCacheDir !== '~/.ollama' ? state.ollamaCacheDir : null
+    });
+    syncFromBuildState(buildState);
+    renderCurrentStep();
+  } catch (err) {
+    console.error('Failed to select Ollama model:', err);
+  }
+}
+
+async function clearOllamaModel() {
+  // Re-select first registry model if available
+  if (state.models.length > 0) {
+    await selectModel(state.models[0].id);
+  } else {
+    state.modelSource = 'registry';
+    state.selectedModel = null;
+    state.selectedOllamaModel = null;
+    renderCurrentStep();
+  }
+}
+
+function expandOllamaSelection() {
+  state.selectedOllamaModel = null;
+  renderCurrentStep();
+}
+
+async function updateOllamaCacheDir(newDir) {
+  state.ollamaCacheDir = newDir;
+  // Refresh models from new directory
+  try {
+    state.ollamaAvailable = await invoke('check_ollama_available', { customDir: newDir || null });
+    if (state.ollamaAvailable) {
+      state.ollamaModels = await invoke('get_ollama_models', { customDir: newDir || null });
+    } else {
+      state.ollamaModels = [];
+    }
+  } catch (e) {
+    state.ollamaAvailable = false;
+    state.ollamaModels = [];
+  }
+  renderCurrentStep();
+}
+
+async function selectOllamaCacheDir() {
+  try {
+    const path = await invoke('select_model_download_dir');
+    if (path) {
+      await updateOllamaCacheDir(path);
+    }
+  } catch (err) {
+    console.error('Failed to select Ollama cache directory:', err);
+  }
+}
+
+// -- LM Studio model functions --
+
+function selectLMStudioSource() {
+  state.modelSource = 'lmstudio';
+  state.selectedModel = null;
+  state.selectedLMStudioModel = null;
+  renderCurrentStep();
+}
+
+async function selectLMStudioModel(dirName) {
+  try {
+    const buildState = await invoke('select_lmstudio_model', {
+      dirName,
+      customDir: state.lmstudioCacheDir !== '~/.cache/lm-studio' ? state.lmstudioCacheDir : null
+    });
+    syncFromBuildState(buildState);
+    // Initialize file selections to first file of each role
+    state.lmstudioFileSelections = { weights: 0, mmproj: 0 };
+    renderCurrentStep();
+  } catch (err) {
+    console.error('Failed to select LM Studio model:', err);
+  }
+}
+
+async function selectLMStudioFile(role, index) {
+  state.lmstudioFileSelections[role] = index;
+  try {
+    const buildState = await invoke('select_lmstudio_file', {
+      role,
+      fileIndex: index
+    });
+    syncFromBuildState(buildState);
+  } catch (err) {
+    console.error('Failed to select LM Studio file:', err);
+  }
+  renderCurrentStep();
+}
+
+async function clearLMStudioModel() {
+  // Re-select first registry model if available
+  if (state.models.length > 0) {
+    await selectModel(state.models[0].id);
+  } else {
+    state.modelSource = 'registry';
+    state.selectedModel = null;
+    state.selectedLMStudioModel = null;
+    state.lmstudioFileSelections = {};
+    renderCurrentStep();
+  }
+}
+
+function expandLMStudioSelection() {
+  state.selectedLMStudioModel = null;
+  state.lmstudioFileSelections = {};
+  renderCurrentStep();
+}
+
+function toggleLMStudioFileExpand(role) {
+  state.expandedLMStudioFiles[role] = !state.expandedLMStudioFiles[role];
+  renderCurrentStep();
+}
+
+async function updateLMStudioCacheDir(newDir) {
+  state.lmstudioCacheDir = newDir;
+  // Refresh models from new directory
+  try {
+    state.lmstudioAvailable = await invoke('check_lmstudio_available', { customDir: newDir || null });
+    if (state.lmstudioAvailable) {
+      state.lmstudioModels = await invoke('get_lmstudio_models', { customDir: newDir || null });
+    } else {
+      state.lmstudioModels = [];
+    }
+  } catch (e) {
+    state.lmstudioAvailable = false;
+    state.lmstudioModels = [];
+  }
+  renderCurrentStep();
+}
+
+async function selectLMStudioCacheDir() {
+  try {
+    const path = await invoke('select_model_download_dir');
+    if (path) {
+      await updateLMStudioCacheDir(path);
+    }
+  } catch (err) {
+    console.error('Failed to select LM Studio cache directory:', err);
+  }
+}
+
 async function selectDownloadDir() {
   try {
     const path = await invoke('select_model_download_dir');
@@ -1115,12 +1550,31 @@ function isModelStepValid() {
   if (state.modelSource === 'custom') {
     return state.customModelFiles.length > 0 && state.customModelFiles[0].path;
   }
+  if (state.modelSource === 'ollama') {
+    return !!state.selectedOllamaModel;
+  }
+  if (state.modelSource === 'lmstudio') {
+    return !!state.selectedLMStudioModel;
+  }
   return !!state.selectedModel;
 }
 
 function getTotalModelSize() {
   if (state.modelSource === 'custom') {
     return 0; // Unknown for custom files
+  }
+  if (state.modelSource === 'ollama') {
+    return state.selectedOllamaModel?.sizeBytes || 0;
+  }
+  if (state.modelSource === 'lmstudio') {
+    // Sum selected files from LM Studio
+    if (!state.selectedLMStudioModel) return 0;
+    const model = state.selectedLMStudioModel;
+    const weightsIdx = state.lmstudioFileSelections.weights || 0;
+    const mmprojIdx = state.lmstudioFileSelections.mmproj || 0;
+    const weightsFile = model.files.filter(f => f.role === 'weights')[weightsIdx];
+    const mmprojFile = model.files.filter(f => f.role === 'mmproj')[mmprojIdx];
+    return (weightsFile?.sizeBytes || 0) + (mmprojFile?.sizeBytes || 0);
   }
   if (!state.selectedModel) return 0;
   return getTotalModelSizeForModel(state.selectedModel);
@@ -1726,6 +2180,18 @@ function renderBuildStep() {
                   <button class="btn btn-secondary" data-action="handleFileExistsChoice" data-choice="skip">Use Anyway</button>
                   <button class="btn btn-secondary" data-action="handleFileExistsChoice" data-choice="cancel" style="margin-left: auto;">Cancel</button>
                 </div>
+              ` : state.fileExistsPrompt.askVerifyChecksum ? `
+                <div class="hf-token-title">Verify File Integrity?</div>
+                <div class="hf-token-desc">
+                  <code>${state.fileExistsPrompt.filename}</code> exists and the file size matches
+                  (${formatBytes(state.fileExistsPrompt.expectedSize)}).<br>
+                  <span style="color: var(--text-muted)">Would you like to verify the SHA256 checksum? This may take a moment for large files.</span>
+                </div>
+                <div class="hf-token-buttons" style="margin-top: 16px;">
+                  <button class="btn btn-primary" data-action="handleFileExistsChoice" data-choice="verify">Verify SHA256</button>
+                  <button class="btn btn-secondary" data-action="handleFileExistsChoice" data-choice="skip">Skip Verification</button>
+                  <button class="btn btn-secondary" data-action="handleFileExistsChoice" data-choice="download">Re-download</button>
+                </div>
               ` : `
                 <div class="hf-token-title">File Already Exists</div>
                 <div class="hf-token-desc">
@@ -1955,11 +2421,12 @@ function cancelHfTokenPrompt() {
 // Check if file exists and prompt user for action
 // Returns: 'skip' (use existing), 'download' (fresh download), 'resume' (continue partial), or throws on cancel
 async function checkFileExistsWithPrompt(path, expectedSize, sha256) {
+  // First, check file info WITHOUT checksum verification (fast)
   const fileInfo = await invoke('get_file_info', {
     path,
     expectedSize,
     expectedSha256: sha256,
-    verifyChecksum: true,
+    verifyChecksum: false,
   });
 
   const filename = path.split('/').pop();
@@ -1988,33 +2455,82 @@ async function checkFileExistsWithPrompt(path, expectedSize, sha256) {
     });
   }
 
-  // File is complete - check if checksum is valid
+  // File is complete (size matches)
   if (fileInfo.isComplete) {
-    if (fileInfo.checksumValid === false) {
-      // Checksum mismatch - offer re-download or use anyway
-      state.buildLog.push(`${filename}: checksum mismatch (file may be corrupted)`);
+    // If we have a SHA256 to verify, ask user if they want to verify
+    if (sha256) {
+      state.buildLog.push(`${filename}: found, size matches (${formatBytes(fileInfo.size)})`);
       renderBuildLog();
-      return new Promise((resolve) => {
+
+      // Ask user if they want to verify checksum
+      const userChoice = await new Promise((resolve) => {
         state.fileExistsPrompt = {
           filename,
           path,
-          checksumMismatch: true,
+          isComplete: true,
+          askVerifyChecksum: true,
+          expectedSize: fileInfo.size,
           resolve,
         };
         renderCurrentStep();
       });
+
+      if (userChoice === 'verify') {
+        // User wants to verify - show progress and calculate
+        state.fileExistsPrompt = null;
+        state.buildLog.push(`${filename}: calculating SHA256...`);
+        renderBuildLog();
+        renderCurrentStep();
+
+        const actualSha = await invoke('calculate_sha256', { path });
+
+        if (actualSha === sha256) {
+          state.buildLog.push(`${filename}: checksum verified`);
+          renderBuildLog();
+          return new Promise((resolve) => {
+            state.fileExistsPrompt = {
+              filename,
+              path,
+              isComplete: true,
+              checksumVerified: true,
+              resolve,
+            };
+            renderCurrentStep();
+          });
+        } else {
+          // Checksum mismatch
+          state.buildLog.push(`${filename}: checksum mismatch!`);
+          renderBuildLog();
+          return new Promise((resolve) => {
+            state.fileExistsPrompt = {
+              filename,
+              path,
+              checksumMismatch: true,
+              resolve,
+            };
+            renderCurrentStep();
+          });
+        }
+      } else if (userChoice === 'skip') {
+        // User skipped verification - use file without verifying
+        return 'skip';
+      } else if (userChoice === 'download') {
+        return 'download';
+      } else {
+        // cancelled
+        return 'cancel';
+      }
     }
-    // File is complete and valid (or no checksum to verify)
-    const checksumVerified = fileInfo.checksumValid === true;
-    const validationMsg = checksumVerified ? 'checksum verified' : 'size verified';
-    state.buildLog.push(`${filename}: found and ${validationMsg}`);
+
+    // No SHA256 available - just show size verified
+    state.buildLog.push(`${filename}: found and size verified (${formatBytes(fileInfo.size)})`);
     renderBuildLog();
     return new Promise((resolve) => {
       state.fileExistsPrompt = {
         filename,
         path,
         isComplete: true,
-        checksumVerified,
+        checksumVerified: false,
         resolve,
       };
       renderCurrentStep();
@@ -2531,6 +3047,20 @@ function getSelectedGgufFilename() {
     }
   }
 
+  if (state.modelSource === 'ollama' && state.selectedOllamaModel) {
+    // For Ollama, use the display name as base
+    return `${state.selectedOllamaModel.displayName.replace(':', '_')}.gguf`;
+  }
+
+  if (state.modelSource === 'lmstudio' && state.selectedLMStudioModel) {
+    const model = state.selectedLMStudioModel;
+    const weightsIdx = state.lmstudioFileSelections.weights || 0;
+    const weightsFile = model.files.filter(f => f.role === 'weights')[weightsIdx];
+    if (weightsFile?.filename) {
+      return weightsFile.filename;
+    }
+  }
+
   if (state.selectedModel && state.modelFileSelections) {
     const sel = state.modelFileSelections['weights'];
     if (sel?.source === 'custom' && sel.customPath) {
@@ -2725,7 +3255,47 @@ async function handleGlobalClick(event) {
       case 'clearCustomModel':
         await clearCustomModel();
         break;
-      
+
+      // Ollama Model Selection
+      case 'selectOllamaSource':
+        selectOllamaSource();
+        break;
+      case 'selectOllamaModel':
+        await selectOllamaModel(params.modelName, params.tag);
+        break;
+      case 'clearOllamaModel':
+        await clearOllamaModel();
+        break;
+      case 'expandOllamaSelection':
+        expandOllamaSelection();
+        break;
+      case 'selectOllamaCacheDir':
+        await selectOllamaCacheDir();
+        break;
+
+      // LM Studio Model Selection
+      case 'selectLMStudioSource':
+        selectLMStudioSource();
+        break;
+      case 'selectLMStudioModel':
+        await selectLMStudioModel(params.dirName);
+        break;
+      case 'selectLMStudioFile':
+        await selectLMStudioFile(params.role, parseInt(params.index));
+        break;
+      case 'clearLMStudioModel':
+        await clearLMStudioModel();
+        break;
+      case 'expandLMStudioSelection':
+        expandLMStudioSelection();
+        break;
+      case 'toggleLMStudioFileExpand':
+        toggleLMStudioFileExpand(params.role);
+        break;
+      case 'selectLMStudioCacheDir':
+        await selectLMStudioCacheDir();
+        break;
+
       // Configuration
       case 'toggleConfig':
         await toggleConfig(params.configKey);
@@ -2840,13 +3410,13 @@ function handleGlobalInput(event) {
 /**
  * Global change handler for onchange events
  */
-function handleGlobalChange(event) {
+async function handleGlobalChange(event) {
   const target = event.target.closest('[data-action]');
   if (!target) return;
-  
+
   const action = target.getAttribute('data-action');
   const params = extractParams(target);
-  
+
   try {
     switch (action) {
       case 'updateConfig':
@@ -2861,6 +3431,12 @@ function handleGlobalChange(event) {
         break;
       case 'updateArgsContent':
         updateArgsContent(event.target.value);
+        break;
+      case 'updateOllamaCacheDir':
+        await updateOllamaCacheDir(event.target.value);
+        break;
+      case 'updateLMStudioCacheDir':
+        await updateLMStudioCacheDir(event.target.value);
         break;
       default:
         // Ignore unknown change actions
