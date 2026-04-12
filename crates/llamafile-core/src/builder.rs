@@ -64,6 +64,118 @@ impl Builder {
         &self.config
     }
 
+    /// Materialize the current state into a flat list of components that
+    /// `build()` would assemble. Useful for previewing what will be built.
+    pub fn resolved_components(&self) -> Vec<Component> {
+        let mut components = Vec::new();
+
+        // Runtime
+        if let Some(release) = self.find_selected_release() {
+            components.push(Component {
+                role: ComponentRole::Runtime,
+                source: ComponentSource::Url(release.download_url.clone()),
+                zip_path: String::new(),
+                expected_size: Some(release.size_bytes),
+                expected_sha256: Some(release.sha256.clone()),
+            });
+        } else if let Some(ref path) = self.state.custom_llamafile_path {
+            components.push(Component {
+                role: ComponentRole::Runtime,
+                source: ComponentSource::Local(PathBuf::from(path)),
+                zip_path: String::new(),
+                expected_size: None,
+                expected_sha256: None,
+            });
+        }
+
+        // Model weights
+        if let Some(ref path) = self.state.resolved_weights_path {
+            if !path.is_empty() {
+                components.push(Component {
+                    role: ComponentRole::Weights,
+                    source: ComponentSource::Local(PathBuf::from(path)),
+                    zip_path: format!(
+                        "/zip/{}",
+                        self.state.resolved_weights_filename.as_deref().unwrap_or("model.gguf")
+                    ),
+                    expected_size: None,
+                    expected_sha256: None,
+                });
+            }
+        } else if let Some(ref model_id) = self.state.selected_model_id {
+            if let Some(comp) = self.registry_file_component(model_id, "weights", ComponentRole::Weights) {
+                components.push(comp);
+            }
+        }
+
+        // Mmproj weights
+        if let Some(ref path) = self.state.resolved_mmproj_path {
+            if !path.is_empty() {
+                components.push(Component {
+                    role: ComponentRole::MmprojWeights,
+                    source: ComponentSource::Local(PathBuf::from(path)),
+                    zip_path: format!(
+                        "/zip/{}",
+                        self.state.resolved_mmproj_filename.as_deref().unwrap_or("mmproj.gguf")
+                    ),
+                    expected_size: None,
+                    expected_sha256: None,
+                });
+            }
+        } else if let Some(ref model_id) = self.state.selected_model_id {
+            if self.state.resolved_mmproj_filename.is_some() {
+                if let Some(comp) = self.registry_file_component(model_id, "mmproj", ComponentRole::MmprojWeights) {
+                    components.push(comp);
+                }
+            }
+        }
+
+        // .args
+        components.push(Component {
+            role: ComponentRole::ArgsFile,
+            source: ComponentSource::Generated,
+            zip_path: "/zip/.args".to_string(),
+            expected_size: None,
+            expected_sha256: None,
+        });
+
+        // GPU libraries
+        for lib in &self.gpu_libs {
+            let ext = match lib.os {
+                Os::Windows => ".dll",
+                Os::Linux => ".so",
+            };
+            let accel_name = match lib.accel {
+                GpuAccel::Cuda => "cuda",
+                GpuAccel::Rocm => "rocm",
+                GpuAccel::Vulkan => "vulkan",
+            };
+            components.push(Component {
+                role: ComponentRole::GpuLib {
+                    accel: lib.accel,
+                    os: lib.os,
+                },
+                source: lib.source.clone(),
+                zip_path: format!("ggml-{}{}", accel_name, ext),
+                expected_size: None,
+                expected_sha256: None,
+            });
+        }
+
+        // Agent prompt
+        if self.agent_config.enabled {
+            components.push(Component {
+                role: ComponentRole::ArgsPrompt,
+                source: ComponentSource::Generated,
+                zip_path: "/zip/.args.prompt".to_string(),
+                expected_size: None,
+                expected_sha256: None,
+            });
+        }
+
+        components
+    }
+
     /// Preview the .args content that would be generated.
     pub fn resolved_args(&self) -> String {
         if let Some(ref override_args) = self.args_override {
@@ -90,7 +202,35 @@ impl Builder {
 
     /// Validate the current build state.
     pub fn validate(&self) -> Vec<ValidationMessage> {
-        validation::validate(&self.state, &self.config)
+        let mut msgs = validation::validate(&self.state, &self.config);
+
+        // GPU-on-wrong-platform checks
+        for lib in &self.gpu_libs {
+            match lib.accel {
+                GpuAccel::Cuda | GpuAccel::Rocm | GpuAccel::Vulkan => {
+                    if cfg!(target_os = "macos") {
+                        msgs.push(ValidationMessage::Warning(format!(
+                            "{:?} GPU libraries are not supported on macOS. \
+                             Metal acceleration is built into the llamafile binary.",
+                            lib.accel
+                        )));
+                    }
+                }
+            }
+        }
+
+        // Agent shell tool warning
+        if self.agent_config.enabled {
+            if self.agent_config.tools.iter().any(|t| t.id == "shell" && t.enabled) {
+                msgs.push(ValidationMessage::Warning(
+                    "Agent shell execution tool is enabled. \
+                     This allows the llamafile to run arbitrary commands."
+                        .to_string(),
+                ));
+            }
+        }
+
+        msgs
     }
 
     /// Check if the current state has blocking errors.
@@ -533,6 +673,26 @@ impl Builder {
         }
 
         Ok(output_path)
+    }
+
+    fn registry_file_component(
+        &self,
+        model_id: &str,
+        role: &str,
+        component_role: ComponentRole,
+    ) -> Option<Component> {
+        let model = self.config.models.iter().find(|m| m.id == model_id)?;
+        let file = model.files.iter().find(|f| f.role == role)?;
+        let sel = self.state.model_file_selections.get(role);
+        let quant_idx = sel.map(|s| s.quantization_idx).unwrap_or(0);
+        let quant = file.quantizations.get(quant_idx)?;
+        Some(Component {
+            role: component_role,
+            source: ComponentSource::Url(quant.download_url.clone()),
+            zip_path: format!("/zip/{}", get_filename_from_url(&quant.download_url)),
+            expected_size: Some(quant.size_bytes),
+            expected_sha256: quant.sha256.clone(),
+        })
     }
 
     fn find_selected_release(&self) -> Option<LlamafileRelease> {

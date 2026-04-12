@@ -174,19 +174,35 @@ impl ConfigManager {
         Ok(())
     }
 
-    /// Load a config file from disk, or write the bundled default and return it.
+    /// Load a config file from disk.
+    ///
+    /// If the file doesn't exist, or if it matches the bundled default exactly
+    /// (meaning no remote update has replaced it), write the current bundled
+    /// default. This ensures that recompiling with updated `data/*.json` files
+    /// always takes effect without requiring users to clear their cache.
     fn load_or_init(&self, filename: &str, bundled: &str) -> Result<String, Error> {
         let path = self.config_dir.join(filename);
+
         if path.exists() {
-            std::fs::read_to_string(&path).map_err(|e| {
+            let on_disk = std::fs::read_to_string(&path).map_err(|e| {
                 Error::Config(format!("Failed to read {}: {}", path.display(), e))
-            })
-        } else {
-            std::fs::write(&path, bundled).map_err(|e| {
-                Error::Config(format!("Failed to write default {}: {}", path.display(), e))
             })?;
-            Ok(bundled.to_string())
+
+            // If a remote update changed this file, keep the remote version.
+            // Otherwise, refresh from the (potentially newer) bundled default.
+            if on_disk != bundled {
+                // File was modified (likely by apply_update). Keep it.
+                tracing::debug!(filename, "using cached config (differs from bundled)");
+                return Ok(on_disk);
+            }
         }
+
+        // Write (or refresh) from bundled default
+        tracing::debug!(filename, "writing bundled default config");
+        std::fs::write(&path, bundled).map_err(|e| {
+            Error::Config(format!("Failed to write {}: {}", path.display(), e))
+        })?;
+        Ok(bundled.to_string())
     }
 }
 

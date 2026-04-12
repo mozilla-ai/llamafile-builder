@@ -59,13 +59,51 @@ async fn main() -> ExitCode {
         cm = cm.with_remote_url(url);
     }
 
-    let config = match cm.load() {
+    let mut config = match cm.load() {
         Ok(c) => c,
         Err(e) => {
             tracing::error!("Failed to load configuration: {e}");
             return ExitCode::from(1);
         }
     };
+
+    // Check for config updates (NFR-9, NFR-10)
+    match cm.update_mode() {
+        llamafile_core::UpdateMode::Always => {
+            tracing::info!("checking for config updates");
+            match cm.check_for_updates().await {
+                Ok(llamafile_core::UpdateStatus::ConfigUpdateAvailable(update)) => {
+                    tracing::info!("config update available, applying");
+                    if let Err(e) = cm.apply_update(&update) {
+                        tracing::warn!("failed to apply config update: {e}");
+                    } else {
+                        // Reload with updated configs
+                        match cm.load() {
+                            Ok(c) => config = c,
+                            Err(e) => tracing::warn!("failed to reload config after update: {e}"),
+                        }
+                    }
+                }
+                Ok(llamafile_core::UpdateStatus::BuilderUpdateRequired { min_version }) => {
+                    tracing::warn!(
+                        min_version,
+                        "remote config requires a newer builder version"
+                    );
+                }
+                Ok(llamafile_core::UpdateStatus::UpToDate) => {
+                    tracing::debug!("config is up to date");
+                }
+                Err(e) => {
+                    tracing::debug!("config update check failed: {e}");
+                }
+            }
+        }
+        llamafile_core::UpdateMode::Ask => {
+            // TODO: prompt the user on stderr before checking
+            tracing::debug!("config update mode is 'ask', skipping for now");
+        }
+        llamafile_core::UpdateMode::Never => {}
+    }
 
     let cache = Cache::new(get_cache_dir());
 

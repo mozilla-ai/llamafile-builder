@@ -1,8 +1,8 @@
 use llamafile_core::config_manager::BuilderConfig;
-use llamafile_core::models::{format_size, Model};
+use llamafile_core::models::{format_size, search_models};
 
 pub fn list(config: &BuilderConfig, search: Option<&str>, tag: Option<&str>, json: bool) {
-    let models = filter_models(&config.models, search, tag);
+    let models = search_models(&config.models, search, tag);
 
     if json {
         println!("{}", serde_json::to_string_pretty(&models).unwrap());
@@ -79,25 +79,3 @@ pub fn show(config: &BuilderConfig, id: &str, json: bool) {
     }
 }
 
-fn filter_models<'a>(models: &'a [Model], search: Option<&str>, tag: Option<&str>) -> Vec<&'a Model> {
-    models
-        .iter()
-        .filter(|m| {
-            if let Some(q) = search {
-                let q = q.to_lowercase();
-                let name_match = m.name.to_lowercase().contains(&q)
-                    || m.organization.to_lowercase().contains(&q)
-                    || m.id.to_lowercase().contains(&q);
-                if !name_match {
-                    return false;
-                }
-            }
-            if let Some(t) = tag {
-                if !m.tags.iter().any(|mt| mt.eq_ignore_ascii_case(t)) {
-                    return false;
-                }
-            }
-            true
-        })
-        .collect()
-}

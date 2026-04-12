@@ -406,6 +406,34 @@ pub enum Os {
 // Helper functions
 // ============================================================================
 
+/// Search models by name, organization, or ID, with optional tag filter.
+pub fn search_models<'a>(
+    models: &'a [Model],
+    query: Option<&str>,
+    tag: Option<&str>,
+) -> Vec<&'a Model> {
+    models
+        .iter()
+        .filter(|m| {
+            if let Some(q) = query {
+                let q = q.to_lowercase();
+                let name_match = m.name.to_lowercase().contains(&q)
+                    || m.organization.to_lowercase().contains(&q)
+                    || m.id.to_lowercase().contains(&q);
+                if !name_match {
+                    return false;
+                }
+            }
+            if let Some(t) = tag {
+                if !m.tags.iter().any(|mt| mt.eq_ignore_ascii_case(t)) {
+                    return false;
+                }
+            }
+            true
+        })
+        .collect()
+}
+
 pub fn get_filename_from_path(path: &str) -> String {
     path.split('/')
         .last()

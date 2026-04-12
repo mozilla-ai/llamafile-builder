@@ -172,7 +172,9 @@ pub enum ComponentSource {
     Generated,
 }
 
-pub enum GpuAccel { Cuda, Rocm, Vulkan, Metal }
+pub enum GpuAccel { Cuda, Rocm, Vulkan }
+// Note: Metal is not included — it is compiled on-the-fly from sources
+// embedded in the llamafile binary itself, not a downloadable library.
 pub enum Os { Linux, Windows }
 ```
 
@@ -190,7 +192,7 @@ pub struct Builder {
 }
 
 impl Builder {
-    pub fn new(config: BuilderConfig) -> Self;
+    pub fn new(config: BuilderConfig, cache: Cache) -> Self;
 
     // --- State queries ---
     pub fn state(&self) -> &BuildState;
@@ -227,10 +229,8 @@ impl Builder {
     pub fn set_output_path(&mut self, path: &Path) -> Result<()>;
 
     // --- Execution ---
-    pub async fn build(
-        &self,
-        progress_tx: mpsc::Sender<BuildProgress>,
-    ) -> Result<PathBuf>;  // FR-3, FR-5
+    // All progress is observable via tracing spans and events.
+    pub async fn build(&self) -> Result<PathBuf>;  // FR-3, FR-5
 
     pub fn cancel(&self);
 }
