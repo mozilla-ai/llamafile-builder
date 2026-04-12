@@ -11,6 +11,10 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 directories = { workspace = true }
 dirs = { workspace = true }
+tokio = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = "1"
