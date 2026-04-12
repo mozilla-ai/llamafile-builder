@@ -15,7 +15,12 @@ tokio = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
 tracing = { workspace = true }
+reqwest = { workspace = true }
+futures-util = { workspace = true }
+url = { workspace = true }
+hf-hub = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = "1"
 tempfile = "3"
+temp-env = "0.3"

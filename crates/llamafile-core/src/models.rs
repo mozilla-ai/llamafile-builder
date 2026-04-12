@@ -438,6 +438,31 @@ pub enum Os {
 }
 
 // ============================================================================
+// Download progress types
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownloadProgress {
+    pub url: String,
+    pub filename: String,
+    pub bytes_downloaded: u64,
+    pub bytes_total: u64,
+    pub percentage: f32,
+    pub resuming: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileInfo {
+    pub exists: bool,
+    pub size: u64,
+    pub expected_size: Option<u64>,
+    pub is_complete: bool,
+    pub is_partial: bool,
+    pub checksum_valid: Option<bool>,
+}
+
+// ============================================================================
 // File-exists prompt types (used by build orchestration)
 // ============================================================================
 

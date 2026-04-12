@@ -1,4 +1,6 @@
 pub mod args;
+pub mod cache;
+pub mod download;
 pub mod error;
 pub mod file_ops;
 pub mod lmstudio;
