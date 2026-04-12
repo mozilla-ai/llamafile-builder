@@ -1,0 +1,31 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["fs", "sync", "rt-multi-thread", "macros", "process", "io-util"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["stream", "json", "rustls-tls"] }
+futures-util = "0.3"
+sha2 = "0.10"
+hex = "0.4"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+directories = "6"
+dirs = "6"
+hf-hub = { version = "0.4", features = ["tokio"] }
+url = "2"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "z"
+strip = true

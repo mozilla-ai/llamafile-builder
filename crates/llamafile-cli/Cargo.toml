@@ -1,0 +1,13 @@
+[package]
+name = "llamafile-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CLI, HTTP server, and interactive interface for llamafile-builder"
+
+[[bin]]
+name = "llamafile-builder"
+path = "src/main.rs"
+
+[dependencies]
+llamafile-core = { path = "../llamafile-core" }

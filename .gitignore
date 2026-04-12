@@ -1,9 +1,9 @@
 # Rust
+/target/
 /src-tauri/target/
 **/*.rs.bk
-Cargo.lock
 
-# Tauri
+# Tauri (legacy, to be removed)
 /src-tauri/WixTools/
 
 # Node (if using for dev tooling)

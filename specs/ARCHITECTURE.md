@@ -1,0 +1,595 @@
+# Architecture
+
+This document describes how the llamafile-builder will be structured to satisfy the requirements in [README.md](README.md). It builds on the original architecture proposal and fills gaps identified during review.
+
+
+## Core decision
+
+Split the builder into a **core library** (pure Rust, no UI dependencies) and **thin interface layers** that expose the library's capabilities through different channels.
+
+This directly addresses the central problem: the builder's logic is currently trapped inside a renderer-dependent binary. By extracting it into a library, any interface -- CLI, HTTP server, TUI, or a future native GUI -- can use it without pulling in each other's dependencies.
+
+```
+llamafile-core (library crate, zero UI deps)
+       |
+       +-- llamafile-cli (single binary)
+       |       |
+       |       +-- CLI mode (default)
+       |       |     $ llamafile-builder build --model llama3 -o out.llamafile
+       |       |
+       |       +-- Server mode (--serve)
+       |       |     $ llamafile-builder --serve --port 8765
+       |       |     HTTP + SSE on localhost, serves web UI
+       |       |
+       |       +-- Interactive mode (--interactive)
+       |             $ llamafile-builder --interactive
+       |             JSON-RPC over stdio
+       |
+       +-- llamafile-tui (optional separate binary)
+               ratatui, links directly to core
+```
+
+
+## Requirements traceability
+
+Before detailing the design, here is how each requirement maps to an architectural element.
+
+| Requirement | Addressed by |
+|-------------|-------------|
+| FR-1 Component selection | Core library: `Builder` API (version, model, config, compute, agent methods) |
+| FR-2 Model discovery | Core library: registry queries, Ollama/LM Studio scanners |
+| FR-3 Download management | Core library: `hf-hub` crate for HF models (shared cache with llama.cpp), custom `Downloader` for non-HF files |
+| FR-4 Configuration generation | Core library: schema-driven `.args` generation + raw `.args` override |
+| FR-5 Build assembly | Core library: `Builder::build()` orchestrates zipalign |
+| FR-6 Build validation | Core library: `Builder::validate()` returns warnings/errors |
+| FR-7 Agent configuration | Core library: `AgentConfig` on `Builder` |
+| NFR-1 Platform independence | Core library has zero UI/renderer dependencies |
+| NFR-2 Headless operation | CLI mode, no display server needed |
+| NFR-3 Scriptability | CLI (exit codes, stdout) + JSON-RPC (stdio) + HTTP (REST + SSE) |
+| NFR-4 Graphical access | Server mode serves web UI to any browser |
+| NFR-5 Progressive complexity | CLI defaults; wizard flow in web UI |
+| NFR-6 Platform coverage | Core is pure Rust; interfaces are lightweight |
+| NFR-7 Offline capability | `hf-hub` cache for models; `Cache` for runtimes, GPU libs, configs |
+| NFR-8 Interoperability | `hf-hub` crate uses standard HF cache layout (`~/.cache/huggingface/hub/`), shared with llama.cpp and Python tools |
+| NFR-9 Remote configuration | Core library: `ConfigManager` fetches, versions, and caches config files |
+| NFR-10 Update checking | Core library: `ConfigManager` handles update check with three modes |
+| NFR-11 Web UI as separate assets | Server mode serves static files from a known directory on disk |
+| NFR-12 Llamafile modification | `Builder` operates on components, not monolithic state; future `open()` feasible |
+
+
+## Core library (`llamafile-core`)
+
+The library is the single source of truth for all builder logic. It has no UI, no CLI parsing, no HTTP handling. Its public API is what every interface layer calls.
+
+### Dependencies
+
+Only what the core logic needs:
+
+```toml
+[dependencies]
+tokio = { version = "1", features = ["fs", "sync", "rt-multi-thread"] }
+hf-hub = { version = "0.4", features = ["tokio"] }  # HF downloads + shared cache
+reqwest = { version = "0.12", features = ["stream"] } # non-HF downloads (runtimes, GPU libs)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+hex = "0.4"
+thiserror = "2"
+directories = "6"
+```
+
+No `clap`, no `axum`, no `ratatui`, no rendering libraries of any kind.
+
+### Configuration management (NFR-9, NFR-10)
+
+The current codebase embeds `versions.json`, `models.json`, and `config.json` at compile time. The new design replaces this with a `ConfigManager` that:
+
+1. **On first run**: uses bundled fallback configs (compiled in as defaults) and writes them to a local config directory.
+2. **On startup** (if update checking is enabled): fetches configs from a remote URL, compares version fields, and replaces local copies if newer.
+3. **On version mismatch**: if the fetched config declares a minimum builder version higher than the running binary, warns the user instead of applying it.
+4. **Default URL is GitHub**: the remote URL points to the config files in the project's GitHub repository (raw content), so there is no extra infrastructure to maintain. A `--config-url` flag (or env var) overrides this for testing, custom registries, or air-gapped mirrors.
+
+```rust
+pub struct ConfigManager {
+    config_dir: PathBuf,       // e.g. ~/.llamafile-builder/config/
+    remote_url: String,        // default or overridden
+    update_mode: UpdateMode,   // Always, Never, Ask
+}
+
+pub enum UpdateMode {
+    Always,
+    Never,
+    Ask,
+}
+
+impl ConfigManager {
+    pub fn new(config_dir: PathBuf) -> Self;
+    pub fn with_remote_url(self, url: &str) -> Self;
+    pub fn with_update_mode(self, mode: UpdateMode) -> Self;
+
+    /// Load configs from disk, falling back to bundled defaults.
+    pub fn load(&self) -> Result<BuilderConfig>;
+
+    /// Check remote for newer configs. Returns what changed, if anything.
+    pub async fn check_for_updates(&self) -> Result<UpdateStatus>;
+
+    /// Apply a fetched update to the local config directory.
+    pub fn apply_update(&self, update: &ConfigUpdate) -> Result<()>;
+}
+
+pub struct BuilderConfig {
+    pub versions: Vec<VersionGroup>,
+    pub models: Vec<Model>,
+    pub config_schema: Vec<ConfigSchemaItem>,
+    pub config_version: u32,
+    pub min_builder_version: Option<String>,
+}
+
+pub enum UpdateStatus {
+    UpToDate,
+    ConfigUpdateAvailable(ConfigUpdate),
+    BuilderUpdateRequired { min_version: String },
+}
+```
+
+The interface layers decide how to handle `UpdateStatus::Ask` -- the CLI prompts on stderr, the web UI shows a dialog, JSON-RPC emits a notification.
+
+### Component model
+
+A llamafile is built from components. Every selection the user makes -- choosing a version, picking a model, adding GPU libraries -- ultimately resolves to a set of **components** that will be bundled. Each component has a known type, a source (registry URL, HuggingFace ID, or local path), and metadata for validation.
+
+```rust
+/// A resolved file that will be included in the final llamafile.
+pub struct Component {
+    pub role: ComponentRole,
+    pub source: ComponentSource,
+    pub zip_path: String,           // path inside the llamafile (e.g. "/zip/model.gguf")
+    pub expected_size: Option<u64>,
+    pub expected_sha256: Option<String>,
+}
+
+pub enum ComponentRole {
+    Runtime,          // the llamafile APE binary (base of the output file)
+    Zipalign,         // the zipalign tool (used during build, not bundled)
+    Weights,          // primary model weights (.gguf)
+    MmprojWeights,    // multimodal projector weights (.gguf)
+    GpuLib {          // GPU acceleration library
+        accel: GpuAccel,
+        os: Os,
+    },
+    ArgsFile,         // .args configuration (generated or overridden)
+    ArgsPrompt,       // .args.prompt for agent mode
+}
+
+pub enum ComponentSource {
+    /// Download from HuggingFace using the hf-hub shared cache.
+    HuggingFace { repo_id: String, filename: String },
+    /// Download from a direct URL (runtimes, GPU libs).
+    Url(String),
+    /// Use a file already on disk.
+    Local(PathBuf),
+    /// Generated at build time (e.g. .args from schema).
+    Generated,
+}
+
+pub enum GpuAccel { Cuda, Rocm, Vulkan, Metal }
+pub enum Os { Linux, Windows }
+```
+
+GPU libraries have two orthogonal dimensions: acceleration type and OS. For example, a build might include `GpuLib { accel: Cuda, os: Linux }` and `GpuLib { accel: Cuda, os: Windows }` to produce a llamafile that works with CUDA on both platforms. Any combination is valid, and libraries can be mixed between downloaded and local sources.
+
+### Builder API (FR-1 through FR-7)
+
+The `Builder` is the main entry point for constructing a llamafile. All selection methods modify internal state, which ultimately resolves to a set of `Component`s that `build()` will assemble.
+
+```rust
+pub struct Builder {
+    config: BuilderConfig,
+    state: BuildState,
+    cancel_flag: Arc<AtomicBool>,
+}
+
+impl Builder {
+    pub fn new(config: BuilderConfig) -> Self;
+
+    // --- State queries ---
+    pub fn state(&self) -> &BuildState;
+    pub fn resolved_components(&self) -> Vec<Component>;
+    pub fn resolved_args(&self) -> Result<String>;  // preview the .args that would be generated
+    pub fn validate(&self) -> Vec<ValidationMessage>;  // FR-6
+
+    // --- Version / binaries (FR-1) ---
+    pub fn select_version(&mut self, group: &str, version: &str) -> Result<()>;
+    pub fn use_custom_runtime(&mut self, path: &Path) -> Result<()>;
+    pub fn use_custom_zipalign(&mut self, path: &Path) -> Result<()>;
+
+    // --- Model (FR-1, FR-2) ---
+    pub fn select_registry_model(&mut self, model_id: &str) -> Result<()>;
+    pub fn select_custom_model(&mut self, path: &Path) -> Result<()>;
+    pub fn select_ollama_model(&mut self, name: &str, tag: &str, dir: Option<&Path>) -> Result<()>;
+    pub fn select_lmstudio_model(&mut self, dir_name: &str, dir: Option<&Path>) -> Result<()>;
+    pub fn select_quantization(&mut self, role: &str, index: usize) -> Result<()>;
+
+    // --- Configuration (FR-4) ---
+    pub fn set_config_value(&mut self, key: &str, value: serde_json::Value) -> Result<()>;
+    pub fn set_args_override(&mut self, raw_args: &str);  // bypass schema, use raw .args content
+
+    // --- GPU libraries (FR-1) ---
+    pub fn add_gpu_lib(&mut self, accel: GpuAccel, os: Os) -> Result<()>;
+    pub fn add_custom_gpu_lib(&mut self, path: &Path, accel: GpuAccel, os: Os) -> Result<()>;
+    pub fn remove_gpu_lib(&mut self, accel: GpuAccel, os: Os);
+    pub fn clear_gpu_libs(&mut self);
+
+    // --- Agent (FR-7, placeholder) ---
+    pub fn set_agent_config(&mut self, config: AgentConfig) -> Result<()>;
+
+    // --- Output ---
+    pub fn set_output_path(&mut self, path: &Path) -> Result<()>;
+
+    // --- Execution ---
+    pub async fn build(
+        &self,
+        progress_tx: mpsc::Sender<BuildProgress>,
+    ) -> Result<PathBuf>;  // FR-3, FR-5
+
+    pub fn cancel(&self);
+}
+```
+
+Design notes:
+
+- **Component-centric**: every selection method modifies internal state that `resolved_components()` materializes into a flat list of components to assemble. This keeps the builder's internals declarative -- callers describe *what* they want, and the builder figures out the concrete files, URLs, and build steps.
+- **`resolved_args()`** lets the UI or CLI show the `.args` content that *would* be generated, before the user commits to a build. Combined with `set_args_override()`, this supports the workflow: generate from schema, review, optionally edit, then build.
+- **GPU libs are additive**: `add_gpu_lib()` adds one library at a time, allowing any combination of acceleration type and OS. `add_custom_gpu_lib()` adds a local file for a specific (accel, os) pair. This avoids a single `ComputeTarget` enum that would need to encode all possible combinations.
+- **`set_agent_config()`** is a placeholder. Agent configuration is not yet defined, so the method accepts an `AgentConfig` struct that will be fleshed out later. For now it stores the data; `build()` generates `.args.prompt` from it if enabled.
+
+### Model discovery (FR-2)
+
+Stateless query functions that don't need a `Builder` instance:
+
+```rust
+// Registry queries (from loaded config)
+pub fn search_models(config: &BuilderConfig, query: &str, tag: Option<&str>) -> Vec<&Model>;
+
+// Local source scanning
+pub fn scan_ollama_models(custom_dir: Option<&Path>) -> Result<Vec<OllamaModel>>;
+pub fn scan_lmstudio_models(custom_dir: Option<&Path>) -> Result<Vec<LMStudioModel>>;
+
+// System capabilities
+pub fn system_info() -> SystemInfo;
+```
+
+### Downloads and caching (FR-3, NFR-7, NFR-8)
+
+Downloads use two systems depending on the component source:
+
+**HuggingFace models** (`ComponentSource::HuggingFace`) use the `hf-hub` crate. This is the official Rust client for the HuggingFace Hub API. It:
+
+- Downloads files by repo ID + filename (e.g. `api.model("Qwen/Qwen3-0.6B-GGUF").get("qwen3-0.6b-q8_0.gguf")`)
+- Uses the **standard HuggingFace cache layout** at `~/.cache/huggingface/hub/` -- the same layout used by Python's `huggingface_hub`, `llama.cpp`, `ollama`, and other tools. Files downloaded by the builder are immediately available to these tools and vice versa, avoiding duplicate multi-GB downloads on disk.
+- Handles auth via `HF_TOKEN` env var and `~/.cache/huggingface/token`
+- Supports async downloads (tokio feature)
+
+**Non-HF files** (`ComponentSource::Url`) -- runtimes, GPU libraries, zipalign -- use our own `Downloader` backed by `reqwest`, with resume support (HTTP Range), SHA256 verification, and progress reporting via channels.
+
+**Local files** (`ComponentSource::Local`) need no downloading. The builder verifies they exist and optionally checks SHA256 if provided.
+
+```rust
+pub struct Cache {
+    base_dir: PathBuf,          // e.g. ~/.llamafile-builder/
+    hf_api: hf_hub::api::tokio::Api,  // shared HF client
+}
+
+impl Cache {
+    pub fn new(base_dir: PathBuf) -> Self;
+    pub fn with_hf_token(self, token: &str) -> Self;
+
+    pub fn runtime_dir(&self) -> PathBuf;
+    pub fn gpu_lib_dir(&self, version: &str) -> PathBuf;
+
+    /// Ensure a component is available locally. Downloads if needed.
+    /// For HF sources, delegates to hf-hub (shared cache).
+    /// For URL sources, downloads to our cache dir with resume support.
+    /// For Local sources, verifies the file exists.
+    pub async fn ensure(
+        &self,
+        component: &Component,
+        progress_tx: mpsc::Sender<DownloadProgress>,
+        cancel_flag: Arc<AtomicBool>,
+    ) -> Result<PathBuf>;
+
+    /// Check status without downloading.
+    pub fn check(&self, component: &Component) -> CacheStatus;
+}
+
+pub enum CacheStatus {
+    Valid(PathBuf),
+    Partial { path: PathBuf, bytes_downloaded: u64 },
+    Missing,
+}
+```
+
+`Builder::build()` calls `Cache::ensure()` for each resolved component before assembly.
+
+### Progress and events (FR-3)
+
+All long-running operations report progress through typed channels:
+
+```rust
+pub enum BuildProgress {
+    Stage { name: String, index: usize, total: usize },
+    Download(DownloadProgress),
+    Writing { file: String },
+    Bundling { component: String },
+    Validating,
+    Completed { output_path: PathBuf, size: u64 },
+    Failed { error: String },
+}
+
+pub enum DownloadProgress {
+    Started { url: String, total_bytes: Option<u64>, resuming: bool },
+    Progress { bytes_downloaded: u64, total_bytes: u64 },
+    Verifying,
+    Completed,
+    Failed { error: String },
+}
+```
+
+### Validation (FR-6)
+
+```rust
+pub enum ValidationMessage {
+    Warning(String),  // e.g. "Context size exceeds model training length"
+    Error(String),    // e.g. "No model selected"
+}
+```
+
+`Builder::validate()` checks:
+- Required components are selected (model, version, output path)
+- Context size vs. model training length
+- Compute target compatibility with host platform (e.g. CUDA on macOS)
+- Agent shell tool warning
+- Custom binary existence and permissions
+
+
+## Interface layers
+
+Each interface is a thin translation layer between user interaction and the core library. None contains builder logic.
+
+### CLI mode (`llamafile-builder [subcommand]`)
+
+The default when no mode flag is given. Uses `clap` for argument parsing.
+
+```
+llamafile-builder versions                  # list available versions
+llamafile-builder models [--search X] [--tag Y]  # search model registry
+llamafile-builder models show <id>          # model details
+llamafile-builder ollama list [--dir PATH]  # scan Ollama cache
+llamafile-builder lmstudio list [--dir PATH]  # scan LM Studio cache
+llamafile-builder system-info               # host capabilities
+
+llamafile-builder build \
+    --model <id|path> \
+    [--quantization Q4_K_M] \
+    [--output path.llamafile] \
+    [--gpu cuda|rocm|metal|none] \
+    [--context-length 8192] \
+    [--args-file custom.args] \
+    [--config-url https://...] \
+    ...
+```
+
+**Exit codes** (NFR-3):
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | General error |
+| 2 | Invalid arguments |
+| 3 | Download failed |
+| 4 | Build failed |
+| 5 | Cancelled |
+
+Progress is reported to stderr via `indicatif` progress bars. Structured output (JSON) available with `--json` flag for machine consumption.
+
+**Progressive complexity** (NFR-5): `llamafile-builder build --model llama3-8b-instruct` is sufficient for a basic build. The CLI fills in defaults (latest stable version, default config, CPU-only, auto-generated output path).
+
+### Server mode (`llamafile-builder --serve`)
+
+Starts an HTTP server on localhost using `axum`. Serves two things:
+
+1. **REST API + SSE** for programmatic access
+2. **Web UI static files** from a directory on disk (NFR-11)
+
+```
+# Static data
+GET  /api/versions
+GET  /api/models[?search=X&tag=Y]
+GET  /api/models/:id
+GET  /api/config-schema
+GET  /api/system-info
+GET  /api/ollama/models[?dir=PATH]
+GET  /api/lmstudio/models[?dir=PATH]
+
+# Build state
+GET  /api/state
+POST /api/state/version          { group, version }
+POST /api/state/model            { id }
+POST /api/state/model-file       { path }
+POST /api/state/config           { key, value }
+POST /api/state/args-override    { content }
+POST /api/state/compute          { target, custom_libs? }
+POST /api/state/agent            { enabled, system_prompt, tools }
+POST /api/state/output           { path }
+POST /api/state/reset
+GET  /api/state/validate
+
+# Build execution
+POST /api/build                  -> SSE stream
+POST /api/cancel
+
+# Cache status
+GET  /api/cache/status           -> what's already downloaded
+```
+
+**Web UI location**: The server looks for static files in a configurable directory, defaulting to `$INSTALL_PREFIX/share/llamafile-builder/web/` or a `web/` directory next to the binary. The web UI is a set of HTML/CSS/JS files (ported from the current Tauri frontend) that uses `fetch()` for API calls and `EventSource` for build progress.
+
+The server binds to `127.0.0.1` only by default and opens the user's browser automatically (suppressible with `--no-open`).
+
+### Interactive mode (`llamafile-builder --interactive`)
+
+JSON-RPC 2.0 over stdin/stdout. For scripting scenarios where multiple operations need shared state within a session.
+
+```jsonc
+// Request
+{"jsonrpc":"2.0","id":1,"method":"list_models","params":{}}
+
+// Response
+{"jsonrpc":"2.0","id":1,"result":[...]}
+
+// Progress notification (no id, pushed during build)
+{"jsonrpc":"2.0","method":"progress","params":{"stage":"download_model","bytes":1234,"total":5678}}
+
+// Error
+{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"No model selected"}}
+```
+
+Methods mirror the core library API one-to-one. This mode is useful for integration with editors, external GUIs, or complex automation that the CLI's one-shot model doesn't suit.
+
+### TUI (optional, `llamafile-tui`)
+
+A separate binary using `ratatui` + `crossterm`. Links directly to `llamafile-core` (no IPC). This is optional and lower priority -- the CLI and web UI cover the primary use cases. The TUI provides a middle ground for users who want a visual wizard in a terminal without launching a browser.
+
+
+## Project structure
+
+```
+llamafile-builder/
++-- Cargo.toml                        # Workspace root
++-- crates/
+|   +-- llamafile-core/               # Library, zero UI deps
+|   |   +-- Cargo.toml
+|   |   +-- src/
+|   |   |   +-- lib.rs                # Public API re-exports
+|   |   |   +-- builder.rs            # Builder struct, build orchestration
+|   |   |   +-- cache.rs              # Cache management, download coordination
+|   |   |   +-- config_manager.rs     # Remote config fetch, versioning, update checks
+|   |   |   +-- download.rs           # HTTP downloads, resume, SHA256, HF auth
+|   |   |   +-- state.rs              # BuildState, component selections
+|   |   |   +-- models.rs             # Data types (Model, Version, ConfigSchema, etc.)
+|   |   |   +-- args.rs               # Schema-driven .args generation
+|   |   |   +-- agent.rs              # AgentConfig, system prompt, tool definitions
+|   |   |   +-- validation.rs         # Build validation rules
+|   |   |   +-- ollama.rs             # Ollama cache scanning
+|   |   |   +-- lmstudio.rs           # LM Studio cache scanning
+|   |   |   +-- system_info.rs        # Host platform detection
+|   |   |   +-- error.rs              # Error types (thiserror)
+|   |   +-- data/                     # Bundled fallback configs
+|   |       +-- versions.json
+|   |       +-- models.json
+|   |       +-- config.json
+|   |
+|   +-- llamafile-cli/                # Binary: CLI + server + interactive
+|   |   +-- Cargo.toml
+|   |   +-- src/
+|   |       +-- main.rs               # Entry point, mode dispatch
+|   |       +-- cli.rs                # Clap definitions
+|   |       +-- commands/             # CLI subcommand handlers
+|   |       |   +-- mod.rs
+|   |       |   +-- versions.rs
+|   |       |   +-- models.rs
+|   |       |   +-- build.rs
+|   |       |   +-- scan.rs
+|   |       +-- server.rs             # Axum HTTP server
+|   |       +-- sse.rs                # SSE bridge (BuildProgress -> SSE events)
+|   |       +-- interactive.rs        # JSON-RPC over stdio
+|   |       +-- progress.rs           # Terminal progress display (indicatif)
+|   |
+|   +-- llamafile-tui/                # Optional: terminal UI
+|       +-- Cargo.toml
+|       +-- src/
+|           +-- main.rs
+|           +-- app.rs
+|           +-- ui.rs
+|           +-- events.rs
+|
++-- web/                              # Web UI static assets (served from disk)
+|   +-- index.html
+|   +-- app.js
+|   +-- styles.css
+|
++-- data/                             # Canonical config files (source of truth for releases)
+    +-- versions.json
+    +-- models.json
+    +-- config.json
+```
+
+Note: `data/` at workspace root is the canonical source for config files (used for releases and publishing to the remote URL). `crates/llamafile-core/data/` contains the same files as bundled fallbacks, copied at release time.
+
+
+## What stays in interface layers
+
+These concerns are NOT part of the core library. Each interface implements them using its own mechanisms:
+
+| Concern | CLI | Server/Web UI | TUI |
+|---------|-----|---------------|-----|
+| File/folder picker | N/A (paths as args) | Browser `<input type="file">` or path text input | N/A (paths as args) |
+| Browser launch | `open` crate | Auto-open on `--serve` | N/A |
+| Progress display | `indicatif` on stderr | SSE events rendered by JS | `ratatui` widgets |
+| Update prompt (NFR-10) | stderr prompt | Browser dialog | TUI dialog |
+| Cancellation | Ctrl+C / signal handler | POST /api/cancel | Ctrl+C / key binding |
+
+
+## Migration path from current codebase
+
+### Phase 1: Extract core library
+
+1. Create workspace with `crates/llamafile-core/`
+2. Define the component model (`Component`, `ComponentRole`, `ComponentSource`, `GpuAccel`, `Os`)
+3. Move and adapt logic from `src-tauri/src/`:
+   - `models.rs` -> `models.rs` (data types, mostly as-is)
+   - `build_state.rs` -> `state.rs` (remove Tauri-specific wrappers, refactor around component model)
+   - `download.rs` -> `download.rs` (replace Tauri event emission with channel sends; non-HF downloads only)
+   - `builder.rs` -> `builder.rs` + `args.rs` (split .args generation out)
+   - `validation.rs` -> `validation.rs` (as-is)
+4. Integrate `hf-hub` crate for HuggingFace model downloads (replaces custom HF download logic)
+5. Extract Ollama/LM Studio scanning from `commands.rs` into dedicated modules
+6. Implement `ConfigManager` (new, replaces embedded JSON loading)
+7. Implement `Cache` (new, delegates to `hf-hub` for models, owns cache for runtimes/GPU libs)
+8. Define `Builder` public API in `lib.rs`
+9. Add unit tests for all core modules
+
+### Phase 2: Build CLI
+
+1. Create `crates/llamafile-cli/`
+2. Implement `clap` command definitions
+3. Wire subcommands to core library calls
+4. Implement `indicatif` progress display
+5. Test all commands end to end
+
+### Phase 3: Add HTTP server
+
+1. Add `axum` to `llamafile-cli`
+2. Implement REST endpoints (thin wrappers around core API)
+3. Implement SSE bridge for `BuildProgress` channel
+4. Static file serving for web UI directory
+5. Test with `curl`
+
+### Phase 4: Port web UI
+
+1. Copy `src/app.js`, `index.html`, `styles.css` to `web/`
+2. Replace `invoke()` calls with `fetch()` to `/api/...`
+3. Replace `listen()` event subscriptions with `EventSource`
+4. Test full wizard flow in browser
+
+### Phase 5: Add interactive mode
+
+1. Implement JSON-RPC 2.0 parser (or use a lightweight crate)
+2. Wire methods to core library
+3. Test with `echo '...' | llamafile-builder --interactive`
+
+### Phase 6 (optional): TUI
+
+1. Create `crates/llamafile-tui/`
+2. Implement wizard flow with `ratatui`
+3. Links directly to `llamafile-core`, no IPC needed
