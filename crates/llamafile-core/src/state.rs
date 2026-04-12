@@ -447,12 +447,12 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     fn load_models() -> Vec<Model> {
-        serde_json::from_str(include_str!("../../../data/models.json"))
+        crate::config_manager::parse_config_data(include_str!("../../../data/models.json"))
             .expect("models.json must be valid")
     }
 
     fn load_versions() -> Vec<LlamafileVersionGroup> {
-        serde_json::from_str(include_str!("../../../data/versions.json"))
+        crate::config_manager::parse_config_data(include_str!("../../../data/versions.json"))
             .expect("versions.json must be valid")
     }
 
@@ -680,6 +680,7 @@ mod tests {
             huggingface_url: None,
             tags: vec![],
             context_length: 4096,
+            default: false,
             files: vec![
                 ModelFile {
                     role: "weights".to_string(),

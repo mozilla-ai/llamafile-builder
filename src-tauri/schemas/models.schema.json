@@ -3,10 +3,24 @@
   "$id": "https://llamafile-builder/schemas/models.schema.json",
   "title": "Llamafile Builder Models Registry",
   "description": "Schema for models.json - defines available models and their downloadable files",
-  "type": "array",
-  "items": {
-    "$ref": "#/$defs/Model"
+  "type": "object",
+  "required": ["config_version", "data"],
+  "properties": {
+    "config_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Schema version number. Incremented when the format changes."
+    },
+    "min_builder_version": {
+      "type": "string",
+      "description": "Minimum builder version required to use this config (semver, e.g. '0.1.0')"
+    },
+    "data": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Model" }
+    }
   },
+  "additionalProperties": false,
   "$defs": {
     "Model": {
       "type": "object",
@@ -70,6 +84,11 @@
           "type": "integer",
           "minimum": 1,
           "description": "Default context length for this model"
+        },
+        "default": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, this model is selected by default when no model is specified"
         },
         "files": {
           "type": "array",

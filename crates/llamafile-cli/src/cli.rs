@@ -11,18 +11,6 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
 
-    /// Start HTTP server mode
-    #[arg(long)]
-    pub serve: bool,
-
-    /// Port for server mode
-    #[arg(long, default_value = "8765")]
-    pub port: u16,
-
-    /// Start JSON-RPC interactive mode over stdio
-    #[arg(long)]
-    pub interactive: bool,
-
     /// Override config URL for fetching updates
     #[arg(long, env = "LLAMAFILE_CONFIG_URL")]
     pub config_url: Option<String>,

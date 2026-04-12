@@ -48,6 +48,8 @@ pub struct LlamafileVersionGroup {
     pub tag: String,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
+    pub default: bool,
     pub releases: Vec<LlamafileRelease>,
 }
 
@@ -82,6 +84,8 @@ pub struct Model {
     pub huggingface_url: Option<String>,
     pub tags: Vec<String>,
     pub context_length: u32,
+    #[serde(default)]
+    pub default: bool,
     pub files: Vec<ModelFile>,
 }
 

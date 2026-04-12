@@ -3,10 +3,24 @@
   "$id": "https://llamafile-builder/schemas/versions.schema.json",
   "title": "Llamafile Builder Versions Registry",
   "description": "Schema for versions.json - defines available llamafile runtime versions",
-  "type": "array",
-  "items": {
-    "$ref": "#/$defs/VersionGroup"
+  "type": "object",
+  "required": ["config_version", "data"],
+  "properties": {
+    "config_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Schema version number. Incremented when the format changes."
+    },
+    "min_builder_version": {
+      "type": "string",
+      "description": "Minimum builder version required to use this config (semver, e.g. '0.1.0')"
+    },
+    "data": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/VersionGroup" }
+    }
   },
+  "additionalProperties": false,
   "$defs": {
     "VersionGroup": {
       "type": "object",
@@ -25,6 +39,11 @@
         "description": {
           "type": "string",
           "description": "Brief description of this version group's features. Supports markdown links."
+        },
+        "default": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, this version group is selected by default when no version is specified"
         },
         "releases": {
           "type": "array",

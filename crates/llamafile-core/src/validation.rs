@@ -1,5 +1,6 @@
 use crate::config_manager::BuilderConfig;
 use crate::state::BuildState;
+use crate::zipalign;
 
 /// A validation message -- either a warning (build can proceed) or an error (cannot proceed).
 #[derive(Debug, Clone, PartialEq)]
@@ -77,18 +78,59 @@ pub fn validate(state: &BuildState, config: &BuilderConfig) -> Vec<ValidationMes
         }
     }
 
-    // ── Custom binary paths exist ──
+    // ── Custom binary paths exist and are executable ──
 
     if let Some(ref path) = state.custom_llamafile_path {
-        if !std::path::Path::new(path).exists() {
+        let p = std::path::Path::new(path);
+        if !p.exists() {
             messages.push(ValidationMessage::Error(format!(
                 "Custom llamafile binary not found: {}",
                 path
             )));
+        } else {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(meta) = std::fs::metadata(p) {
+                    if meta.permissions().mode() & 0o111 == 0 {
+                        messages.push(ValidationMessage::Warning(format!(
+                            "Custom llamafile binary is not executable: {}",
+                            path
+                        )));
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Zipalign available ──
+
+    let zipalign_path = zipalign::find_zipalign();
+    if zipalign_path.to_str() == Some("zipalign") {
+        // find_zipalign fell through to PATH -- check if it's actually in PATH
+        if which_in_path("zipalign").is_none() {
+            messages.push(ValidationMessage::Error(
+                "zipalign binary not found. It must be in PATH or next to the \
+                 llamafile-builder binary. zipalign is included in llamafile releases."
+                    .to_string(),
+            ));
         }
     }
 
     messages
+}
+
+fn which_in_path(name: &str) -> Option<std::path::PathBuf> {
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths).find_map(|dir| {
+            let full = dir.join(name);
+            if full.is_file() {
+                Some(full)
+            } else {
+                None
+            }
+        })
+    })
 }
 
 #[cfg(test)]
@@ -121,6 +163,7 @@ mod tests {
                 huggingface_url: None,
                 tags: vec![],
                 context_length,
+                default: false,
                 files: vec![],
             }],
             config_schema: vec![],

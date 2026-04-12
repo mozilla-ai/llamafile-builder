@@ -948,9 +948,7 @@ name = "llamafile-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
- "console",
  "directories",
- "indicatif",
  "llamafile-core",
  "serde_json",
  "tokio",

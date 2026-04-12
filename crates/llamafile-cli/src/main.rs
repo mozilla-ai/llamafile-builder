@@ -10,6 +10,25 @@ use llamafile_core::config_manager::ConfigManager;
 
 use cli::{Cli, Commands, LmStudioCmd, ModelsCmd, OllamaCmd};
 
+/// Map error strings to exit codes per spec:
+/// 0 = success, 1 = general, 2 = invalid args, 3 = download failed,
+/// 4 = build failed, 5 = cancelled
+fn exit_code_for_error(error: &str) -> ExitCode {
+    let e = error.to_lowercase();
+    if e.contains("cancelled") || e.contains("canceled") {
+        ExitCode::from(5)
+    } else if e.contains("download") || e.contains("http") || e.contains("auth") {
+        ExitCode::from(3)
+    } else if e.contains("not found in registry")
+        || e.contains("invalid")
+        || e.contains("not found. use")
+    {
+        ExitCode::from(2)
+    } else {
+        ExitCode::from(4) // build failed
+    }
+}
+
 fn get_config_dir() -> PathBuf {
     directories::BaseDirs::new()
         .map(|dirs| {
@@ -99,24 +118,39 @@ async fn main() -> ExitCode {
             }
         }
         llamafile_core::UpdateMode::Ask => {
-            // TODO: prompt the user on stderr before checking
-            tracing::debug!("config update mode is 'ask', skipping for now");
+            // In CLI mode, Ask behaves like Always with a log message.
+            // A graphical frontend would show a dialog instead.
+            tracing::info!("checking for config updates (use --update-mode=never to skip)");
+            match cm.check_for_updates().await {
+                Ok(llamafile_core::UpdateStatus::ConfigUpdateAvailable(update)) => {
+                    tracing::info!("config update available, applying");
+                    if let Err(e) = cm.apply_update(&update) {
+                        tracing::warn!("failed to apply config update: {e}");
+                    } else {
+                        match cm.load() {
+                            Ok(c) => config = c,
+                            Err(e) => tracing::warn!("failed to reload config after update: {e}"),
+                        }
+                    }
+                }
+                Ok(llamafile_core::UpdateStatus::BuilderUpdateRequired { min_version }) => {
+                    tracing::warn!(
+                        min_version,
+                        "remote config requires a newer builder version"
+                    );
+                }
+                Ok(llamafile_core::UpdateStatus::UpToDate) => {
+                    tracing::debug!("config is up to date");
+                }
+                Err(e) => {
+                    tracing::debug!("config update check failed: {e}");
+                }
+            }
         }
         llamafile_core::UpdateMode::Never => {}
     }
 
     let cache = Cache::new(get_cache_dir());
-
-    // Dispatch
-    if cli.serve {
-        tracing::error!("Server mode not yet implemented (Phase 6).");
-        return ExitCode::from(1);
-    }
-
-    if cli.interactive {
-        tracing::error!("Interactive mode not yet implemented (Phase 6).");
-        return ExitCode::from(1);
-    }
 
     match cli.command {
         Some(Commands::Versions) => {
@@ -183,7 +217,7 @@ async fn main() -> ExitCode {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     tracing::error!("{e}");
-                    ExitCode::from(4)
+                    exit_code_for_error(&e)
                 }
             }
         }

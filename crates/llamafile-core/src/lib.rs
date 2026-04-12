@@ -14,6 +14,25 @@ pub mod system_info;
 pub mod validation;
 pub mod zipalign;
 
+// Primary API
 pub use builder::Builder;
+pub use cache::{Cache, CacheStatus};
 pub use config_manager::{BuilderConfig, ConfigManager, UpdateMode, UpdateStatus};
-pub use error::{Error, Result};
+pub use error::{DownloadError, Error, Result};
+pub use validation::ValidationMessage;
+
+// Component model
+pub use models::{
+    Component, ComponentRole, ComponentSource, GpuAccel, Os,
+};
+
+// Data types used by consumers
+pub use models::{
+    AgentConfig, AgentTool, ComputeConfig, ComputeMode, ConfigSchemaItem, GpuLibrary, GpuLibs,
+    GpuLibsByPlatform, LMStudioFile, LMStudioModel, LlamafileRelease, LlamafileVersionGroup,
+    Model, ModelFile, ModelFileQuantization, OllamaModel, SystemInfo,
+};
+
+// Query functions
+pub use models::search_models;
+pub use system_info::system_info;

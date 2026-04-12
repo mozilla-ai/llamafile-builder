@@ -240,6 +240,24 @@ impl Builder {
 
     // ── Version / binaries ──
 
+    /// Select the default version: the version group marked `default: true`,
+    /// or the first group if none is marked. Picks the first release within
+    /// that group. Returns false if no versions are available.
+    pub fn select_default_version(&mut self) -> bool {
+        let group = self.config.versions.iter()
+            .find(|g| g.default)
+            .or_else(|| self.config.versions.first());
+        let picked = group.and_then(|g| {
+            g.releases.first().map(|r| (g.name.clone(), r.version.clone()))
+        });
+        if let Some((group, version)) = picked {
+            self.select_version(&group, &version);
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn select_version(&mut self, group: &str, version: &str) {
         self.state.select_llamafile_version(
             group.to_string(),
@@ -258,6 +276,22 @@ impl Builder {
     }
 
     // ── Model ──
+
+    /// Select the default model: the model marked `default: true`,
+    /// or the first model if none is marked. Returns false if no models
+    /// are available.
+    pub fn select_default_model(&mut self) -> bool {
+        let model_id = self.config.models.iter()
+            .find(|m| m.default)
+            .or_else(|| self.config.models.first())
+            .map(|m| m.id.clone());
+        if let Some(id) = model_id {
+            self.select_registry_model(&id);
+            true
+        } else {
+            false
+        }
+    }
 
     pub fn select_registry_model(&mut self, model_id: &str) {
         self.state
@@ -281,6 +315,40 @@ impl Builder {
 
     pub fn select_quantization(&mut self, role: &str, index: usize) {
         self.state.select_file_quantization(
+            role.to_string(),
+            index,
+            &self.config.models,
+        );
+    }
+
+    /// Override a registry model's file for a specific role with a local file.
+    /// For example, use your own weights while keeping the registry mmproj.
+    pub fn use_custom_file_for_role(&mut self, role: &str, path: &Path) {
+        self.state.use_custom_file_for_role(
+            role.to_string(),
+            path.to_string_lossy().to_string(),
+            &self.config.models,
+        );
+    }
+
+    /// Add a companion file (e.g. mmproj) to a custom model selection.
+    pub fn add_custom_companion_file(&mut self, role: &str, path: &Path) {
+        self.state.add_custom_companion_file(
+            role.to_string(),
+            path.to_string_lossy().to_string(),
+            &self.config.models,
+        );
+    }
+
+    /// Remove a companion file from a custom model selection.
+    pub fn remove_custom_companion_file(&mut self, role: &str) {
+        self.state
+            .remove_custom_companion_file(role, &self.config.models);
+    }
+
+    /// Select a specific file within an LM Studio model (by role and index).
+    pub fn select_lmstudio_file(&mut self, role: &str, index: usize) {
+        self.state.select_lmstudio_file(
             role.to_string(),
             index,
             &self.config.models,
@@ -724,9 +792,15 @@ mod tests {
 
     fn test_config() -> BuilderConfig {
         BuilderConfig {
-            versions: serde_json::from_str(include_str!("../../../data/versions.json")).unwrap(),
-            models: serde_json::from_str(include_str!("../../../data/models.json")).unwrap(),
-            config_schema: serde_json::from_str(include_str!("../../../data/config.json")).unwrap(),
+            versions: crate::config_manager::parse_config_data(
+                include_str!("../../../data/versions.json"),
+            ).unwrap(),
+            models: crate::config_manager::parse_config_data(
+                include_str!("../../../data/models.json"),
+            ).unwrap(),
+            config_schema: crate::config_manager::parse_config_data(
+                include_str!("../../../data/config.json"),
+            ).unwrap(),
             config_version: 1,
             min_builder_version: None,
         }

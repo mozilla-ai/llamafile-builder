@@ -13,8 +13,13 @@ pub async fn run(args: &BuildArgs, config: BuilderConfig, cache: Cache) -> Resul
     // Select version
     if let Some(ref runtime) = args.runtime {
         builder.use_custom_runtime(runtime);
+    } else if let Some(ref v) = args.version {
+        let found = find_version(&builder, v)?;
+        builder.select_version(&found.0, &found.1);
     } else {
-        select_best_version(&mut builder, args.version.as_deref())?;
+        if !builder.select_default_version() {
+            return Err("No llamafile versions available in config.".to_string());
+        }
     }
 
     // Select model
@@ -111,43 +116,18 @@ pub async fn run(args: &BuildArgs, config: BuilderConfig, cache: Cache) -> Resul
     Ok(())
 }
 
-fn select_best_version(builder: &mut Builder, version_str: Option<&str>) -> Result<(), String> {
-    let versions: Vec<_> = builder
-        .config()
-        .versions
-        .iter()
-        .map(|g| {
-            (
-                g.name.clone(),
-                g.releases.iter().map(|r| r.version.clone()).collect::<Vec<_>>(),
-            )
-        })
-        .collect();
-
-    if let Some(v) = version_str {
-        for (group_name, releases) in &versions {
-            for release_version in releases {
-                if release_version.contains(v) {
-                    builder.select_version(group_name, release_version);
-                    return Ok(());
-                }
+fn find_version(builder: &Builder, version_str: &str) -> Result<(String, String), String> {
+    for group in &builder.config().versions {
+        for release in &group.releases {
+            if release.version.contains(version_str) {
+                return Ok((group.name.clone(), release.version.clone()));
             }
         }
-        return Err(format!(
-            "Version '{}' not found. Use 'versions' to list available versions.",
-            v
-        ));
     }
-
-    // Default: pick the first release of the first group (latest/stable)
-    if let Some((group_name, releases)) = versions.first() {
-        if let Some(release_version) = releases.first() {
-            builder.select_version(group_name, release_version);
-            return Ok(());
-        }
-    }
-
-    Err("No llamafile versions available in config.".to_string())
+    Err(format!(
+        "Version '{}' not found. Use 'versions' to list available versions.",
+        version_str
+    ))
 }
 
 fn parse_gpu_spec(spec: &str) -> Result<(GpuAccel, Vec<Os>), String> {

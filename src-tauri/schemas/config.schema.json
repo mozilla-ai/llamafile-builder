@@ -3,10 +3,24 @@
   "$id": "https://llamafile-builder/schemas/config.schema.json",
   "title": "Llamafile Builder Configuration Schema",
   "description": "Schema for config.json - defines the UI configuration items and their mapping to llamafile CLI flags",
-  "type": "array",
-  "items": {
-    "$ref": "#/$defs/ConfigSchemaItem"
+  "type": "object",
+  "required": ["config_version", "data"],
+  "properties": {
+    "config_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Schema version number. Incremented when the format changes."
+    },
+    "min_builder_version": {
+      "type": "string",
+      "description": "Minimum builder version required to use this config (semver, e.g. '0.1.0')"
+    },
+    "data": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ConfigSchemaItem" }
+    }
   },
+  "additionalProperties": false,
   "$defs": {
     "ConfigSchemaItem": {
       "description": "A configuration item that can be a section, text input, dropdown, boolean toggle, or slider",

@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use std::path::PathBuf;
 
 use crate::error::Error;
@@ -7,9 +8,21 @@ const BUNDLED_VERSIONS: &str = include_str!("../../../data/versions.json");
 const BUNDLED_MODELS: &str = include_str!("../../../data/models.json");
 const BUNDLED_CONFIG: &str = include_str!("../../../data/config.json");
 
+/// The builder's own version, from Cargo.toml at compile time.
+const BUILDER_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Default remote URL for fetching updated config files (GitHub raw content).
 const DEFAULT_REMOTE_URL: &str =
     "https://raw.githubusercontent.com/Mozilla-Ocho/llamafile-builder/main/data";
+
+/// Versioned envelope around a JSON config file.
+#[derive(Debug, Deserialize)]
+struct ConfigEnvelope<T> {
+    config_version: u32,
+    #[serde(default)]
+    min_builder_version: Option<String>,
+    data: T,
+}
 
 /// How the builder checks for config updates at startup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,26 +114,78 @@ impl ConfigManager {
         let models_json = self.load_or_init("models.json", BUNDLED_MODELS)?;
         let config_json = self.load_or_init("config.json", BUNDLED_CONFIG)?;
 
-        let versions: Vec<LlamafileVersionGroup> = serde_json::from_str(&versions_json)
-            .map_err(|e| Error::Config(format!("Invalid versions.json: {e}")))?;
-        let models: Vec<Model> = serde_json::from_str(&models_json)
+        let versions_env: ConfigEnvelope<Vec<LlamafileVersionGroup>> =
+            serde_json::from_str(&versions_json)
+                .map_err(|e| Error::Config(format!("Invalid versions.json: {e}")))?;
+        let models_env: ConfigEnvelope<Vec<Model>> = serde_json::from_str(&models_json)
             .map_err(|e| Error::Config(format!("Invalid models.json: {e}")))?;
-        let config_schema: Vec<ConfigSchemaItem> = serde_json::from_str(&config_json)
-            .map_err(|e| Error::Config(format!("Invalid config.json: {e}")))?;
+        let config_env: ConfigEnvelope<Vec<ConfigSchemaItem>> =
+            serde_json::from_str(&config_json)
+                .map_err(|e| Error::Config(format!("Invalid config.json: {e}")))?;
+
+        // Use the highest config_version among the three files
+        let config_version = versions_env
+            .config_version
+            .max(models_env.config_version)
+            .max(config_env.config_version);
+
+        // Use the most restrictive min_builder_version
+        let min_builder_version = [
+            &versions_env.min_builder_version,
+            &models_env.min_builder_version,
+            &config_env.min_builder_version,
+        ]
+        .iter()
+        .filter_map(|v| v.as_ref())
+        .max()
+        .cloned();
+
+        // Check if this builder version can handle the config
+        if let Some(ref min_ver) = min_builder_version {
+            if BUILDER_VERSION < min_ver.as_str() {
+                tracing::warn!(
+                    builder_version = BUILDER_VERSION,
+                    min_required = %min_ver,
+                    "config requires a newer builder version"
+                );
+            }
+        }
+
+        let versions = versions_env.data;
+        let models = models_env.data;
+        let config_schema = config_env.data;
+
+        // Validate: at most one default per list
+        let default_version_count = versions.iter().filter(|v| v.default).count();
+        if default_version_count > 1 {
+            tracing::warn!(
+                count = default_version_count,
+                "multiple version groups marked as default, using the first one"
+            );
+        }
+        let default_model_count = models.iter().filter(|m| m.default).count();
+        if default_model_count > 1 {
+            tracing::warn!(
+                count = default_model_count,
+                "multiple models marked as default, using the first one"
+            );
+        }
 
         Ok(BuilderConfig {
             versions,
             models,
             config_schema,
-            config_version: 1, // Current format is bare arrays, version 1
-            min_builder_version: None,
+            config_version,
+            min_builder_version,
         })
     }
 
     /// Check the remote URL for newer configs.
     pub async fn check_for_updates(&self) -> Result<UpdateStatus, Error> {
+        let local = self.load()?;
+
         let client = reqwest::Client::builder()
-            .user_agent("llamafile-builder/0.1.0")
+            .user_agent(format!("llamafile-builder/{}", BUILDER_VERSION))
             .build()?;
 
         // Fetch all three files
@@ -138,28 +203,58 @@ impl ConfigManager {
             || !models_resp.status().is_success()
             || !config_resp.status().is_success()
         {
-            return Ok(UpdateStatus::UpToDate); // Can't reach remote, assume up to date
+            return Ok(UpdateStatus::UpToDate);
         }
 
         let versions_json = versions_resp.text().await?;
         let models_json = models_resp.text().await?;
         let config_json = config_resp.text().await?;
 
-        // Validate fetched JSON before accepting
-        let _: Vec<LlamafileVersionGroup> = serde_json::from_str(&versions_json)
-            .map_err(|e| Error::Config(format!("Remote versions.json invalid: {e}")))?;
-        let _: Vec<Model> = serde_json::from_str(&models_json)
-            .map_err(|e| Error::Config(format!("Remote models.json invalid: {e}")))?;
-        let _: Vec<ConfigSchemaItem> = serde_json::from_str(&config_json)
-            .map_err(|e| Error::Config(format!("Remote config.json invalid: {e}")))?;
+        // Parse envelopes to get version info
+        let remote_versions: ConfigEnvelope<serde_json::Value> =
+            serde_json::from_str(&versions_json)
+                .map_err(|e| Error::Config(format!("Remote versions.json invalid: {e}")))?;
+        let remote_models: ConfigEnvelope<serde_json::Value> =
+            serde_json::from_str(&models_json)
+                .map_err(|e| Error::Config(format!("Remote models.json invalid: {e}")))?;
+        let remote_config: ConfigEnvelope<serde_json::Value> =
+            serde_json::from_str(&config_json)
+                .map_err(|e| Error::Config(format!("Remote config.json invalid: {e}")))?;
 
-        // For now, always report as available if fetch succeeded.
-        // Future: compare version fields in a wrapper object.
+        let remote_version = remote_versions
+            .config_version
+            .max(remote_models.config_version)
+            .max(remote_config.config_version);
+
+        // Check if the remote config requires a newer builder
+        let remote_min_builder = [
+            &remote_versions.min_builder_version,
+            &remote_models.min_builder_version,
+            &remote_config.min_builder_version,
+        ]
+        .iter()
+        .filter_map(|v| v.as_ref())
+        .max()
+        .cloned();
+
+        if let Some(ref min_ver) = remote_min_builder {
+            if BUILDER_VERSION < min_ver.as_str() {
+                return Ok(UpdateStatus::BuilderUpdateRequired {
+                    min_version: min_ver.clone(),
+                });
+            }
+        }
+
+        // Compare versions
+        if remote_version <= local.config_version {
+            return Ok(UpdateStatus::UpToDate);
+        }
+
         Ok(UpdateStatus::ConfigUpdateAvailable(ConfigUpdate {
             versions_json,
             models_json,
             config_json,
-            config_version: 1,
+            config_version: remote_version,
         }))
     }
 
@@ -171,6 +266,7 @@ impl ConfigManager {
         )?;
         std::fs::write(self.config_dir.join("models.json"), &update.models_json)?;
         std::fs::write(self.config_dir.join("config.json"), &update.config_json)?;
+        tracing::info!(config_version = update.config_version, "config update applied");
         Ok(())
     }
 
@@ -188,22 +284,27 @@ impl ConfigManager {
                 Error::Config(format!("Failed to read {}: {}", path.display(), e))
             })?;
 
-            // If a remote update changed this file, keep the remote version.
-            // Otherwise, refresh from the (potentially newer) bundled default.
             if on_disk != bundled {
-                // File was modified (likely by apply_update). Keep it.
                 tracing::debug!(filename, "using cached config (differs from bundled)");
                 return Ok(on_disk);
             }
         }
 
-        // Write (or refresh) from bundled default
         tracing::debug!(filename, "writing bundled default config");
         std::fs::write(&path, bundled).map_err(|e| {
             Error::Config(format!("Failed to write {}: {}", path.display(), e))
         })?;
         Ok(bundled.to_string())
     }
+}
+
+/// Parse the `data` field from a versioned config JSON string.
+/// Useful in tests and other contexts that need the inner data without
+/// going through ConfigManager.
+pub fn parse_config_data<T: serde::de::DeserializeOwned>(json: &str) -> Result<T, Error> {
+    let env: ConfigEnvelope<T> =
+        serde_json::from_str(json).map_err(|e| Error::Config(format!("Invalid config: {e}")))?;
+    Ok(env.data)
 }
 
 #[cfg(test)]
@@ -214,23 +315,21 @@ mod tests {
     fn load_creates_dir_and_writes_defaults() {
         let tmp = tempfile::TempDir::new().unwrap();
         let config_dir = tmp.path().join("config");
-        // Dir doesn't exist yet
         assert!(!config_dir.exists());
 
         let cm = ConfigManager::new(config_dir.clone());
         let config = cm.load().unwrap();
 
-        // Dir was created
         assert!(config_dir.exists());
-        // Files were written
         assert!(config_dir.join("versions.json").exists());
         assert!(config_dir.join("models.json").exists());
         assert!(config_dir.join("config.json").exists());
 
-        // Data was parsed
         assert!(!config.versions.is_empty());
         assert!(!config.models.is_empty());
         assert!(!config.config_schema.is_empty());
+        assert_eq!(config.config_version, 1);
+        assert_eq!(config.min_builder_version.as_deref(), Some("0.1.0"));
     }
 
     #[test]
@@ -239,10 +338,10 @@ mod tests {
         let config_dir = tmp.path().join("config");
         std::fs::create_dir_all(&config_dir).unwrap();
 
-        // Write minimal valid JSON
-        std::fs::write(config_dir.join("versions.json"), "[]").unwrap();
-        std::fs::write(config_dir.join("models.json"), "[]").unwrap();
-        std::fs::write(config_dir.join("config.json"), "[]").unwrap();
+        let empty_envelope = r#"{"config_version": 5, "min_builder_version": "0.2.0", "data": []}"#;
+        std::fs::write(config_dir.join("versions.json"), empty_envelope).unwrap();
+        std::fs::write(config_dir.join("models.json"), empty_envelope).unwrap();
+        std::fs::write(config_dir.join("config.json"), empty_envelope).unwrap();
 
         let cm = ConfigManager::new(config_dir);
         let config = cm.load().unwrap();
@@ -250,6 +349,8 @@ mod tests {
         assert!(config.versions.is_empty());
         assert!(config.models.is_empty());
         assert!(config.config_schema.is_empty());
+        assert_eq!(config.config_version, 5);
+        assert_eq!(config.min_builder_version.as_deref(), Some("0.2.0"));
     }
 
     #[test]
@@ -259,13 +360,31 @@ mod tests {
         std::fs::create_dir_all(&config_dir).unwrap();
 
         std::fs::write(config_dir.join("versions.json"), "not json").unwrap();
-        std::fs::write(config_dir.join("models.json"), "[]").unwrap();
-        std::fs::write(config_dir.join("config.json"), "[]").unwrap();
+        let envelope = r#"{"config_version": 1, "data": []}"#;
+        std::fs::write(config_dir.join("models.json"), envelope).unwrap();
+        std::fs::write(config_dir.join("config.json"), envelope).unwrap();
 
         let cm = ConfigManager::new(config_dir);
         let result = cm.load();
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("versions.json"));
+    }
+
+    #[test]
+    fn load_fails_on_bare_array() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config_dir = tmp.path().join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        // Bare array (old format) should fail -- we only support the envelope
+        std::fs::write(config_dir.join("versions.json"), "[]").unwrap();
+        let envelope = r#"{"config_version": 1, "data": []}"#;
+        std::fs::write(config_dir.join("models.json"), envelope).unwrap();
+        std::fs::write(config_dir.join("config.json"), envelope).unwrap();
+
+        let cm = ConfigManager::new(config_dir);
+        let result = cm.load();
+        assert!(result.is_err());
     }
 
     #[test]
@@ -276,9 +395,9 @@ mod tests {
 
         let cm = ConfigManager::new(config_dir.clone());
         let update = ConfigUpdate {
-            versions_json: "[{\"name\":\"test\",\"tag\":\"latest\",\"releases\":[]}]".to_string(),
-            models_json: "[]".to_string(),
-            config_json: "[]".to_string(),
+            versions_json: r#"{"config_version": 2, "data": [{"name":"test","tag":"latest","releases":[]}]}"#.to_string(),
+            models_json: r#"{"config_version": 2, "data": []}"#.to_string(),
+            config_json: r#"{"config_version": 2, "data": []}"#.to_string(),
             config_version: 2,
         };
         cm.apply_update(&update).unwrap();
@@ -299,12 +418,41 @@ mod tests {
 
     #[test]
     fn bundled_configs_parse_correctly() {
-        // Verify the bundled JSON is valid
-        let _: Vec<LlamafileVersionGroup> =
+        let v: ConfigEnvelope<Vec<LlamafileVersionGroup>> =
             serde_json::from_str(BUNDLED_VERSIONS).expect("bundled versions.json must be valid");
-        let _: Vec<Model> =
+        assert!(!v.data.is_empty());
+        assert_eq!(v.config_version, 1);
+
+        let m: ConfigEnvelope<Vec<Model>> =
             serde_json::from_str(BUNDLED_MODELS).expect("bundled models.json must be valid");
-        let _: Vec<ConfigSchemaItem> =
+        assert!(!m.data.is_empty());
+
+        let c: ConfigEnvelope<Vec<ConfigSchemaItem>> =
             serde_json::from_str(BUNDLED_CONFIG).expect("bundled config.json must be valid");
+        assert!(!c.data.is_empty());
+    }
+
+    #[test]
+    fn config_version_uses_highest_across_files() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config_dir = tmp.path().join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        std::fs::write(
+            config_dir.join("versions.json"),
+            r#"{"config_version": 3, "data": []}"#,
+        ).unwrap();
+        std::fs::write(
+            config_dir.join("models.json"),
+            r#"{"config_version": 1, "data": []}"#,
+        ).unwrap();
+        std::fs::write(
+            config_dir.join("config.json"),
+            r#"{"config_version": 2, "data": []}"#,
+        ).unwrap();
+
+        let cm = ConfigManager::new(config_dir);
+        let config = cm.load().unwrap();
+        assert_eq!(config.config_version, 3);
     }
 }
