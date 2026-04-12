@@ -53,8 +53,8 @@ pub fn show(config: &BuilderConfig, id: &str, json: bool) {
             println!("  Context:      {} tokens", model.context_length);
             println!("  License:      {}", model.license);
             println!("  Description:  {}", model.description);
-            if let Some(url) = &model.huggingface_url {
-                println!("  HuggingFace:  {}", url);
+            if model.source == "hf" {
+                println!("  HuggingFace:  https://huggingface.co/{}", model.id);
             }
             if !model.tags.is_empty() {
                 println!("  Tags:         {}", model.tags.join(", "));

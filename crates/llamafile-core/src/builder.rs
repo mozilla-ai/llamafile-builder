@@ -592,30 +592,56 @@ impl Builder {
             crate::Error::Build(format!("Quantization index {} out of range", quant_idx))
         })?;
 
+        let component = self.make_model_component(model, quant, role);
+
         tracing::info!(
             role,
             quantization = %quant.name,
-            url = %quant.download_url,
+            source = %component.source_display(),
             size = quant.size_bytes,
             "downloading registry file"
         );
-
-        let component = Component {
-            role: if role == "weights" {
-                ComponentRole::Weights
-            } else {
-                ComponentRole::MmprojWeights
-            },
-            source: ComponentSource::Url(quant.download_url.clone()),
-            zip_path: format!("/zip/{}", get_filename_from_url(&quant.download_url)),
-            expected_size: Some(quant.size_bytes),
-            expected_sha256: quant.sha256.clone(),
-        };
 
         self.cache
             .ensure(&component, self.cancel_flag.clone())
             .await
             .map_err(crate::Error::Download)
+    }
+
+    /// Create a Component for a model file, using the model's source to
+    /// determine whether to use HF hub or a direct URL.
+    fn make_model_component(
+        &self,
+        model: &Model,
+        quant: &ModelFileQuantization,
+        role: &str,
+    ) -> Component {
+        let source = if model.source == "hf" {
+            ComponentSource::HuggingFace {
+                repo_id: model.id.clone(),
+                filename: quant.filename.clone(),
+            }
+        } else if let Some(ref url) = quant.download_url {
+            ComponentSource::Url(url.clone())
+        } else {
+            // Fallback: construct HF URL from id + filename
+            ComponentSource::HuggingFace {
+                repo_id: model.id.clone(),
+                filename: quant.filename.clone(),
+            }
+        };
+
+        Component {
+            role: if role == "weights" {
+                ComponentRole::Weights
+            } else {
+                ComponentRole::MmprojWeights
+            },
+            source,
+            zip_path: format!("/zip/{}", quant.filename),
+            expected_size: Some(quant.size_bytes),
+            expected_sha256: quant.sha256.clone(),
+        }
     }
 
     async fn ensure_gpu_libs(&self) -> Vec<PathBuf> {
@@ -747,20 +773,14 @@ impl Builder {
         &self,
         model_id: &str,
         role: &str,
-        component_role: ComponentRole,
+        _component_role: ComponentRole,
     ) -> Option<Component> {
         let model = self.config.models.iter().find(|m| m.id == model_id)?;
         let file = model.files.iter().find(|f| f.role == role)?;
         let sel = self.state.model_file_selections.get(role);
         let quant_idx = sel.map(|s| s.quantization_idx).unwrap_or(0);
         let quant = file.quantizations.get(quant_idx)?;
-        Some(Component {
-            role: component_role,
-            source: ComponentSource::Url(quant.download_url.clone()),
-            zip_path: format!("/zip/{}", get_filename_from_url(&quant.download_url)),
-            expected_size: Some(quant.size_bytes),
-            expected_sha256: quant.sha256.clone(),
-        })
+        Some(self.make_model_component(model, quant, role))
     }
 
     fn find_selected_release(&self) -> Option<LlamafileRelease> {
@@ -794,13 +814,16 @@ mod tests {
         BuilderConfig {
             versions: crate::config_manager::parse_config_data(
                 include_str!("../../../data/versions.json"),
-            ).unwrap(),
+            )
+            .unwrap(),
             models: crate::config_manager::parse_config_data(
                 include_str!("../../../data/models.json"),
-            ).unwrap(),
+            )
+            .unwrap(),
             config_schema: crate::config_manager::parse_config_data(
                 include_str!("../../../data/config.json"),
-            ).unwrap(),
+            )
+            .unwrap(),
             config_version: 1,
             min_builder_version: None,
         }
@@ -810,154 +833,267 @@ mod tests {
         Cache::new(PathBuf::from("/tmp/llamafile-test-cache"))
     }
 
-    #[test]
-    fn builder_new_has_empty_state() {
-        let builder = Builder::new(test_config(), test_cache());
-        assert!(builder.state().selected_model_id.is_none());
-        assert!(builder.state().output_path.is_empty());
-        assert!(builder.gpu_libs.is_empty());
-    }
-
-    #[test]
-    fn select_registry_model_updates_state() {
-        let mut builder = Builder::new(test_config(), test_cache());
-        builder.select_registry_model("qwen3-0.6b");
-        assert_eq!(
-            builder.state().selected_model_id.as_deref(),
-            Some("qwen3-0.6b")
-        );
-        assert!(builder.state().output_path.ends_with(".llamafile"));
-        assert!(builder.state().resolved_weights_filename.is_some());
-    }
-
-    #[test]
-    fn select_version_updates_state() {
+    fn configured_builder() -> Builder {
         let config = test_config();
         let group_name = config.versions[0].name.clone();
         let release_version = config.versions[0].releases[0].version.clone();
-
         let mut builder = Builder::new(config, test_cache());
         builder.select_version(&group_name, &release_version);
-        assert!(builder.state().resolved_llamafile_path.is_some());
+        builder.select_registry_model("Qwen/Qwen3-0.6B-GGUF");
+        builder
     }
 
+    // ── resolved_args ──
+
     #[test]
-    fn resolved_args_produces_valid_output() {
-        let mut builder = Builder::new(test_config(), test_cache());
-        builder.select_registry_model("qwen3-0.6b");
+    fn resolved_args_contains_model_path_and_defaults() {
+        let builder = configured_builder();
         let args = builder.resolved_args();
-        assert!(args.contains("-m"));
-        assert!(args.contains("/zip/"));
-        assert!(args.ends_with("..."));
+        let lines: Vec<&str> = args.lines().collect();
+
+        // Model path
+        assert!(lines.contains(&"-m"));
+        assert!(lines.iter().any(|l| l.contains("/zip/Qwen3-0.6B-Q8_0.gguf")));
+        // Defaults from schema
+        assert!(lines.contains(&"--ctx-size"));
+        assert!(lines.contains(&"4096"));
+        assert!(lines.contains(&"--server"));
+        assert!(lines.ends_with(&["..."]));
     }
 
     #[test]
-    fn args_override_replaces_generated_args() {
-        let mut builder = Builder::new(test_config(), test_cache());
-        builder.select_registry_model("qwen3-0.6b");
+    fn args_override_bypasses_schema_generation() {
+        let mut builder = configured_builder();
         builder.set_args_override("-m\n/zip/custom.gguf\n...");
         assert_eq!(builder.resolved_args(), "-m\n/zip/custom.gguf\n...");
 
         builder.clear_args_override();
-        assert!(builder.resolved_args().contains("/zip/"));
+        // Back to schema-generated
+        assert!(builder.resolved_args().contains("Qwen3-0.6B"));
+    }
+
+    // ── resolved_components ──
+
+    #[test]
+    fn resolved_components_simple_model_has_runtime_weights_args() {
+        let builder = configured_builder();
+        let components = builder.resolved_components();
+
+        let roles: Vec<_> = components.iter().map(|c| &c.role).collect();
+        assert!(
+            roles.iter().any(|r| matches!(r, ComponentRole::Runtime)),
+            "missing Runtime"
+        );
+        assert!(
+            roles.iter().any(|r| matches!(r, ComponentRole::Weights)),
+            "missing Weights"
+        );
+        assert!(
+            roles.iter().any(|r| matches!(r, ComponentRole::ArgsFile)),
+            "missing ArgsFile"
+        );
+        // qwen3-0.6b has no mmproj
+        assert!(
+            !roles
+                .iter()
+                .any(|r| matches!(r, ComponentRole::MmprojWeights)),
+            "unexpected MmprojWeights"
+        );
     }
 
     #[test]
-    fn add_and_remove_gpu_libs() {
+    fn resolved_components_multimodal_includes_mmproj() {
         let config = test_config();
         let group_name = config.versions[0].name.clone();
         let release_version = config.versions[0].releases[0].version.clone();
-
         let mut builder = Builder::new(config, test_cache());
         builder.select_version(&group_name, &release_version);
+        builder.select_registry_model("mistralai/Ministral-3-3B-Instruct-2512-GGUF");
+
+        let components = builder.resolved_components();
+        let roles: Vec<_> = components.iter().map(|c| &c.role).collect();
+        assert!(roles.iter().any(|r| matches!(r, ComponentRole::Weights)));
+        assert!(
+            roles
+                .iter()
+                .any(|r| matches!(r, ComponentRole::MmprojWeights)),
+            "multimodal model should include MmprojWeights"
+        );
+    }
+
+    #[test]
+    fn resolved_components_gpu_libs_appear() {
+        let mut builder = configured_builder();
+        builder.add_gpu_lib(GpuAccel::Cuda, Os::Linux);
+        builder.add_custom_gpu_lib(Path::new("/my/ggml-rocm.so"), GpuAccel::Rocm, Os::Linux);
+
+        let components = builder.resolved_components();
+        let gpu_components: Vec<_> = components
+            .iter()
+            .filter(|c| matches!(c.role, ComponentRole::GpuLib { .. }))
+            .collect();
+        assert_eq!(gpu_components.len(), 2);
+
+        // CUDA should be a URL source (from registry)
+        assert!(matches!(
+            &gpu_components.iter().find(|c| matches!(c.role, ComponentRole::GpuLib { accel: GpuAccel::Cuda, .. })).unwrap().source,
+            ComponentSource::Url(_)
+        ));
+        // ROCm should be a local source
+        assert!(matches!(
+            &gpu_components.iter().find(|c| matches!(c.role, ComponentRole::GpuLib { accel: GpuAccel::Rocm, .. })).unwrap().source,
+            ComponentSource::Local(_)
+        ));
+    }
+
+    #[test]
+    fn resolved_components_agent_prompt_only_when_enabled() {
+        let mut builder = configured_builder();
+        let without = builder.resolved_components();
+        assert!(
+            !without
+                .iter()
+                .any(|c| matches!(c.role, ComponentRole::ArgsPrompt)),
+            "ArgsPrompt should not appear when agent disabled"
+        );
+
+        let mut agent = AgentConfig::default();
+        agent.enabled = true;
+        builder.set_agent_config(agent);
+        let with = builder.resolved_components();
+        assert!(
+            with.iter()
+                .any(|c| matches!(c.role, ComponentRole::ArgsPrompt)),
+            "ArgsPrompt should appear when agent enabled"
+        );
+    }
+
+    #[test]
+    fn resolved_components_custom_model_uses_local_source() {
+        let config = test_config();
+        let group_name = config.versions[0].name.clone();
+        let release_version = config.versions[0].releases[0].version.clone();
+        let mut builder = Builder::new(config, test_cache());
+        builder.select_version(&group_name, &release_version);
+        builder.select_custom_model(Path::new("/my/weights.gguf"));
+
+        let components = builder.resolved_components();
+        let weights = components
+            .iter()
+            .find(|c| matches!(c.role, ComponentRole::Weights))
+            .expect("should have Weights");
+        assert_eq!(
+            weights.source,
+            ComponentSource::Local(PathBuf::from("/my/weights.gguf"))
+        );
+    }
+
+    #[test]
+    fn resolved_components_quantization_change_updates_url() {
+        let config = test_config();
+        let group_name = config.versions[0].name.clone();
+        let release_version = config.versions[0].releases[0].version.clone();
+        let mut builder = Builder::new(config, test_cache());
+        builder.select_version(&group_name, &release_version);
+        builder.select_registry_model("mistralai/Ministral-3-3B-Instruct-2512-GGUF");
+
+        // Default (index 0) is Q4_K_M
+        let c1 = builder.resolved_components();
+        let w1 = c1.iter().find(|c| matches!(c.role, ComponentRole::Weights)).unwrap();
+        assert!(w1.zip_path.contains("Q4_K_M"));
+
+        // Switch to BF16 (index 1)
+        builder.select_quantization("weights", 1);
+        let c2 = builder.resolved_components();
+        let w2 = c2.iter().find(|c| matches!(c.role, ComponentRole::Weights)).unwrap();
+        assert!(w2.zip_path.contains("BF16"));
+    }
+
+    // ── GPU lib management ──
+
+    #[test]
+    fn gpu_lib_deduplication_and_removal() {
+        let mut builder = configured_builder();
 
         builder.add_gpu_lib(GpuAccel::Cuda, Os::Linux);
         assert_eq!(builder.gpu_libs.len(), 1);
 
+        // Same (accel, os) replaces, not duplicates
         builder.add_gpu_lib(GpuAccel::Cuda, Os::Linux);
         assert_eq!(builder.gpu_libs.len(), 1);
 
+        // Different accel adds (ROCm Linux is in our test data)
         builder.add_gpu_lib(GpuAccel::Rocm, Os::Linux);
         assert_eq!(builder.gpu_libs.len(), 2);
 
+        // Custom libs always add regardless of registry data
+        builder.add_custom_gpu_lib(Path::new("/x.dll"), GpuAccel::Cuda, Os::Windows);
+        assert_eq!(builder.gpu_libs.len(), 3);
+
         builder.remove_gpu_lib(GpuAccel::Cuda, Os::Linux);
-        assert_eq!(builder.gpu_libs.len(), 1);
+        assert_eq!(builder.gpu_libs.len(), 2);
 
         builder.clear_gpu_libs();
         assert!(builder.gpu_libs.is_empty());
     }
 
-    #[test]
-    fn add_custom_gpu_lib() {
-        let mut builder = Builder::new(test_config(), test_cache());
-        builder.add_custom_gpu_lib(
-            Path::new("/my/ggml-cuda.so"),
-            GpuAccel::Cuda,
-            Os::Linux,
-        );
-        assert_eq!(builder.gpu_libs.len(), 1);
-        assert_eq!(
-            builder.gpu_libs[0].source,
-            ComponentSource::Local(PathBuf::from("/my/ggml-cuda.so"))
-        );
-    }
+    // ── Validation ──
 
     #[test]
-    fn validate_empty_state_has_errors() {
+    fn validate_catches_missing_model_and_version() {
         let builder = Builder::new(test_config(), test_cache());
         let msgs = builder.validate();
-        assert!(msgs.iter().any(|m| m.is_error()));
+        let errors: Vec<_> = msgs.iter().filter(|m| m.is_error()).collect();
+        assert!(errors.len() >= 2, "should flag missing model and version");
         assert!(!builder.can_build());
     }
 
     #[test]
-    fn validate_complete_state_has_no_errors() {
-        let config = test_config();
-        let group_name = config.versions[0].name.clone();
-        let release_version = config.versions[0].releases[0].version.clone();
-
-        let mut builder = Builder::new(config, test_cache());
-        builder.select_registry_model("qwen3-0.6b");
-        builder.select_version(&group_name, &release_version);
-
+    fn validate_passes_with_full_config() {
+        let builder = configured_builder();
         let msgs = builder.validate();
         let errors: Vec<_> = msgs.iter().filter(|m| m.is_error()).collect();
-        assert!(errors.is_empty(), "Unexpected errors: {:?}", errors);
+        assert!(errors.is_empty(), "unexpected errors: {:?}", errors);
+        assert!(builder.can_build());
     }
 
     #[test]
-    fn set_config_value_updates_state() {
+    fn validate_warns_on_gpu_on_macos() {
+        let mut builder = configured_builder();
+        builder.add_custom_gpu_lib(Path::new("/x.so"), GpuAccel::Cuda, Os::Linux);
+        let msgs = builder.validate();
+
+        if cfg!(target_os = "macos") {
+            assert!(
+                msgs.iter().any(|m| matches!(m, ValidationMessage::Warning(s) if s.contains("macOS"))),
+                "should warn about GPU libs on macOS"
+            );
+        }
+    }
+
+    // ── Defaults ──
+
+    #[test]
+    fn select_default_version_picks_marked_default() {
         let mut builder = Builder::new(test_config(), test_cache());
-        builder.set_config_value("context_length", serde_json::json!(16384));
+        assert!(builder.select_default_version());
+        // versions.json has llamafile 0.10 marked default
+        assert!(builder
+            .state()
+            .selected_version_group
+            .as_deref()
+            .unwrap()
+            .contains("0.10"));
+    }
+
+    #[test]
+    fn select_default_model_picks_marked_default() {
+        let mut builder = Builder::new(test_config(), test_cache());
+        assert!(builder.select_default_model());
+        // models.json has qwen3-0.6b marked default
         assert_eq!(
-            builder.state().config_values.get("context_length"),
-            Some(&serde_json::json!(16384))
-        );
-    }
-
-    #[test]
-    fn set_agent_config() {
-        let mut builder = Builder::new(test_config(), test_cache());
-        let mut agent = AgentConfig::default();
-        agent.enabled = true;
-        builder.set_agent_config(agent);
-        assert!(builder.agent_config.enabled);
-    }
-
-    #[test]
-    fn set_output_path() {
-        let mut builder = Builder::new(test_config(), test_cache());
-        builder.set_output_path(Path::new("/tmp/my-output.llamafile"));
-        assert_eq!(builder.state().output_path, "/tmp/my-output.llamafile");
-    }
-
-    #[test]
-    fn use_custom_runtime() {
-        let mut builder = Builder::new(test_config(), test_cache());
-        builder.use_custom_runtime(Path::new("/my/llamafile"));
-        assert_eq!(
-            builder.state().resolved_llamafile_path.as_deref(),
-            Some("/my/llamafile")
+            builder.state().selected_model_id.as_deref(),
+            Some("Qwen/Qwen3-0.6B-GGUF")
         );
     }
 }

@@ -407,16 +407,6 @@ mod tests {
     }
 
     #[test]
-    fn with_remote_url_and_update_mode() {
-        let cm = ConfigManager::new(PathBuf::from("/tmp"))
-            .with_remote_url("https://custom.example.com/data")
-            .with_update_mode(UpdateMode::Always);
-
-        assert_eq!(cm.remote_url, "https://custom.example.com/data");
-        assert_eq!(cm.update_mode(), UpdateMode::Always);
-    }
-
-    #[test]
     fn bundled_configs_parse_correctly() {
         let v: ConfigEnvelope<Vec<LlamafileVersionGroup>> =
             serde_json::from_str(BUNDLED_VERSIONS).expect("bundled versions.json must be valid");

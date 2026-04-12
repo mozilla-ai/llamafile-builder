@@ -61,7 +61,12 @@ pub struct LlamafileVersionGroup {
 pub struct ModelFileQuantization {
     pub name: String,
     pub size_bytes: u64,
-    pub download_url: String,
+    /// Filename within the repository (used with hf-hub for HF sources).
+    pub filename: String,
+    /// Direct download URL. Optional -- for HF sources, hf-hub constructs
+    /// the URL from repo_id + filename. For non-HF sources, this is required.
+    #[serde(default)]
+    pub download_url: Option<String>,
     pub sha256: Option<String>,
 }
 
@@ -74,19 +79,26 @@ pub struct ModelFile {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Model {
+    /// Model identifier. For HF sources, this is the repo ID (e.g. "Qwen/Qwen3-0.6B-GGUF").
     pub id: String,
+    /// Where this model's files come from ("hf" for HuggingFace).
+    #[serde(default = "default_source")]
+    pub source: String,
     pub name: String,
     pub organization: String,
     pub parameters: String,
     pub param_count: u64,
     pub description: String,
     pub license: String,
-    pub huggingface_url: Option<String>,
     pub tags: Vec<String>,
     pub context_length: u32,
     #[serde(default)]
     pub default: bool,
     pub files: Vec<ModelFile>,
+}
+
+fn default_source() -> String {
+    "hf".to_string()
 }
 
 // ============================================================================

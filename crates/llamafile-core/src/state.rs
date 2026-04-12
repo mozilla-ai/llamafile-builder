@@ -134,7 +134,7 @@ impl BuildState {
                 let weights_file = model.files.iter().find(|f| f.role == "weights")?;
                 let sel = self.model_file_selections.get("weights")?;
                 let quant = weights_file.quantizations.get(sel.quantization_idx)?;
-                Some(get_filename_from_url(&quant.download_url))
+                Some(quant.filename.clone())
             }
         }
     }
@@ -280,7 +280,7 @@ impl BuildState {
                             continue;
                         }
                     } else if let Some(quant) = file.quantizations.get(sel.quantization_idx) {
-                        let filename = get_filename_from_url(&quant.download_url);
+                        let filename = quant.filename.clone();
                         (String::new(), filename)
                     } else {
                         continue;
@@ -462,12 +462,12 @@ mod tests {
     fn select_registry_model_sets_source_and_seeds_selections() {
         let models = load_models();
         let mut bs = BuildState::default();
-        bs.select_registry_model("ministral-3-3b-instruct-2512".to_string(), &models);
+        bs.select_registry_model("mistralai/Ministral-3-3B-Instruct-2512-GGUF".to_string(), &models);
 
         assert_eq!(bs.model_source, ModelSource::Registry);
         assert_eq!(
             bs.selected_model_id.as_deref(),
-            Some("ministral-3-3b-instruct-2512")
+            Some("mistralai/Ministral-3-3B-Instruct-2512-GGUF")
         );
         assert!(bs.model_file_selections.contains_key("weights"));
         assert!(bs.model_file_selections.contains_key("mmproj"));
@@ -491,7 +491,7 @@ mod tests {
         bs.select_custom_model("/tmp/foo.gguf".to_string(), &models);
         assert_eq!(bs.model_source, ModelSource::Custom);
 
-        bs.select_registry_model("qwen3-0.6b".to_string(), &models);
+        bs.select_registry_model("Qwen/Qwen3-0.6B-GGUF".to_string(), &models);
         assert_eq!(bs.model_source, ModelSource::Registry);
         assert!(bs.custom_model_files.is_empty());
         assert!(bs.selected_ollama_model.is_none());
@@ -616,7 +616,7 @@ mod tests {
     fn select_file_quantization_updates_index_and_output() {
         let models = load_models();
         let mut bs = BuildState::default();
-        bs.select_registry_model("ministral-3-3b-instruct-2512".to_string(), &models);
+        bs.select_registry_model("mistralai/Ministral-3-3B-Instruct-2512-GGUF".to_string(), &models);
         let q0_output = bs.output_path.clone();
         bs.select_file_quantization("weights".to_string(), 1, &models);
 
@@ -637,7 +637,7 @@ mod tests {
     fn select_file_quantization_for_non_weights_does_not_change_output_path() {
         let models = load_models();
         let mut bs = BuildState::default();
-        bs.select_registry_model("ministral-3-3b-instruct-2512".to_string(), &models);
+        bs.select_registry_model("mistralai/Ministral-3-3B-Instruct-2512-GGUF".to_string(), &models);
         let before = bs.output_path.clone();
         bs.select_file_quantization("mmproj".to_string(), 0, &models);
         assert_eq!(bs.output_path, before);
@@ -649,7 +649,7 @@ mod tests {
     fn use_custom_file_for_role_flips_source_and_path() {
         let models = load_models();
         let mut bs = BuildState::default();
-        bs.select_registry_model("ministral-3-3b-instruct-2512".to_string(), &models);
+        bs.select_registry_model("mistralai/Ministral-3-3B-Instruct-2512-GGUF".to_string(), &models);
         bs.use_custom_file_for_role(
             "weights".to_string(),
             "/tmp/custom.gguf".to_string(),
@@ -671,13 +671,13 @@ mod tests {
     fn init_file_selections_seeds_default_for_every_role() {
         let model = Model {
             id: "m".to_string(),
+            source: "hf".to_string(),
             name: "m".to_string(),
             organization: "o".to_string(),
             parameters: "1B".to_string(),
             param_count: 1,
             description: String::new(),
             license: String::new(),
-            huggingface_url: None,
             tags: vec![],
             context_length: 4096,
             default: false,
@@ -688,7 +688,8 @@ mod tests {
                     quantizations: vec![ModelFileQuantization {
                         name: "Q4".to_string(),
                         size_bytes: 1,
-                        download_url: "https://example.com/a.gguf".to_string(),
+                        filename: "a.gguf".to_string(),
+                        download_url: None,
                         sha256: None,
                     }],
                 },
@@ -698,7 +699,8 @@ mod tests {
                     quantizations: vec![ModelFileQuantization {
                         name: "BF16".to_string(),
                         size_bytes: 1,
-                        download_url: "https://example.com/b.gguf".to_string(),
+                        filename: "b.gguf".to_string(),
+                        download_url: None,
                         sha256: None,
                     }],
                 },
@@ -754,7 +756,7 @@ mod tests {
     fn get_gguf_filename_registry_from_url() {
         let models = load_models();
         let mut bs = BuildState::default();
-        bs.select_registry_model("ministral-3-3b-instruct-2512".to_string(), &models);
+        bs.select_registry_model("mistralai/Ministral-3-3B-Instruct-2512-GGUF".to_string(), &models);
         assert_eq!(
             bs.get_gguf_filename(&models).as_deref(),
             Some("Ministral-3-3B-Instruct-2512-Q4_K_M.gguf")
@@ -765,7 +767,7 @@ mod tests {
     fn get_gguf_filename_registry_with_custom_override() {
         let models = load_models();
         let mut bs = BuildState::default();
-        bs.select_registry_model("ministral-3-3b-instruct-2512".to_string(), &models);
+        bs.select_registry_model("mistralai/Ministral-3-3B-Instruct-2512-GGUF".to_string(), &models);
         bs.use_custom_file_for_role(
             "weights".to_string(),
             "/foo/bar/baz.gguf".to_string(),
@@ -804,7 +806,7 @@ mod tests {
         let models = load_models();
         let mut bs = BuildState::default();
 
-        bs.select_registry_model("qwen3-0.6b".to_string(), &models);
+        bs.select_registry_model("Qwen/Qwen3-0.6B-GGUF".to_string(), &models);
         let name = bs.get_model_name(&models).unwrap();
         assert!(!name.is_empty());
 
