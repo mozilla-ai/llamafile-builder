@@ -270,7 +270,9 @@ Downloads use two systems depending on the component source:
 - Handles auth via `HF_TOKEN` env var and `~/.cache/huggingface/token`
 - Supports async downloads (tokio feature)
 
-**Non-HF files** (`ComponentSource::Url`) -- runtimes, GPU libraries, zipalign -- use our own `Downloader` backed by `reqwest`, with resume support (HTTP Range), SHA256 verification, and progress reporting via channels.
+**Non-HF files** (`ComponentSource::Url`) -- runtimes, GPU libraries, zipalign -- use our own `Downloader` backed by `reqwest`, with resume support (HTTP Range), SHA256 verification, and progress reporting via `tracing`.
+
+**Zipalign as a managed dependency**: zipalign is not assumed to be pre-installed. It comes from the same release as the llamafile runtime and is downloaded and cached alongside it. The `versions.json` config includes zipalign download URLs per release. Users may override with `use_custom_zipalign()` if they have a local copy.
 
 **Local files** (`ComponentSource::Local`) need no downloading. The builder verifies they exist and optionally checks SHA256 if provided.
 
@@ -291,10 +293,10 @@ impl Cache {
     /// For HF sources, delegates to hf-hub (shared cache).
     /// For URL sources, downloads to our cache dir with resume support.
     /// For Local sources, verifies the file exists.
+    /// Progress is reported via tracing events.
     pub async fn ensure(
         &self,
         component: &Component,
-        progress_tx: mpsc::Sender<DownloadProgress>,
         cancel_flag: Arc<AtomicBool>,
     ) -> Result<PathBuf>;
 
@@ -311,29 +313,19 @@ pub enum CacheStatus {
 
 `Builder::build()` calls `Cache::ensure()` for each resolved component before assembly.
 
-### Progress and events (FR-3)
+### Observability
 
-All long-running operations report progress through typed channels:
+All operations in the core library are instrumented with `tracing` spans and events. The library does not own any UI-facing progress types or channels -- it is the responsibility of the interface layer (CLI, server, TUI) to subscribe to tracing events and present them however it chooses.
 
-```rust
-pub enum BuildProgress {
-    Stage { name: String, index: usize, total: usize },
-    Download(DownloadProgress),
-    Writing { file: String },
-    Bundling { component: String },
-    Validating,
-    Completed { output_path: PathBuf, size: u64 },
-    Failed { error: String },
-}
+Key spans emitted during a build:
+- `build{output=...}` -- outer span for the entire build
+- `ensure_runtime` -- downloading or locating the llamafile binary
+- `ensure_model` -- downloading or locating model weights
+- `write_config` -- generating and writing the .args file
+- `ensure_gpu_libs` -- downloading or locating GPU libraries
+- `create_executable` -- copying runtime, running zipalign
 
-pub enum DownloadProgress {
-    Started { url: String, total_bytes: Option<u64>, resuming: bool },
-    Progress { bytes_downloaded: u64, total_bytes: u64 },
-    Verifying,
-    Completed,
-    Failed { error: String },
-}
-```
+Download progress is emitted as INFO-level events with structured fields: `bytes_downloaded`, `bytes_total`, `percentage`, `filename`.
 
 ### Validation (FR-6)
 
@@ -390,9 +382,14 @@ llamafile-builder build \
 | 4 | Build failed |
 | 5 | Cancelled |
 
-Progress is reported to stderr via `indicatif` progress bars. Structured output (JSON) available with `--json` flag for machine consumption.
+Progress is reported to stderr via `tracing` at INFO level. Structured output (JSON) available with `--json` flag for machine consumption.
 
 **Progressive complexity** (NFR-5): `llamafile-builder build --model llama3-8b-instruct` is sufficient for a basic build. The CLI fills in defaults (latest stable version, default config, CPU-only, auto-generated output path).
+
+**Two modes of operation:**
+
+1. **One-shot mode** (current): all options specified on the command line, build runs immediately. Good for scripts and CI.
+2. **Interactive mode** (future): the CLI connects to the builder via JSON-RPC over stdio, allowing multi-step configuration (select version, then model, then configure, then build). This also enables progress bars via streaming JSON-RPC notifications. This makes the CLI a thin client of the same backend that the web UI and other frontends use, ensuring consistent behavior.
 
 ### Server mode (`llamafile-builder --serve`)
 
@@ -524,7 +521,22 @@ llamafile-builder/
     +-- config.json
 ```
 
-Note: `data/` at workspace root is the canonical source for config files (used for releases and publishing to the remote URL). `crates/llamafile-core/data/` contains the same files as bundled fallbacks, copied at release time.
+Note: `data/` at workspace root is the single source of truth for config files. The core library references them via `include_str!("../../../data/...")` for bundled fallbacks.
+
+
+## Layered testability (NFR-12)
+
+Each interface layer serves as an integration test for the layer below it. This maximizes automated test coverage before moving to manual UI testing.
+
+```
+Unit tests          -> core library functions (105+ tests)
+CLI (direct calls)  -> integration test for Builder API, downloads, assembly
+JSON-RPC (piped)    -> integration test for the protocol and state management
+HTTP server (curl)  -> integration test for the REST API before adding a browser UI
+Web UI (browser)    -> the only layer requiring manual testing
+```
+
+The order of implementation follows this layering: each phase adds a new test surface on top of the previous one.
 
 
 ## What stays in interface layers
@@ -535,61 +547,11 @@ These concerns are NOT part of the core library. Each interface implements them 
 |---------|-----|---------------|-----|
 | File/folder picker | N/A (paths as args) | Browser `<input type="file">` or path text input | N/A (paths as args) |
 | Browser launch | `open` crate | Auto-open on `--serve` | N/A |
-| Progress display | `indicatif` on stderr | SSE events rendered by JS | `ratatui` widgets |
-| Update prompt (NFR-10) | stderr prompt | Browser dialog | TUI dialog |
+| Progress display | `tracing` subscriber on stderr | SSE events rendered by JS | `ratatui` widgets |
+| Update prompt (NFR-10) | stderr log | Browser dialog | TUI dialog |
 | Cancellation | Ctrl+C / signal handler | POST /api/cancel | Ctrl+C / key binding |
 
 
-## Migration path from current codebase
+## Implementation plan
 
-### Phase 1: Extract core library
-
-1. Create workspace with `crates/llamafile-core/`
-2. Define the component model (`Component`, `ComponentRole`, `ComponentSource`, `GpuAccel`, `Os`)
-3. Move and adapt logic from `src-tauri/src/`:
-   - `models.rs` -> `models.rs` (data types, mostly as-is)
-   - `build_state.rs` -> `state.rs` (remove Tauri-specific wrappers, refactor around component model)
-   - `download.rs` -> `download.rs` (replace Tauri event emission with channel sends; non-HF downloads only)
-   - `builder.rs` -> `builder.rs` + `args.rs` (split .args generation out)
-   - `validation.rs` -> `validation.rs` (as-is)
-4. Integrate `hf-hub` crate for HuggingFace model downloads (replaces custom HF download logic)
-5. Extract Ollama/LM Studio scanning from `commands.rs` into dedicated modules
-6. Implement `ConfigManager` (new, replaces embedded JSON loading)
-7. Implement `Cache` (new, delegates to `hf-hub` for models, owns cache for runtimes/GPU libs)
-8. Define `Builder` public API in `lib.rs`
-9. Add unit tests for all core modules
-
-### Phase 2: Build CLI
-
-1. Create `crates/llamafile-cli/`
-2. Implement `clap` command definitions
-3. Wire subcommands to core library calls
-4. Implement `indicatif` progress display
-5. Test all commands end to end
-
-### Phase 3: Add HTTP server
-
-1. Add `axum` to `llamafile-cli`
-2. Implement REST endpoints (thin wrappers around core API)
-3. Implement SSE bridge for `BuildProgress` channel
-4. Static file serving for web UI directory
-5. Test with `curl`
-
-### Phase 4: Port web UI
-
-1. Copy `src/app.js`, `index.html`, `styles.css` to `web/`
-2. Replace `invoke()` calls with `fetch()` to `/api/...`
-3. Replace `listen()` event subscriptions with `EventSource`
-4. Test full wizard flow in browser
-
-### Phase 5: Add interactive mode
-
-1. Implement JSON-RPC 2.0 parser (or use a lightweight crate)
-2. Wire methods to core library
-3. Test with `echo '...' | llamafile-builder --interactive`
-
-### Phase 6 (optional): TUI
-
-1. Create `crates/llamafile-tui/`
-2. Implement wizard flow with `ratatui`
-3. Links directly to `llamafile-core`, no IPC needed
+See [PLAN.md](PLAN.md) for the phased implementation plan with current status.

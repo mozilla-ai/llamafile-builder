@@ -124,13 +124,13 @@ The builder must allow users to select each component of a llamafile: binaries (
 The builder must provide access to a curated model registry and support scanning of local model sources (Ollama cache, LM Studio cache, arbitrary GGUF files on disk).
 
 **FR-3: Download management**
-The builder must download components over HTTP with: progress reporting, resumption of interrupted downloads, SHA256 integrity verification, and cancellation. It must handle HuggingFace authentication (gated repositories) by resolving tokens from environment variables only (few GGUF repositories are gated, so a simple resolution strategy is sufficient).
+The builder must download components over HTTP with: progress reporting, resumption of interrupted downloads, SHA256 integrity verification, and cancellation. HuggingFace model downloads must use the standard HuggingFace Hub API (via the `hf-hub` Rust crate) so that downloaded files are cached in the shared HuggingFace cache at `~/.cache/huggingface/hub/` and are immediately available to other tools (llama.cpp, Python's `huggingface_hub`, etc.). Authentication for gated repositories is resolved from environment variables only (few GGUF repositories are gated, so a simple resolution strategy is sufficient).
 
 **FR-4: Configuration generation**
 The builder must generate valid `.args` files. Arguments change frequently (depending on new or changed llama.cpp / llamafile features), so we need a flexible configuration schema that describes more the parameter types and how they are presented in the UI (correctly handling sections, conditionals, toggleable groups, and placeholder substitution) rather than the parameter themselves. Users should also be able to customize the `.args` file before it is bundled with the llamafile.
 
 **FR-5: Build assembly**
-The builder must assemble the final llamafile by invoking zipalign to combine the runtime binary, model weights, configuration, and optional GPU libraries into a single executable.
+The builder must assemble the final llamafile by invoking zipalign to combine the runtime binary, model weights, configuration, and optional GPU libraries into a single executable. The zipalign binary itself must be treated as a managed dependency: it is downloaded and cached alongside the llamafile runtime (they come from the same release), not assumed to be pre-installed. Users may override with a local zipalign binary if preferred.
 
 **FR-6: Build validation**
 The builder must validate the build configuration before starting assembly (e.g. warn about context sizes that exceed model training length, flag missing dependencies, detect incompatible compute targets for the host platform).
@@ -147,13 +147,13 @@ The core logic (everything listed in FR-1 through FR-7) must not depend on any U
 It must be possible to perform a complete build (from component selection through final assembly) without a display server, in environments like CI runners, containers, and SSH sessions.
 
 **NFR-3: Scriptability**
-All operations must be drivable from scripts and automation tools -- through command-line arguments, standard I/O, or a network API -- with machine-readable output and meaningful exit codes.
+All operations must be drivable from scripts and automation tools -- through command-line arguments, standard I/O, or a network API -- with machine-readable output and meaningful exit codes. The JSON-RPC interactive mode serves as the universal protocol: external GUIs, the web UI server, and eventually the CLI itself can all drive the builder through the same interface, ensuring consistent behavior across all frontends.
 
 **NFR-4: Graphical access**
 Desktop users must still have access to a graphical interface for the guided wizard workflow. This interface should not require installing additional system dependencies beyond what the builder binary itself provides.
 
 **NFR-5: Progressive complexity**
-Simple tasks (build a llamafile from a known model) should require minimal input. Advanced options (custom files, non-default config, GPU target selection) should be available but not mandatory.
+Simple tasks (build a llamafile from a known model) should require minimal input. Advanced options (custom files, non-default config, GPU target selection) should be available but not mandatory. The builder's internal state should be manipulable in multiple steps (select version, then select model, then configure, then build) rather than requiring all choices to be specified at once. The CLI should support both one-shot mode (all options on the command line) and a future multi-step interactive mode where the user builds up the configuration incrementally.
 
 **NFR-6: Platform coverage**
 The builder must work on the platforms listed in the target platforms table. Adding support for a new platform or distribution channel should not require changes to the core logic.
@@ -173,5 +173,8 @@ At startup the builder checks for updates to its configuration files (and option
 **NFR-11: Web UI as separate assets**
 If the builder serves a browser-based UI via a local HTTP server, the static assets (HTML, CSS, JS) should be served from disk rather than embedded in the binary. This allows modifying or replacing the UI without rebuilding the builder. The builder should track where assets are located and support cache headers so the browser can cache them efficiently.
 
-**NFR-12: Llamafile modification (future)**
+**NFR-12: Layered testability**
+Each interface layer must be automatically testable without the layers above it. The core library is tested via unit tests. The CLI (calling the library directly) serves as an integration test for the library. The JSON-RPC interactive mode is testable via piped stdin/stdout, serving as an integration test for the protocol and state management. The HTTP server is testable via HTTP requests. Each layer maximizes the automated test surface before moving to the next, so that bugs are caught at the lowest possible level rather than discovered only through manual UI testing.
+
+**NFR-13: Llamafile modification (future)**
 The builder's scope is assembling new llamafiles from components. However, the architecture should not preclude a future capability to open an existing llamafile and selectively replace components (e.g. update the runtime while preserving the model weights, or swap GPU libraries without re-downloading the model). This is not a launch requirement but should be kept in mind during design.
