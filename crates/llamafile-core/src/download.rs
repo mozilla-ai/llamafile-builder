@@ -6,10 +6,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::mpsc;
 
 use crate::error::DownloadError;
-use crate::models::{DownloadProgress, FileInfo};
+
+/// File status information for cache checks.
+#[derive(Debug, Clone)]
+pub struct FileInfo {
+    pub exists: bool,
+    pub size: u64,
+    pub expected_size: Option<u64>,
+    pub is_complete: bool,
+    pub is_partial: bool,
+    pub checksum_valid: Option<bool>,
+}
 
 pub(crate) fn is_huggingface_url(url: &str) -> bool {
     if let Ok(parsed) = url::Url::parse(url) {
@@ -48,6 +57,7 @@ pub(crate) fn resolve_hf_token(app_token: Option<&str>) -> Option<String> {
     None
 }
 
+#[tracing::instrument(skip_all, fields(path = %path.display()))]
 pub async fn get_file_info(
     path: &Path,
     expected_size: Option<u64>,
@@ -55,6 +65,7 @@ pub async fn get_file_info(
     verify_checksum: bool,
 ) -> FileInfo {
     if !path.exists() {
+        tracing::debug!("file does not exist");
         return FileInfo {
             exists: false,
             size: 0,
@@ -75,11 +86,25 @@ pub async fn get_file_info(
         .map(|exp| size > 0 && size < exp)
         .unwrap_or(false);
 
+    tracing::debug!(size, is_complete, is_partial, "file info");
+
     let checksum_valid = if verify_checksum && is_complete {
         if let Some(expected) = expected_sha256 {
+            tracing::info!("verifying SHA256 checksum");
             match crate::file_ops::calculate_sha256(&path.to_string_lossy()).await {
-                Ok(actual) => Some(actual == expected),
-                Err(_) => Some(false),
+                Ok(actual) => {
+                    let valid = actual == expected;
+                    if valid {
+                        tracing::info!("checksum valid");
+                    } else {
+                        tracing::warn!(expected, actual, "checksum mismatch");
+                    }
+                    Some(valid)
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "checksum calculation failed");
+                    Some(false)
+                }
             }
         } else {
             None
@@ -98,8 +123,11 @@ pub async fn get_file_info(
     }
 }
 
-/// Download a file from a URL with resume support, SHA256 verification,
-/// progress reporting via channel, and cancellation.
+/// Download a file from a URL with resume support, SHA256 verification, and cancellation.
+///
+/// Progress is reported via `tracing` events at INFO level with fields:
+/// `bytes_downloaded`, `bytes_total`, `percentage`, `filename`.
+#[tracing::instrument(skip(cancel_flag, hf_token), fields(filename))]
 pub async fn download_file(
     url: &str,
     dest: &Path,
@@ -107,12 +135,18 @@ pub async fn download_file(
     expected_sha256: Option<&str>,
     hf_token: Option<&str>,
     resume: bool,
-    progress_tx: mpsc::Sender<DownloadProgress>,
     cancel_flag: Arc<AtomicBool>,
 ) -> Result<(), DownloadError> {
     if let Some(parent) = dest.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
+
+    let filename = dest
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file")
+        .to_string();
+    tracing::Span::current().record("filename", &filename.as_str());
 
     let client = Client::builder()
         .user_agent("llamafile-builder/0.1.0")
@@ -131,18 +165,22 @@ pub async fn download_file(
 
     if is_huggingface_url(url) {
         if let Some(token) = resolve_hf_token(hf_token) {
+            tracing::debug!("using HuggingFace auth token");
             request = request.header("Authorization", format!("Bearer {}", token));
         }
     }
 
     if existing_size > 0 {
+        tracing::info!(existing_size, "resuming download");
         request = request.header("Range", format!("bytes={}-", existing_size));
     }
 
+    tracing::info!("starting download");
     let response = request.send().await?;
     let status = response.status();
 
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        tracing::error!(status = %status, "authentication required");
         return Err(DownloadError::AuthRequired {
             status: status.as_u16(),
         });
@@ -150,6 +188,10 @@ pub async fn download_file(
 
     let resuming = status == reqwest::StatusCode::PARTIAL_CONTENT;
     let starting_offset = if resuming { existing_size } else { 0 };
+
+    if existing_size > 0 && !resuming {
+        tracing::warn!("server does not support resume, restarting download");
+    }
 
     let response = response.error_for_status()?;
 
@@ -160,11 +202,11 @@ pub async fn download_file(
         content_length
     };
 
-    let filename = dest
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("file")
-        .to_string();
+    tracing::info!(
+        total_bytes = total_size,
+        resuming,
+        "download started"
+    );
 
     let mut file = if resuming {
         OpenOptions::new()
@@ -178,10 +220,11 @@ pub async fn download_file(
 
     let mut stream = response.bytes_stream();
     let mut downloaded: u64 = starting_offset;
-    let mut last_progress_time = std::time::Instant::now();
+    let mut last_log_time = std::time::Instant::now();
 
     while let Some(chunk) = stream.next().await {
         if cancel_flag.load(Ordering::Relaxed) {
+            tracing::warn!("download cancelled by user");
             drop(file);
             return Err(DownloadError::Cancelled);
         }
@@ -190,38 +233,30 @@ pub async fn download_file(
         file.write_all(&chunk).await?;
         downloaded += chunk.len() as u64;
 
-        // Throttle progress updates to ~2/sec
+        // Log progress at ~2/sec
         let now = std::time::Instant::now();
-        if now.duration_since(last_progress_time).as_millis() >= 500 {
-            last_progress_time = now;
-            let _ = progress_tx.send(DownloadProgress {
-                url: url.to_string(),
-                filename: filename.clone(),
-                bytes_downloaded: downloaded,
-                bytes_total: total_size,
-                percentage: if total_size > 0 {
-                    (downloaded as f32 / total_size as f32) * 100.0
-                } else {
-                    0.0
-                },
-                resuming,
-            }).await;
+        if now.duration_since(last_log_time).as_millis() >= 500 {
+            last_log_time = now;
+            let percentage = if total_size > 0 {
+                (downloaded as f64 / total_size as f64) * 100.0
+            } else {
+                0.0
+            };
+            tracing::info!(
+                bytes_downloaded = downloaded,
+                bytes_total = total_size,
+                percentage = format!("{:.1}", percentage),
+                "downloading"
+            );
         }
     }
 
-    // Final 100% progress
-    let _ = progress_tx.send(DownloadProgress {
-        url: url.to_string(),
-        filename: filename.clone(),
-        bytes_downloaded: downloaded,
-        bytes_total: total_size,
-        percentage: if total_size > 0 {
-            (downloaded as f32 / total_size as f32) * 100.0
-        } else {
-            100.0
-        },
-        resuming,
-    }).await;
+    // Final progress
+    tracing::info!(
+        bytes_downloaded = downloaded,
+        bytes_total = total_size,
+        "download complete"
+    );
 
     file.flush().await?;
     drop(file);
@@ -229,6 +264,7 @@ pub async fn download_file(
     let final_size = tokio::fs::metadata(dest).await?.len();
     if let Some(expected) = expected_size {
         if final_size != expected {
+            tracing::error!(expected, actual = final_size, "size mismatch");
             return Err(DownloadError::SizeMismatch {
                 expected,
                 actual: final_size,
@@ -237,12 +273,11 @@ pub async fn download_file(
     }
 
     if let Some(expected) = expected_sha256 {
-        tracing::info!("Verifying SHA256 checksum...");
+        tracing::info!("verifying SHA256 checksum");
         let dest_path = dest.to_path_buf();
         let actual = tokio::task::spawn_blocking(move || {
             use std::io::Read;
-            let mut file =
-                std::fs::File::open(&dest_path).map_err(DownloadError::Io)?;
+            let mut file = std::fs::File::open(&dest_path).map_err(DownloadError::Io)?;
             let mut hasher = Sha256::new();
             let mut buffer = vec![0u8; 256 * 1024];
             loop {
@@ -258,11 +293,13 @@ pub async fn download_file(
         .map_err(|e| DownloadError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))??;
 
         if actual != expected {
+            tracing::error!(expected, actual, "checksum mismatch");
             return Err(DownloadError::ChecksumMismatch {
                 expected: expected.to_string(),
                 actual,
             });
         }
+        tracing::info!("checksum verified");
     }
 
     Ok(())
@@ -379,7 +416,7 @@ mod tests {
             ],
             || {
                 let result = resolve_hf_token(None);
-                let _ = result; // may or may not be Some depending on machine state
+                let _ = result;
             },
         );
     }

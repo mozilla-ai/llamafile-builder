@@ -1,16 +1,15 @@
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 
 use crate::download;
 use crate::error::DownloadError;
-use crate::models::{Component, ComponentRole, ComponentSource, DownloadProgress};
+use crate::models::{Component, ComponentRole, ComponentSource};
 
 /// Status of a cached component.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CacheStatus {
-    /// File exists and checksum matches (or no checksum to check).
+    /// File exists and size matches (or no expected size to check).
     Valid(PathBuf),
     /// File exists but is smaller than expected (can resume).
     Partial {
@@ -26,11 +25,20 @@ pub enum CacheStatus {
 /// `~/.cache/huggingface/hub/` for interoperability with llama.cpp and other tools.
 pub struct Cache {
     base_dir: PathBuf,
+    hf_token: Option<String>,
 }
 
 impl Cache {
     pub fn new(base_dir: PathBuf) -> Self {
-        Self { base_dir }
+        Self {
+            base_dir,
+            hf_token: None,
+        }
+    }
+
+    pub fn with_hf_token(mut self, token: String) -> Self {
+        self.hf_token = Some(token);
+        self
     }
 
     /// Directory for cached llamafile runtime binaries.
@@ -65,11 +73,7 @@ impl Cache {
                 let filename = crate::models::get_filename_from_url(url);
                 let dir = match &component.role {
                     ComponentRole::Runtime | ComponentRole::Zipalign => self.runtime_dir(),
-                    ComponentRole::GpuLib { .. } => {
-                        // GPU libs need a version dir, but we don't have it here.
-                        // The builder will use gpu_lib_dir() directly.
-                        self.base_dir.join("gpu")
-                    }
+                    ComponentRole::GpuLib { .. } => self.base_dir.join("gpu"),
                     _ => self.base_dir.join("downloads"),
                 };
                 Some(dir.join(filename))
@@ -77,16 +81,8 @@ impl Cache {
             ComponentSource::HuggingFace {
                 repo_id, filename, ..
             } => {
-                // For HF downloads, we store in our own cache but the builder
-                // should prefer using hf-hub's native cache for interop.
-                // This path is a fallback for when we download manually.
                 let safe_repo = repo_id.replace('/', "--");
-                Some(
-                    self.base_dir
-                        .join("hf")
-                        .join(safe_repo)
-                        .join(filename),
-                )
+                Some(self.base_dir.join("hf").join(safe_repo).join(filename))
             }
             ComponentSource::Local(path) => Some(path.clone()),
             ComponentSource::Generated => None,
@@ -94,12 +90,15 @@ impl Cache {
     }
 
     /// Check if a component is already cached without downloading.
+    #[tracing::instrument(skip_all, fields(role = ?component.role, source = %component.source_display()))]
     pub fn check(&self, component: &Component) -> CacheStatus {
         match &component.source {
             ComponentSource::Local(path) => {
                 if path.exists() {
+                    tracing::debug!(path = %path.display(), "local file exists");
                     CacheStatus::Valid(path.clone())
                 } else {
+                    tracing::debug!(path = %path.display(), "local file missing");
                     CacheStatus::Missing
                 }
             }
@@ -110,13 +109,16 @@ impl Cache {
                     None => return CacheStatus::Missing,
                 };
                 if !path.exists() {
+                    tracing::debug!(path = %path.display(), "not cached");
                     return CacheStatus::Missing;
                 }
                 let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                 if let Some(expected) = component.expected_size {
                     if size == expected {
+                        tracing::debug!(path = %path.display(), size, "cached and complete");
                         CacheStatus::Valid(path)
                     } else if size > 0 && size < expected {
+                        tracing::debug!(path = %path.display(), size, expected, "partial download");
                         CacheStatus::Partial {
                             path,
                             bytes_downloaded: size,
@@ -135,30 +137,33 @@ impl Cache {
 
     /// Ensure a component is available locally. Downloads if needed.
     ///
-    /// For `ComponentSource::Url`: downloads with resume support to our cache.
-    /// For `ComponentSource::HuggingFace`: resolves the download URL via hf-hub,
-    ///   then downloads with our custom downloader for progress reporting.
-    /// For `ComponentSource::Local`: verifies the file exists.
-    /// For `ComponentSource::Generated`: no-op, returns empty path.
+    /// For `Url`: downloads with resume to our cache directory.
+    /// For `HuggingFace`: tries hf-hub first (shared cache), falls back to direct download.
+    /// For `Local`: verifies the file exists.
+    /// For `Generated`: no-op, returns empty path.
+    #[tracing::instrument(skip_all, fields(role = ?component.role, source = %component.source_display()))]
     pub async fn ensure(
         &self,
         component: &Component,
-        hf_token: Option<&str>,
-        progress_tx: mpsc::Sender<DownloadProgress>,
         cancel_flag: Arc<AtomicBool>,
     ) -> std::result::Result<PathBuf, DownloadError> {
         match &component.source {
             ComponentSource::Local(path) => {
                 if path.exists() {
+                    tracing::info!(path = %path.display(), "using local file");
                     Ok(path.clone())
                 } else {
+                    tracing::error!(path = %path.display(), "local file not found");
                     Err(DownloadError::Io(std::io::Error::new(
                         std::io::ErrorKind::NotFound,
                         format!("Local file not found: {}", path.display()),
                     )))
                 }
             }
-            ComponentSource::Generated => Ok(PathBuf::new()),
+            ComponentSource::Generated => {
+                tracing::debug!("generated component, no download needed");
+                Ok(PathBuf::new())
+            }
             ComponentSource::Url(url) => {
                 let dest = self
                     .path_for(component)
@@ -172,6 +177,7 @@ impl Cache {
                             .map(|m| m.len())
                             .unwrap_or(0);
                         if size == expected {
+                            tracing::info!(path = %dest.display(), "already cached");
                             return Ok(dest);
                         }
                     }
@@ -183,9 +189,8 @@ impl Cache {
                     &dest,
                     component.expected_size,
                     component.expected_sha256.as_deref(),
-                    hf_token,
+                    self.hf_token.as_deref(),
                     resume,
-                    progress_tx,
                     cancel_flag,
                 )
                 .await?;
@@ -194,8 +199,9 @@ impl Cache {
             ComponentSource::HuggingFace {
                 repo_id, filename, ..
             } => {
-                // Use hf-hub to resolve the download URL (with auth),
-                // then download with our custom downloader for progress.
+                tracing::info!(repo_id, filename, "resolving HuggingFace model");
+
+                // Try hf-hub first (uses standard ~/.cache/huggingface/hub/ layout)
                 let api = hf_hub::api::tokio::ApiBuilder::new()
                     .with_progress(false)
                     .build()
@@ -207,17 +213,13 @@ impl Cache {
                     })?;
 
                 let repo = api.model(repo_id.clone());
-
-                // Try to get the file from the HF cache first.
-                // hf-hub's get() downloads if not cached, but we want to use
-                // our own downloader for progress reporting. So we check the
-                // cache first, and only if missing, resolve the URL and download.
-                let cache_path = repo.get(filename).await;
-                match cache_path {
-                    Ok(path) => Ok(path),
-                    Err(_) => {
-                        // If hf-hub can't get it (e.g. no network, auth needed),
-                        // fall back to direct URL download with our downloader.
+                match repo.get(filename).await {
+                    Ok(path) => {
+                        tracing::info!(path = %path.display(), "resolved from HF cache");
+                        Ok(path)
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "hf-hub failed, falling back to direct download");
                         let url = format!(
                             "https://huggingface.co/{}/resolve/main/{}",
                             repo_id, filename
@@ -231,9 +233,8 @@ impl Cache {
                             &dest,
                             component.expected_size,
                             component.expected_sha256.as_deref(),
-                            hf_token,
+                            self.hf_token.as_deref(),
                             resume,
-                            progress_tx,
                             cancel_flag,
                         )
                         .await?;
@@ -388,7 +389,6 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let cache = Cache::new(tmp.path().to_path_buf());
 
-        // Create a partial file in the cache
         let bin_dir = cache.runtime_dir();
         std::fs::create_dir_all(&bin_dir).unwrap();
         std::fs::write(bin_dir.join("llamafile_0.10"), b"partial").unwrap();
@@ -404,7 +404,7 @@ mod tests {
             CacheStatus::Partial {
                 bytes_downloaded, ..
             } => {
-                assert_eq!(bytes_downloaded, 7); // "partial" is 7 bytes
+                assert_eq!(bytes_downloaded, 7);
             }
             other => panic!("Expected Partial, got {:?}", other),
         }
@@ -423,7 +423,7 @@ mod tests {
             role: ComponentRole::Runtime,
             source: ComponentSource::Url("https://example.com/llamafile_0.10".to_string()),
             zip_path: String::new(),
-            expected_size: Some(5), // matches "12345"
+            expected_size: Some(5),
             expected_sha256: None,
         };
         match cache.check(&component) {

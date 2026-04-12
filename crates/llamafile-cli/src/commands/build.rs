@@ -1,14 +1,11 @@
 use std::path::Path;
-use tokio::sync::mpsc;
 
-use llamafile_core::builder::FileExistsPolicy;
 use llamafile_core::cache::Cache;
 use llamafile_core::config_manager::BuilderConfig;
 use llamafile_core::models::{GpuAccel, Os};
 use llamafile_core::Builder;
 
 use crate::cli::BuildArgs;
-use crate::progress;
 
 pub async fn run(args: &BuildArgs, config: BuilderConfig, cache: Cache) -> Result<(), String> {
     let mut builder = Builder::new(config, cache);
@@ -17,8 +14,7 @@ pub async fn run(args: &BuildArgs, config: BuilderConfig, cache: Cache) -> Resul
     if let Some(ref runtime) = args.runtime {
         builder.use_custom_runtime(runtime);
     } else {
-        let version_str = args.version.as_deref();
-        select_best_version(&mut builder, version_str)?;
+        select_best_version(&mut builder, args.version.as_deref())?;
     }
 
     // Select model
@@ -98,10 +94,10 @@ pub async fn run(args: &BuildArgs, config: BuilderConfig, cache: Cache) -> Resul
     for msg in &msgs {
         match msg {
             llamafile_core::validation::ValidationMessage::Warning(s) => {
-                eprintln!("Warning: {s}");
+                tracing::warn!("{s}");
             }
             llamafile_core::validation::ValidationMessage::Error(s) => {
-                eprintln!("Error: {s}");
+                tracing::error!("{s}");
             }
         }
     }
@@ -109,64 +105,23 @@ pub async fn run(args: &BuildArgs, config: BuilderConfig, cache: Cache) -> Resul
         return Err("Build validation failed. Fix the errors above.".to_string());
     }
 
-    // Print build summary
-    eprintln!("Building llamafile...");
-    eprintln!("  Output: {}", builder.state().output_path);
-    if let Some(ref model_id) = builder.state().selected_model_id {
-        eprintln!("  Model:  {}", model_id);
-    }
-    if let Some(ref wf) = builder.state().resolved_weights_filename {
-        eprintln!("  File:   {}", wf);
-    }
-    eprintln!();
+    // Run the build -- all progress is via tracing
+    builder.build().await.map_err(|e| format!("{e}"))?;
 
-    // Run the build
-    let policy = if args.skip_existing {
-        FileExistsPolicy::SkipExisting
-    } else {
-        FileExistsPolicy::SkipExisting // CLI always skips for now
-    };
-
-    let (event_tx, event_rx) = mpsc::channel(64);
-
-    let build_handle = {
-        // Clone what we need for the spawned task
-        let event_tx = event_tx.clone();
-        tokio::spawn(async move {
-            builder.build(event_tx, None, policy).await
-        })
-    };
-
-    // Display progress
-    progress::display_progress(event_rx).await;
-
-    // Wait for build
-    let build_result = build_handle.await.map_err(|e| format!("Build task panicked: {e}"))?;
-
-    match build_result {
-        Ok(output_path) => {
-            let size = tokio::fs::metadata(&output_path)
-                .await
-                .map(|m| m.len())
-                .unwrap_or(0);
-            eprintln!(
-                "\nBuild complete: {} ({})",
-                output_path.display(),
-                llamafile_core::models::format_size(size)
-            );
-            Ok(())
-        }
-        Err(e) => Err(format!("Build failed: {e}")),
-    }
+    Ok(())
 }
 
 fn select_best_version(builder: &mut Builder, version_str: Option<&str>) -> Result<(), String> {
-    // Clone version data to avoid borrow conflict with builder
     let versions: Vec<_> = builder
         .config()
         .versions
         .iter()
-        .map(|g| (g.name.clone(), g.releases.iter().map(|r| r.version.clone()).collect::<Vec<_>>()))
+        .map(|g| {
+            (
+                g.name.clone(),
+                g.releases.iter().map(|r| r.version.clone()).collect::<Vec<_>>(),
+            )
+        })
         .collect();
 
     if let Some(v) = version_str {
@@ -201,7 +156,12 @@ fn parse_gpu_spec(spec: &str) -> Result<(GpuAccel, Vec<Os>), String> {
         "cuda" => GpuAccel::Cuda,
         "rocm" => GpuAccel::Rocm,
         "vulkan" => GpuAccel::Vulkan,
-        other => return Err(format!("Unknown GPU type: '{}'. Use cuda, rocm, or vulkan.", other)),
+        other => {
+            return Err(format!(
+                "Unknown GPU type: '{}'. Use cuda, rocm, or vulkan.",
+                other
+            ))
+        }
     };
 
     let os_list = if parts.len() > 1 {
@@ -209,18 +169,19 @@ fn parse_gpu_spec(spec: &str) -> Result<(GpuAccel, Vec<Os>), String> {
             "linux" => vec![Os::Linux],
             "windows" => vec![Os::Windows],
             "all" => vec![Os::Linux, Os::Windows],
-            other => return Err(format!("Unknown OS: '{}'. Use linux, windows, or all.", other)),
+            other => {
+                return Err(format!(
+                    "Unknown OS: '{}'. Use linux, windows, or all.",
+                    other
+                ))
+            }
         }
+    } else if cfg!(target_os = "linux") {
+        vec![Os::Linux]
+    } else if cfg!(target_os = "windows") {
+        vec![Os::Windows]
     } else {
-        // Default: just the current platform
-        if cfg!(target_os = "linux") {
-            vec![Os::Linux]
-        } else if cfg!(target_os = "windows") {
-            vec![Os::Windows]
-        } else {
-            // macOS doesn't have downloadable GPU libs (Metal is built-in)
-            vec![Os::Linux]
-        }
+        vec![Os::Linux]
     };
 
     Ok((accel, os_list))

@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::mpsc;
 
 use crate::args;
 use crate::cache::Cache;
@@ -9,52 +8,6 @@ use crate::config_manager::BuilderConfig;
 use crate::models::*;
 use crate::state::BuildState;
 use crate::validation::{self, ValidationMessage};
-
-// ============================================================================
-// Build event types
-// ============================================================================
-
-/// Events emitted by the builder during a build.
-#[derive(Debug, Clone)]
-pub enum BuildEvent {
-    /// Progress update (stage, percentage, message).
-    Progress(BuildProgress),
-    /// Log message.
-    Log(String),
-    /// Download progress for the current file.
-    Download(Option<DownloadProgress>),
-    /// A decision is needed from the user (interactive mode only).
-    NeedDecision(DecisionRequest),
-    /// Build completed successfully.
-    Complete { output_path: PathBuf, size: u64 },
-    /// Build failed.
-    Failed { error: String },
-}
-
-/// Requests for user decisions during interactive builds.
-#[derive(Debug, Clone)]
-pub enum DecisionRequest {
-    FileExists(FileExistsVariant),
-    HfTokenNeeded,
-}
-
-/// User decisions sent back to the builder.
-#[derive(Debug, Clone)]
-pub enum Decision {
-    FileExists(FileExistsChoice),
-    HfToken(Option<String>),
-}
-
-/// Policy for handling existing cached files.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileExistsPolicy {
-    /// Use cached files without prompting (CLI default).
-    SkipExisting,
-    /// Always re-download everything.
-    RedownloadAll,
-    /// Send NeedDecision events for user to decide (server/TUI).
-    Interactive,
-}
 
 // ============================================================================
 // GPU library selection
@@ -74,9 +27,8 @@ pub struct GpuLibSelection {
 
 /// The main entry point for constructing a llamafile.
 ///
-/// All selection methods modify internal state. `resolved_components()`
-/// materializes the state into a list of components to assemble.
-/// `build()` orchestrates the download-and-assemble pipeline.
+/// All selection methods modify internal state. `build()` orchestrates the
+/// download-and-assemble pipeline. All operations are observable via `tracing`.
 pub struct Builder {
     config: BuilderConfig,
     state: BuildState,
@@ -198,9 +150,7 @@ impl Builder {
     // ── Configuration ──
 
     pub fn set_config_value(&mut self, key: &str, value: serde_json::Value) {
-        self.state
-            .config_values
-            .insert(key.to_string(), value);
+        self.state.config_values.insert(key.to_string(), value);
     }
 
     pub fn set_args_override(&mut self, raw_args: &str) {
@@ -214,10 +164,8 @@ impl Builder {
     // ── GPU libraries ──
 
     pub fn add_gpu_lib(&mut self, accel: GpuAccel, os: Os) {
-        // Find the URL from the selected version's GPU libs
         let source = self.find_gpu_lib_url(accel, os);
         if let Some(source) = source {
-            // Remove existing entry for same (accel, os)
             self.gpu_libs
                 .retain(|g| !(g.accel == accel && g.os == os));
             self.gpu_libs.push(GpuLibSelection { accel, os, source });
@@ -261,119 +209,73 @@ impl Builder {
         self.cancel_flag.store(true, Ordering::Relaxed);
     }
 
-    /// Run the build pipeline.
+    /// Run the build pipeline. Returns the path to the created llamafile.
     ///
-    /// Sends `BuildEvent`s to `event_tx` as the build progresses.
-    /// For interactive builds, listens for `Decision`s on `decision_rx`.
-    pub async fn build(
-        &self,
-        event_tx: mpsc::Sender<BuildEvent>,
-        _decision_rx: Option<mpsc::Receiver<Decision>>,
-        _policy: FileExistsPolicy,
-    ) -> crate::Result<PathBuf> {
+    /// All progress is observable via `tracing` spans and events.
+    /// Use a `tracing` subscriber in the calling code to display or log them.
+    #[tracing::instrument(skip(self), fields(output = %self.state.output_path))]
+    pub async fn build(&self) -> crate::Result<PathBuf> {
         self.cancel_flag.store(false, Ordering::Relaxed);
 
-        let hf_token = crate::download::resolve_hf_token(None);
-
         // Phase 1: Ensure runtime
-        self.send_progress(&event_tx, BuildStage::DownloadingRuntime, 0.0, "Preparing runtime...").await;
-        let runtime_path = self.ensure_runtime(hf_token.as_deref(), &event_tx).await?;
+        let runtime_path = {
+            let _span = tracing::info_span!("ensure_runtime").entered();
+            tracing::info!("preparing runtime binary");
+            self.ensure_runtime().await?
+        };
         self.check_cancelled()?;
 
         // Phase 2: Ensure model files
-        self.send_progress(&event_tx, BuildStage::DownloadingModel, 20.0, "Preparing model files...").await;
-        let (weights_path, mmproj_path) = self.ensure_model_files(hf_token.as_deref(), &event_tx).await?;
+        let (weights_path, mmproj_path) = {
+            let _span = tracing::info_span!("ensure_model").entered();
+            tracing::info!("preparing model files");
+            self.ensure_model_files().await?
+        };
         self.check_cancelled()?;
 
-        let _weights_filename = weights_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("model.gguf")
-            .to_string();
-        let _mmproj_filename = mmproj_path.as_ref().and_then(|p| {
-            p.file_name().and_then(|n| n.to_str()).map(|s| s.to_string())
-        });
-
         // Phase 3: Write .args
-        self.send_progress(&event_tx, BuildStage::WritingConfig, 50.0, "Writing configuration...").await;
-        let args_content = self.resolved_args();
-        let args_path = crate::file_ops::write_temp_file(&args_content, ".args")
-            .await
-            .map_err(|e| crate::Error::Build(format!("Failed to write .args: {e}")))?;
+        let args_path = {
+            let _span = tracing::info_span!("write_config").entered();
+            let args_content = self.resolved_args();
+            tracing::info!(content_length = args_content.len(), "writing .args configuration");
+            tracing::debug!(content = %args_content, ".args content");
+            crate::file_ops::write_temp_file(&args_content, ".args")
+                .await
+                .map_err(|e| crate::Error::Build(format!("Failed to write .args: {e}")))?
+        };
         self.check_cancelled()?;
 
         // Phase 4: Ensure GPU libraries
-        self.send_progress(&event_tx, BuildStage::BundlingGpu, 60.0, "Preparing GPU libraries...").await;
-        let gpu_lib_paths = self.ensure_gpu_libs(hf_token.as_deref(), &event_tx).await;
+        let gpu_lib_paths = {
+            let _span = tracing::info_span!("ensure_gpu_libs").entered();
+            self.ensure_gpu_libs().await
+        };
         self.check_cancelled()?;
 
         // Phase 5: Create executable
-        self.send_progress(&event_tx, BuildStage::CreatingExecutable, 80.0, "Creating executable...").await;
-        let output_path = PathBuf::from(&self.state.output_path);
+        let output_path = {
+            let _span = tracing::info_span!("create_executable").entered();
+            self.create_executable(
+                &runtime_path,
+                &weights_path,
+                mmproj_path.as_deref(),
+                &args_path,
+                &gpu_lib_paths,
+            )
+            .await?
+        };
 
-        // Copy runtime to output
-        let _ = event_tx.send(BuildEvent::Log(format!(
-            "Copying runtime to {}...",
-            output_path.display()
-        ))).await;
-        crate::file_ops::copy_file(
-            &runtime_path.to_string_lossy(),
-            &output_path.to_string_lossy(),
-        )
-        .await
-        .map_err(|e| crate::Error::Build(format!("Failed to copy runtime: {e}")))?;
-
-        // Make executable
-        crate::zipalign::make_executable(&output_path).await?;
-
-        // Bundle files with zipalign
-        let mut files_to_bundle: Vec<PathBuf> = Vec::new();
-        files_to_bundle.push(PathBuf::from(&args_path));
-        files_to_bundle.push(weights_path.clone());
-        if let Some(ref mmproj) = mmproj_path {
-            files_to_bundle.push(mmproj.clone());
-        }
-        for gpu_path in &gpu_lib_paths {
-            files_to_bundle.push(gpu_path.clone());
-        }
-
-        // Write agent prompt if enabled
-        if self.agent_config.enabled {
-            let prompt = args::generate_system_prompt(&self.agent_config);
-            let prompt_path = crate::file_ops::write_temp_file(&prompt, ".args.prompt")
-                .await
-                .map_err(|e| crate::Error::Build(format!("Failed to write .args.prompt: {e}")))?;
-            files_to_bundle.push(PathBuf::from(prompt_path));
-        }
-
-        let file_refs: Vec<&Path> = files_to_bundle.iter().map(|p| p.as_path()).collect();
-
-        let _ = event_tx.send(BuildEvent::Log(format!(
-            "Running zipalign with {} files...",
-            file_refs.len()
-        ))).await;
-
-        let log_lines = crate::zipalign::zipalign_bundle(
-            &output_path,
-            &file_refs,
-            self.custom_zipalign.as_deref(),
-        )
-        .await?;
-
-        for line in &log_lines {
-            let _ = event_tx.send(BuildEvent::Log(line.clone())).await;
-        }
-
-        // Done
         let final_size = tokio::fs::metadata(&output_path)
             .await
             .map(|m| m.len())
             .unwrap_or(0);
 
-        let _ = event_tx.send(BuildEvent::Complete {
-            output_path: output_path.clone(),
-            size: final_size,
-        }).await;
+        tracing::info!(
+            path = %output_path.display(),
+            size = final_size,
+            size_human = %format_size(final_size),
+            "build complete"
+        );
 
         Ok(output_path)
     }
@@ -382,55 +284,41 @@ impl Builder {
 
     fn check_cancelled(&self) -> crate::Result<()> {
         if self.cancel_flag.load(Ordering::Relaxed) {
+            tracing::warn!("build cancelled");
             Err(crate::Error::Cancelled)
         } else {
             Ok(())
         }
     }
 
-    async fn send_progress(
-        &self,
-        tx: &mpsc::Sender<BuildEvent>,
-        stage: BuildStage,
-        pct: f32,
-        msg: &str,
-    ) {
-        let _ = tx.send(BuildEvent::Progress(BuildProgress {
-            stage,
-            progress_pct: pct,
-            message: msg.to_string(),
-            bytes_downloaded: 0,
-            bytes_total: 0,
-            error: None,
-        })).await;
-    }
-
-    async fn ensure_runtime(
-        &self,
-        hf_token: Option<&str>,
-        event_tx: &mpsc::Sender<BuildEvent>,
-    ) -> crate::Result<PathBuf> {
+    #[tracing::instrument(skip(self))]
+    async fn ensure_runtime(&self) -> crate::Result<PathBuf> {
         let path = self.state.resolved_llamafile_path.as_ref().ok_or_else(|| {
             crate::Error::Build("No llamafile version selected".to_string())
         })?;
 
-        // If it's a custom path, just verify it exists
         if let crate::state::LlamafileSource::Custom = self.state.llamafile_source {
             let p = PathBuf::from(path);
             if p.exists() {
+                tracing::info!(path = %p.display(), "using custom runtime");
                 return Ok(p);
             } else {
                 return Err(crate::Error::NotFound(format!(
-                    "Custom llamafile not found: {}",
-                    path
+                    "Custom llamafile not found: {}", path
                 )));
             }
         }
 
-        // Registry: find the release and download if needed
         let release = self.find_selected_release().ok_or_else(|| {
             crate::Error::Build("Selected release not found in config".to_string())
         })?;
+
+        tracing::info!(
+            version = %release.version,
+            url = %release.download_url,
+            size = release.size_bytes,
+            "downloading runtime"
+        );
 
         let component = Component {
             role: ComponentRole::Runtime,
@@ -440,59 +328,38 @@ impl Builder {
             expected_sha256: Some(release.sha256.clone()),
         };
 
-        let (progress_tx, mut progress_rx) = mpsc::channel::<DownloadProgress>(32);
-
-        // Forward download progress to build events
-        let event_tx2 = event_tx.clone();
-        let progress_forwarder = tokio::spawn(async move {
-            while let Some(dp) = progress_rx.recv().await {
-                let _ = event_tx2.send(BuildEvent::Download(Some(dp))).await;
-            }
-        });
-
-        let result = self.cache.ensure(
-            &component,
-            hf_token,
-            progress_tx,
-            self.cancel_flag.clone(),
-        ).await;
-
-        progress_forwarder.abort();
-        let _ = event_tx.send(BuildEvent::Download(None)).await;
-
-        result.map_err(|e| crate::Error::Download(e))
+        self.cache
+            .ensure(&component, self.cancel_flag.clone())
+            .await
+            .map_err(crate::Error::Download)
     }
 
-    async fn ensure_model_files(
-        &self,
-        hf_token: Option<&str>,
-        event_tx: &mpsc::Sender<BuildEvent>,
-    ) -> crate::Result<(PathBuf, Option<PathBuf>)> {
+    #[tracing::instrument(skip(self))]
+    async fn ensure_model_files(&self) -> crate::Result<(PathBuf, Option<PathBuf>)> {
         // Weights
         let weights_path = match &self.state.resolved_weights_path {
             Some(p) if !p.is_empty() => {
-                let _ = event_tx.send(BuildEvent::Log(format!("Using model weights: {p}"))).await;
+                tracing::info!(path = %p, "using local model weights");
                 PathBuf::from(p)
             }
             _ => {
-                // Registry model: need to download
-                let _ = event_tx.send(BuildEvent::Log("Downloading model weights...".to_string())).await;
-                self.download_registry_file("weights", hf_token, event_tx).await?
+                tracing::info!("downloading model weights from registry");
+                self.download_registry_file("weights").await?
             }
         };
 
         // Mmproj (optional)
         let mmproj_path = match &self.state.resolved_mmproj_path {
             Some(p) if !p.is_empty() => {
-                let _ = event_tx.send(BuildEvent::Log(format!("Using mmproj: {p}"))).await;
+                tracing::info!(path = %p, "using local mmproj");
                 Some(PathBuf::from(p))
             }
             _ => {
-                // Check if registry model has mmproj
                 if self.state.resolved_mmproj_filename.is_some() {
-                    let _ = event_tx.send(BuildEvent::Log("Downloading mmproj...".to_string())).await;
-                    Some(self.download_registry_file("mmproj", hf_token, event_tx).await?)
+                    tracing::info!("downloading mmproj from registry");
+                    Some(self.download_registry_file("mmproj").await?)
                 } else {
+                    tracing::debug!("no mmproj needed");
                     None
                 }
             }
@@ -501,12 +368,7 @@ impl Builder {
         Ok((weights_path, mmproj_path))
     }
 
-    async fn download_registry_file(
-        &self,
-        role: &str,
-        hf_token: Option<&str>,
-        event_tx: &mpsc::Sender<BuildEvent>,
-    ) -> crate::Result<PathBuf> {
+    async fn download_registry_file(&self, role: &str) -> crate::Result<PathBuf> {
         let model_id = self.state.selected_model_id.as_ref().ok_or_else(|| {
             crate::Error::Build("No model selected for download".to_string())
         })?;
@@ -522,6 +384,14 @@ impl Builder {
             crate::Error::Build(format!("Quantization index {} out of range", quant_idx))
         })?;
 
+        tracing::info!(
+            role,
+            quantization = %quant.name,
+            url = %quant.download_url,
+            size = quant.size_bytes,
+            "downloading registry file"
+        );
+
         let component = Component {
             role: if role == "weights" {
                 ComponentRole::Weights
@@ -534,45 +404,21 @@ impl Builder {
             expected_sha256: quant.sha256.clone(),
         };
 
-        let (progress_tx, mut progress_rx) = mpsc::channel::<DownloadProgress>(32);
-        let event_tx2 = event_tx.clone();
-        let progress_forwarder = tokio::spawn(async move {
-            while let Some(dp) = progress_rx.recv().await {
-                let _ = event_tx2.send(BuildEvent::Download(Some(dp))).await;
-            }
-        });
-
-        let result = self.cache.ensure(
-            &component,
-            hf_token,
-            progress_tx,
-            self.cancel_flag.clone(),
-        ).await;
-
-        progress_forwarder.abort();
-        let _ = event_tx.send(BuildEvent::Download(None)).await;
-
-        result.map_err(|e| crate::Error::Download(e))
+        self.cache
+            .ensure(&component, self.cancel_flag.clone())
+            .await
+            .map_err(crate::Error::Download)
     }
 
-    async fn ensure_gpu_libs(
-        &self,
-        hf_token: Option<&str>,
-        event_tx: &mpsc::Sender<BuildEvent>,
-    ) -> Vec<PathBuf> {
+    async fn ensure_gpu_libs(&self) -> Vec<PathBuf> {
         let mut paths = Vec::new();
 
         if self.gpu_libs.is_empty() {
-            let _ = event_tx.send(BuildEvent::Log("No GPU libraries to bundle.".to_string())).await;
+            tracing::info!("no GPU libraries to bundle");
             return paths;
         }
 
         for lib in &self.gpu_libs {
-            let _ = event_tx.send(BuildEvent::Log(format!(
-                "Preparing {:?} library for {:?}...",
-                lib.accel, lib.os
-            ))).await;
-
             let ext = match lib.os {
                 Os::Windows => ".dll",
                 Os::Linux => ".so",
@@ -582,6 +428,8 @@ impl Builder {
                 GpuAccel::Rocm => "rocm",
                 GpuAccel::Vulkan => "vulkan",
             };
+
+            tracing::info!(accel = accel_name, os = ?lib.os, "preparing GPU library");
 
             let component = Component {
                 role: ComponentRole::GpuLib {
@@ -594,32 +442,97 @@ impl Builder {
                 expected_sha256: None,
             };
 
-            let (progress_tx, _progress_rx) = mpsc::channel::<DownloadProgress>(32);
-
-            match self.cache.ensure(
-                &component,
-                hf_token,
-                progress_tx,
-                self.cancel_flag.clone(),
-            ).await {
+            match self.cache.ensure(&component, self.cancel_flag.clone()).await {
                 Ok(path) => {
-                    let _ = event_tx.send(BuildEvent::Log(format!(
-                        "GPU library ready: {}",
-                        path.display()
-                    ))).await;
+                    tracing::info!(path = %path.display(), "GPU library ready");
                     paths.push(path);
                 }
                 Err(e) => {
                     // GPU lib failures are non-fatal
-                    let _ = event_tx.send(BuildEvent::Log(format!(
-                        "Warning: GPU library {:?}/{:?} failed: {}",
-                        lib.accel, lib.os, e
-                    ))).await;
+                    tracing::warn!(
+                        accel = accel_name,
+                        os = ?lib.os,
+                        error = %e,
+                        "GPU library download failed, continuing without it"
+                    );
                 }
             }
         }
 
         paths
+    }
+
+    async fn create_executable(
+        &self,
+        runtime_path: &Path,
+        weights_path: &Path,
+        mmproj_path: Option<&Path>,
+        args_path: &str,
+        gpu_lib_paths: &[PathBuf],
+    ) -> crate::Result<PathBuf> {
+        let output_path = PathBuf::from(&self.state.output_path);
+
+        // Copy runtime to output
+        tracing::info!(
+            src = %runtime_path.display(),
+            dest = %output_path.display(),
+            "copying runtime to output"
+        );
+        crate::file_ops::copy_file(
+            &runtime_path.to_string_lossy(),
+            &output_path.to_string_lossy(),
+        )
+        .await
+        .map_err(|e| crate::Error::Build(format!("Failed to copy runtime: {e}")))?;
+
+        // Make executable
+        crate::zipalign::make_executable(&output_path).await?;
+
+        // Collect files to bundle
+        let mut files_to_bundle: Vec<PathBuf> = Vec::new();
+
+        tracing::info!(path = args_path, "bundling .args");
+        files_to_bundle.push(PathBuf::from(args_path));
+
+        tracing::info!(path = %weights_path.display(), "bundling model weights");
+        files_to_bundle.push(weights_path.to_path_buf());
+
+        if let Some(mmproj) = mmproj_path {
+            tracing::info!(path = %mmproj.display(), "bundling mmproj");
+            files_to_bundle.push(mmproj.to_path_buf());
+        }
+
+        for gpu_path in gpu_lib_paths {
+            tracing::info!(path = %gpu_path.display(), "bundling GPU library");
+            files_to_bundle.push(gpu_path.clone());
+        }
+
+        // Write agent prompt if enabled
+        if self.agent_config.enabled {
+            let prompt = args::generate_system_prompt(&self.agent_config);
+            let prompt_path = crate::file_ops::write_temp_file(&prompt, ".args.prompt")
+                .await
+                .map_err(|e| crate::Error::Build(format!("Failed to write .args.prompt: {e}")))?;
+            tracing::info!("bundling agent prompt");
+            files_to_bundle.push(PathBuf::from(prompt_path));
+        }
+
+        // Run zipalign
+        let file_refs: Vec<&Path> = files_to_bundle.iter().map(|p| p.as_path()).collect();
+        tracing::info!(file_count = file_refs.len(), "running zipalign");
+
+        let log_lines = crate::zipalign::zipalign_bundle(
+            &output_path,
+            &file_refs,
+            self.custom_zipalign.as_deref(),
+        )
+        .await?;
+
+        for line in &log_lines {
+            tracing::debug!(zipalign = %line);
+        }
+
+        Ok(output_path)
     }
 
     fn find_selected_release(&self) -> Option<LlamafileRelease> {
@@ -635,7 +548,7 @@ impl Builder {
         let by_platform = match accel {
             GpuAccel::Cuda => gpu_libs.cuda.as_ref()?,
             GpuAccel::Rocm => gpu_libs.rocm.as_ref()?,
-            GpuAccel::Vulkan => return None, // Not in current data format
+            GpuAccel::Vulkan => return None,
         };
         let lib = match os {
             Os::Linux => by_platform.linux.as_ref()?,
@@ -651,9 +564,9 @@ mod tests {
 
     fn test_config() -> BuilderConfig {
         BuilderConfig {
-            versions: serde_json::from_str(include_str!("../data/versions.json")).unwrap(),
-            models: serde_json::from_str(include_str!("../data/models.json")).unwrap(),
-            config_schema: serde_json::from_str(include_str!("../data/config.json")).unwrap(),
+            versions: serde_json::from_str(include_str!("../../../data/versions.json")).unwrap(),
+            models: serde_json::from_str(include_str!("../../../data/models.json")).unwrap(),
+            config_schema: serde_json::from_str(include_str!("../../../data/config.json")).unwrap(),
             config_version: 1,
             min_builder_version: None,
         }
@@ -727,7 +640,6 @@ mod tests {
         builder.add_gpu_lib(GpuAccel::Cuda, Os::Linux);
         assert_eq!(builder.gpu_libs.len(), 1);
 
-        // Adding same (accel, os) replaces
         builder.add_gpu_lib(GpuAccel::Cuda, Os::Linux);
         assert_eq!(builder.gpu_libs.len(), 1);
 
@@ -773,7 +685,6 @@ mod tests {
         let mut builder = Builder::new(config, test_cache());
         builder.select_registry_model("qwen3-0.6b");
         builder.select_version(&group_name, &release_version);
-        // Output path is auto-set by select_registry_model
 
         let msgs = builder.validate();
         let errors: Vec<_> = msgs.iter().filter(|m| m.is_error()).collect();
@@ -795,7 +706,7 @@ mod tests {
         let mut builder = Builder::new(test_config(), test_cache());
         let mut agent = AgentConfig::default();
         agent.enabled = true;
-        builder.set_agent_config(agent.clone());
+        builder.set_agent_config(agent);
         assert!(builder.agent_config.enabled);
     }
 

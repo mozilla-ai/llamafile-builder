@@ -266,7 +266,7 @@ mod tests {
     use serde_json::json;
 
     fn load_schema() -> Vec<ConfigSchemaItem> {
-        serde_json::from_str(include_str!("../data/config.json"))
+        serde_json::from_str(include_str!("../../../data/config.json"))
             .expect("config.json must be valid")
     }
 

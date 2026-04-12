@@ -277,60 +277,6 @@ You are a helpful coding assistant with access to local tools.
     }
 }
 
-// ============================================================================
-// Build Types
-// ============================================================================
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct BuildConfig {
-    pub llamafile_version: String,
-    pub model_id: String,
-    pub quantization: String,
-    pub config_values: std::collections::HashMap<String, serde_json::Value>,
-    pub compute: ComputeConfig,
-    pub agent: AgentConfig,
-    pub output_path: String,
-    pub model_filename: String,
-    pub mmproj_filename: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum BuildStage {
-    Idle,
-    DownloadingModel,
-    DownloadingRuntime,
-    WritingConfig,
-    BundlingGpu,
-    CreatingExecutable,
-    Complete,
-    Failed,
-    Cancelled,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct BuildProgress {
-    pub stage: BuildStage,
-    pub progress_pct: f32,
-    pub message: String,
-    pub bytes_downloaded: u64,
-    pub bytes_total: u64,
-    pub error: Option<String>,
-}
-
-impl Default for BuildProgress {
-    fn default() -> Self {
-        Self {
-            stage: BuildStage::Idle,
-            progress_pct: 0.0,
-            message: String::new(),
-            bytes_downloaded: 0,
-            bytes_total: 0,
-            error: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SystemInfo {
     pub os: String,
@@ -419,6 +365,25 @@ pub enum ComponentSource {
     Generated,
 }
 
+impl Component {
+    /// Short display string for the component source (used in tracing spans).
+    pub fn source_display(&self) -> String {
+        match &self.source {
+            ComponentSource::HuggingFace { repo_id, filename } => {
+                format!("hf:{}/{}", repo_id, filename)
+            }
+            ComponentSource::Url(url) => get_filename_from_url(url),
+            ComponentSource::Local(path) => {
+                path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("local")
+                    .to_string()
+            }
+            ComponentSource::Generated => "generated".to_string(),
+        }
+    }
+}
+
 /// GPU acceleration type. Metal is not included because it is compiled
 /// on-the-fly from sources embedded in the llamafile binary itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -435,66 +400,6 @@ pub enum GpuAccel {
 pub enum Os {
     Linux,
     Windows,
-}
-
-// ============================================================================
-// Download progress types
-// ============================================================================
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DownloadProgress {
-    pub url: String,
-    pub filename: String,
-    pub bytes_downloaded: u64,
-    pub bytes_total: u64,
-    pub percentage: f32,
-    pub resuming: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FileInfo {
-    pub exists: bool,
-    pub size: u64,
-    pub expected_size: Option<u64>,
-    pub is_complete: bool,
-    pub is_partial: bool,
-    pub checksum_valid: Option<bool>,
-}
-
-// ============================================================================
-// File-exists prompt types (used by build orchestration)
-// ============================================================================
-
-/// What to show in the file-exists prompt
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "variant")]
-pub enum FileExistsVariant {
-    /// Partial download found
-    Partial {
-        filename: String,
-        current_size: u64,
-        expected_size: u64,
-    },
-    /// File complete, asking whether to verify SHA256
-    AskVerify { filename: String, size: u64 },
-    /// Checksum mismatch after verification
-    ChecksumMismatch { filename: String },
-    /// File complete, checksum verified OK
-    ChecksumOk { filename: String },
-    /// File exists (size matches, no sha available)
-    Exists { filename: String, size: u64 },
-}
-
-/// User's response to the file-exists prompt
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FileExistsChoice {
-    Resume,
-    Download,
-    Skip,
-    Verify,
-    Cancel,
 }
 
 // ============================================================================

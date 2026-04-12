@@ -1,6 +1,5 @@
 mod cli;
 mod commands;
-mod progress;
 
 use clap::Parser;
 use std::path::PathBuf;
@@ -39,16 +38,19 @@ fn get_cache_dir() -> PathBuf {
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    let cli = Cli::parse();
+
+    // Configure tracing subscriber.
+    // Default: WARN level. Use RUST_LOG=info or RUST_LOG=debug for more detail.
+    // The build command will produce INFO-level logs for each phase.
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::WARN.into()),
+                .add_directive(tracing::Level::INFO.into()),
         )
         .with_target(false)
         .with_writer(std::io::stderr)
         .init();
-
-    let cli = Cli::parse();
 
     // Load configuration
     let config_dir = get_config_dir().join("config");
@@ -60,7 +62,7 @@ async fn main() -> ExitCode {
     let config = match cm.load() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Failed to load configuration: {e}");
+            tracing::error!("Failed to load configuration: {e}");
             return ExitCode::from(1);
         }
     };
@@ -69,12 +71,12 @@ async fn main() -> ExitCode {
 
     // Dispatch
     if cli.serve {
-        eprintln!("Server mode not yet implemented (Phase 6).");
+        tracing::error!("Server mode not yet implemented (Phase 6).");
         return ExitCode::from(1);
     }
 
     if cli.interactive {
-        eprintln!("Interactive mode not yet implemented (Phase 6).");
+        tracing::error!("Interactive mode not yet implemented (Phase 6).");
         return ExitCode::from(1);
     }
 
@@ -123,9 +125,18 @@ async fn main() -> ExitCode {
                 println!("OS:         {} {}", info.os, info.arch);
                 println!("CPU cores:  {}", info.cpu_cores);
                 println!("Memory:     {:.1} GB", info.memory_gb);
-                println!("NVIDIA GPU: {}", if info.has_nvidia_gpu { "yes" } else { "no" });
-                println!("AMD GPU:    {}", if info.has_amd_gpu { "yes" } else { "no" });
-                println!("Metal:      {}", if info.has_metal { "yes" } else { "no" });
+                println!(
+                    "NVIDIA GPU: {}",
+                    if info.has_nvidia_gpu { "yes" } else { "no" }
+                );
+                println!(
+                    "AMD GPU:    {}",
+                    if info.has_amd_gpu { "yes" } else { "no" }
+                );
+                println!(
+                    "Metal:      {}",
+                    if info.has_metal { "yes" } else { "no" }
+                );
             }
             ExitCode::SUCCESS
         }
@@ -133,13 +144,12 @@ async fn main() -> ExitCode {
             match commands::build::run(args, config, cache).await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
-                    eprintln!("Error: {e}");
-                    ExitCode::from(4) // build failed
+                    tracing::error!("{e}");
+                    ExitCode::from(4)
                 }
             }
         }
         None => {
-            // No subcommand -- print help
             use clap::CommandFactory;
             Cli::command().print_help().ok();
             println!();

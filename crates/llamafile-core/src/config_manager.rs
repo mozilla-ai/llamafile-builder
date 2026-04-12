@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use crate::error::Error;
 use crate::models::{ConfigSchemaItem, LlamafileVersionGroup, Model};
 
-const BUNDLED_VERSIONS: &str = include_str!("../data/versions.json");
-const BUNDLED_MODELS: &str = include_str!("../data/models.json");
-const BUNDLED_CONFIG: &str = include_str!("../data/config.json");
+const BUNDLED_VERSIONS: &str = include_str!("../../../data/versions.json");
+const BUNDLED_MODELS: &str = include_str!("../../../data/models.json");
+const BUNDLED_CONFIG: &str = include_str!("../../../data/config.json");
 
 /// Default remote URL for fetching updated config files (GitHub raw content).
 const DEFAULT_REMOTE_URL: &str =

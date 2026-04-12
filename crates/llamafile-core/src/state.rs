@@ -447,12 +447,12 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     fn load_models() -> Vec<Model> {
-        serde_json::from_str(include_str!("../data/models.json"))
+        serde_json::from_str(include_str!("../../../data/models.json"))
             .expect("models.json must be valid")
     }
 
     fn load_versions() -> Vec<LlamafileVersionGroup> {
-        serde_json::from_str(include_str!("../data/versions.json"))
+        serde_json::from_str(include_str!("../../../data/versions.json"))
             .expect("versions.json must be valid")
     }
 
