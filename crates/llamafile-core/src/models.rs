@@ -38,6 +38,13 @@ pub struct LlamafileRelease {
     pub download_url: String,
     pub size_bytes: u64,
     pub sha256: String,
+    /// URL to the zipalign binary for this release.
+    #[serde(default)]
+    pub zipalign_url: Option<String>,
+    #[serde(default)]
+    pub zipalign_size_bytes: Option<u64>,
+    #[serde(default)]
+    pub zipalign_sha256: Option<String>,
     #[serde(default)]
     pub gpu_libs: Option<GpuLibs>,
 }

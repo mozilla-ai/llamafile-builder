@@ -1,6 +1,5 @@
 use crate::config_manager::BuilderConfig;
 use crate::state::BuildState;
-use crate::zipalign;
 
 /// A validation message -- either a warning (build can proceed) or an error (cannot proceed).
 #[derive(Debug, Clone, PartialEq)]
@@ -103,34 +102,11 @@ pub fn validate(state: &BuildState, config: &BuilderConfig) -> Vec<ValidationMes
         }
     }
 
-    // ── Zipalign available ──
-
-    let zipalign_path = zipalign::find_zipalign();
-    if zipalign_path.to_str() == Some("zipalign") {
-        // find_zipalign fell through to PATH -- check if it's actually in PATH
-        if which_in_path("zipalign").is_none() {
-            messages.push(ValidationMessage::Error(
-                "zipalign binary not found. It must be in PATH or next to the \
-                 llamafile-builder binary. zipalign is included in llamafile releases."
-                    .to_string(),
-            ));
-        }
-    }
+    // Note: zipalign availability is not checked here because the builder
+    // downloads it automatically from the selected release. The builder's
+    // ensure_zipalign() handles fallback to PATH if no URL is available.
 
     messages
-}
-
-fn which_in_path(name: &str) -> Option<std::path::PathBuf> {
-    std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths).find_map(|dir| {
-            let full = dir.join(name);
-            if full.is_file() {
-                Some(full)
-            } else {
-                None
-            }
-        })
-    })
 }
 
 #[cfg(test)]

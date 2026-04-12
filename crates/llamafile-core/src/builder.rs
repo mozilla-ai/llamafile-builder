@@ -69,6 +69,27 @@ impl Builder {
     pub fn resolved_components(&self) -> Vec<Component> {
         let mut components = Vec::new();
 
+        // Zipalign
+        if let Some(ref custom) = self.custom_zipalign {
+            components.push(Component {
+                role: ComponentRole::Zipalign,
+                source: ComponentSource::Local(custom.clone()),
+                zip_path: String::new(),
+                expected_size: None,
+                expected_sha256: None,
+            });
+        } else if let Some(release) = self.find_selected_release() {
+            if let Some(ref url) = release.zipalign_url {
+                components.push(Component {
+                    role: ComponentRole::Zipalign,
+                    source: ComponentSource::Url(url.clone()),
+                    zip_path: String::new(),
+                    expected_size: release.zipalign_size_bytes,
+                    expected_sha256: release.zipalign_sha256.clone(),
+                });
+            }
+        }
+
         // Runtime
         if let Some(release) = self.find_selected_release() {
             components.push(Component {
@@ -425,7 +446,15 @@ impl Builder {
     pub async fn build(&self) -> crate::Result<PathBuf> {
         self.cancel_flag.store(false, Ordering::Relaxed);
 
-        // Phase 1: Ensure runtime
+        // Phase 1: Ensure zipalign (prerequisite for everything)
+        let zipalign_path = {
+            let _span = tracing::info_span!("ensure_zipalign").entered();
+            tracing::info!("preparing zipalign");
+            self.ensure_zipalign().await?
+        };
+        self.check_cancelled()?;
+
+        // Phase 2: Ensure runtime
         let runtime_path = {
             let _span = tracing::info_span!("ensure_runtime").entered();
             tracing::info!("preparing runtime binary");
@@ -433,7 +462,7 @@ impl Builder {
         };
         self.check_cancelled()?;
 
-        // Phase 2: Ensure model files
+        // Phase 3: Ensure model files
         let (weights_path, mmproj_path) = {
             let _span = tracing::info_span!("ensure_model").entered();
             tracing::info!("preparing model files");
@@ -441,7 +470,7 @@ impl Builder {
         };
         self.check_cancelled()?;
 
-        // Phase 3: Write .args
+        // Phase 4: Write .args
         let args_path = {
             let _span = tracing::info_span!("write_config").entered();
             let args_content = self.resolved_args();
@@ -453,17 +482,18 @@ impl Builder {
         };
         self.check_cancelled()?;
 
-        // Phase 4: Ensure GPU libraries
+        // Phase 5: Ensure GPU libraries
         let gpu_lib_paths = {
             let _span = tracing::info_span!("ensure_gpu_libs").entered();
             self.ensure_gpu_libs().await
         };
         self.check_cancelled()?;
 
-        // Phase 5: Create executable
+        // Phase 6: Create executable
         let output_path = {
             let _span = tracing::info_span!("create_executable").entered();
             self.create_executable(
+                &zipalign_path,
                 &runtime_path,
                 &weights_path,
                 mmproj_path.as_deref(),
@@ -497,6 +527,66 @@ impl Builder {
         } else {
             Ok(())
         }
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn ensure_zipalign(&self) -> crate::Result<PathBuf> {
+        // If user provided a custom zipalign, use it
+        if let Some(ref custom) = self.custom_zipalign {
+            if custom.exists() {
+                tracing::info!(path = %custom.display(), "using custom zipalign");
+                return Ok(custom.clone());
+            } else {
+                return Err(crate::Error::NotFound(format!(
+                    "Custom zipalign not found: {}", custom.display()
+                )));
+            }
+        }
+
+        // Try to download from the selected release
+        let release = self.find_selected_release();
+        if let Some(release) = release {
+            if let Some(ref url) = release.zipalign_url {
+                tracing::info!(url, "downloading zipalign");
+                let component = Component {
+                    role: ComponentRole::Zipalign,
+                    source: ComponentSource::Url(url.clone()),
+                    zip_path: String::new(),
+                    expected_size: release.zipalign_size_bytes,
+                    expected_sha256: release.zipalign_sha256.clone(),
+                };
+
+                let path = self.cache
+                    .ensure(&component, self.cancel_flag.clone())
+                    .await
+                    .map_err(crate::Error::Download)?;
+
+                // Make it executable
+                crate::zipalign::make_executable(&path).await?;
+                return Ok(path);
+            }
+        }
+
+        // Fallback: find zipalign in PATH or next to binary
+        let found = crate::zipalign::find_zipalign();
+        if found.to_str() == Some("zipalign") {
+            // find_zipalign fell through to PATH name only -- check it exists
+            if std::process::Command::new("zipalign")
+                .arg("--version")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_err()
+            {
+                return Err(crate::Error::NotFound(
+                    "zipalign not found. Select a llamafile version that includes \
+                     zipalign, provide one with --zipalign, or install it in PATH."
+                        .to_string(),
+                ));
+            }
+        }
+        tracing::info!(path = %found.display(), "using zipalign from PATH");
+        Ok(found)
     }
 
     #[tracing::instrument(skip(self))]
@@ -698,6 +788,7 @@ impl Builder {
 
     async fn create_executable(
         &self,
+        zipalign_path: &Path,
         runtime_path: &Path,
         weights_path: &Path,
         mmproj_path: Option<&Path>,
@@ -758,7 +849,7 @@ impl Builder {
         let log_lines = crate::zipalign::zipalign_bundle(
             &output_path,
             &file_refs,
-            self.custom_zipalign.as_deref(),
+            Some(zipalign_path),
         )
         .await?;
 
@@ -1094,6 +1185,57 @@ mod tests {
         assert_eq!(
             builder.state().selected_model_id.as_deref(),
             Some("Qwen/Qwen3-0.6B-GGUF")
+        );
+    }
+
+    // ── HuggingFace source ──
+
+    #[test]
+    fn resolved_components_hf_model_uses_huggingface_source() {
+        let builder = configured_builder();
+        let components = builder.resolved_components();
+        let weights = components
+            .iter()
+            .find(|c| matches!(c.role, ComponentRole::Weights))
+            .expect("should have Weights");
+        assert!(
+            matches!(&weights.source, ComponentSource::HuggingFace { repo_id, filename }
+                if repo_id == "Qwen/Qwen3-0.6B-GGUF" && filename == "Qwen3-0.6B-Q8_0.gguf"),
+            "weights should use HuggingFace source, got {:?}",
+            weights.source
+        );
+    }
+
+    // ── Zipalign ──
+
+    #[test]
+    fn resolved_components_includes_zipalign_from_release() {
+        let builder = configured_builder();
+        let components = builder.resolved_components();
+        let zipalign = components
+            .iter()
+            .find(|c| matches!(c.role, ComponentRole::Zipalign));
+        assert!(zipalign.is_some(), "should include Zipalign component");
+        let zipalign = zipalign.unwrap();
+        assert!(
+            matches!(&zipalign.source, ComponentSource::Url(url) if url.contains("zipalign")),
+            "zipalign source should be a URL containing 'zipalign', got {:?}",
+            zipalign.source
+        );
+    }
+
+    #[test]
+    fn resolved_components_uses_custom_zipalign_when_set() {
+        let mut builder = configured_builder();
+        builder.use_custom_zipalign(Path::new("/my/custom/zipalign"));
+        let components = builder.resolved_components();
+        let zipalign = components
+            .iter()
+            .find(|c| matches!(c.role, ComponentRole::Zipalign))
+            .expect("should include Zipalign component");
+        assert_eq!(
+            zipalign.source,
+            ComponentSource::Local(PathBuf::from("/my/custom/zipalign"))
         );
     }
 }

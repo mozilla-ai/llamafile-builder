@@ -89,6 +89,21 @@
           "pattern": "^[a-f0-9]{64}$",
           "description": "SHA-256 checksum of the file for integrity verification"
         },
+        "zipalign_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Direct download URL for the zipalign binary for this release"
+        },
+        "zipalign_size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "File size of the zipalign binary in bytes"
+        },
+        "zipalign_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 checksum of the zipalign binary"
+        },
         "gpu_libs": {
           "$ref": "#/$defs/GpuLibs",
           "description": "Optional GPU library downloads for this release"

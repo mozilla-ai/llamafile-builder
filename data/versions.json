@@ -15,6 +15,9 @@
           "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10.0/resolve/main/llamafile_thin_0.10.0",
           "size_bytes": 30845952,
           "sha256": "6e124c7298e3971081981f022189f714e15c6a8c0977954f98a9c0948a164e20",
+          "zipalign_url": "https://github.com/mozilla-ai/llamafile/releases/download/0.10.0/zipalign-0.10.0",
+          "zipalign_size_bytes": 851513,
+          "zipalign_sha256": "7eac59c658226027b365d92131babf06341f746fb20c0db33115bbdf5c5c6c4b",
           "gpu_libs": {
             "cuda": {
               "linux": {
@@ -45,7 +48,8 @@
           "release_date": "2025-05-14",
           "download_url": "https://github.com/mozilla-ai/llamafile/releases/download/0.9.3/llamafile-0.9.3",
           "size_bytes": 307741491,
-          "sha256": "c62b303d2fa6ca6829f10cf9b3c9bfae38a28182eacea92502a399b90547b24b"
+          "sha256": "c62b303d2fa6ca6829f10cf9b3c9bfae38a28182eacea92502a399b90547b24b",
+          "zipalign_url": "https://github.com/mozilla-ai/llamafile/releases/download/0.9.3/zipalign-0.9.3"
         },
         {
           "version": "0.9.2",
@@ -53,7 +57,8 @@
           "release_date": "2024-12-15",
           "download_url": "https://github.com/mozilla-ai/llamafile/releases/download/0.9.2/llamafile-0.9.2",
           "size_bytes": 307675955,
-          "sha256": "5f75c5bb5b4b120e27a8f964d95fab3ccb994099909d6ee512a06b7c33bcdea2"
+          "sha256": "5f75c5bb5b4b120e27a8f964d95fab3ccb994099909d6ee512a06b7c33bcdea2",
+          "zipalign_url": "https://github.com/mozilla-ai/llamafile/releases/download/0.9.2/zipalign-0.9.2"
         }
       ]
     }
