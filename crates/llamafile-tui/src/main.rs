@@ -21,7 +21,6 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 use llamafile_core::config_manager::ConfigManager;
-use llamafile_core::models::{GpuAccel, Os};
 
 use app::{App, BuildStatus, LogEntry, LogLevel};
 
@@ -47,30 +46,6 @@ fn get_cache_dir() -> PathBuf {
     get_config_dir().join("cache")
 }
 
-pub fn parse_gpu_spec(spec: &str) -> Result<(GpuAccel, Vec<Os>), String> {
-    let parts: Vec<&str> = spec.split(':').collect();
-    let accel = match parts[0].to_lowercase().as_str() {
-        "cuda" => GpuAccel::Cuda,
-        "rocm" => GpuAccel::Rocm,
-        "vulkan" => GpuAccel::Vulkan,
-        other => return Err(format!("Unknown GPU type: '{}'", other)),
-    };
-    let os_list = if parts.len() > 1 {
-        match parts[1].to_lowercase().as_str() {
-            "linux" => vec![Os::Linux],
-            "windows" => vec![Os::Windows],
-            "all" => vec![Os::Linux, Os::Windows],
-            other => return Err(format!("Unknown OS: '{}'", other)),
-        }
-    } else if cfg!(target_os = "linux") {
-        vec![Os::Linux]
-    } else if cfg!(target_os = "windows") {
-        vec![Os::Windows]
-    } else {
-        vec![Os::Linux]
-    };
-    Ok((accel, os_list))
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
