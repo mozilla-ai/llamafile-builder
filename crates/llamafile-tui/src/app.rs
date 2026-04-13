@@ -596,3 +596,209 @@ impl App {
         self.validation_errors().is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn test_config() -> BuilderConfig {
+        BuilderConfig {
+            versions: llamafile_core::config_manager::parse_config_data(
+                include_str!("../../../data/versions.json"),
+            ).unwrap(),
+            models: llamafile_core::config_manager::parse_config_data(
+                include_str!("../../../data/models.json"),
+            ).unwrap(),
+            config_schema: llamafile_core::config_manager::parse_config_data(
+                include_str!("../../../data/config.json"),
+            ).unwrap(),
+            config_version: 1,
+            min_builder_version: None,
+        }
+    }
+
+    fn test_app() -> App {
+        App::new(test_config(), PathBuf::from("/tmp/test-cache"))
+    }
+
+    // ── Defaults ──
+
+    #[test]
+    fn new_app_selects_default_version_and_model() {
+        let app = test_app();
+        assert!(app.version_group.is_some(), "should have a default version group");
+        assert!(app.version.is_some(), "should have a default version");
+        assert!(app.model_id.is_some(), "should have a default model");
+        assert_eq!(app.model_source, ModelTab::Registry);
+    }
+
+    #[test]
+    fn new_app_can_build() {
+        let app = test_app();
+        assert!(app.can_build(), "default state should be buildable");
+    }
+
+    #[test]
+    fn effective_output_has_llamafile_extension() {
+        let app = test_app();
+        assert!(app.effective_output().ends_with(".llamafile"));
+    }
+
+    // ── Focus navigation ──
+
+    #[test]
+    fn focus_next_wraps_around() {
+        let focus = Focus::Quit.next(false, false, false);
+        assert_eq!(focus, Focus::Version);
+    }
+
+    #[test]
+    fn focus_prev_wraps_around() {
+        let focus = Focus::Version.prev(false, false, false);
+        assert_eq!(focus, Focus::Quit);
+    }
+
+    #[test]
+    fn focus_skips_mmproj_when_no_mmproj() {
+        let focus = Focus::Weights.next(false, false, false);
+        assert_eq!(focus, Focus::Output, "should skip Mmproj");
+    }
+
+    #[test]
+    fn focus_includes_mmproj_when_present() {
+        let focus = Focus::Weights.next(true, false, false);
+        assert_eq!(focus, Focus::Mmproj);
+    }
+
+    #[test]
+    fn focus_skips_config_when_args_overridden() {
+        let focus = Focus::Output.next(false, true, false);
+        assert_eq!(focus, Focus::Gpu, "should skip Config");
+    }
+
+    #[test]
+    fn focus_skips_weights_and_mmproj_for_local_model() {
+        let focus = Focus::Model.next(true, false, true);
+        assert_eq!(focus, Focus::Output, "should skip Weights and Mmproj");
+    }
+
+    #[test]
+    fn focus_prev_skips_weights_for_local_model() {
+        let focus = Focus::Output.prev(true, false, true);
+        assert_eq!(focus, Focus::Model, "should skip Mmproj and Weights");
+    }
+
+    // ── Model source switching ──
+
+    #[test]
+    fn selecting_ollama_clears_registry_model() {
+        let mut app = test_app();
+        assert!(app.model_id.is_some());
+
+        app.model_source = ModelTab::Ollama;
+        app.ollama_model = Some(OllamaModel {
+            model_name: "llama3".to_string(),
+            tag: "8b".to_string(),
+            display_name: "llama3:8b".to_string(),
+            weights_path: "/path/to/blob".to_string(),
+            size_bytes: 4_000_000_000,
+        });
+        app.model_id = None;
+
+        assert!(app.is_local_model());
+        assert!(app.selected_model().is_none(), "registry model should be None");
+        assert!(!app.has_mmproj(), "Ollama model has no mmproj");
+    }
+
+    #[test]
+    fn ollama_model_sets_output_filename() {
+        let mut app = test_app();
+        app.model_source = ModelTab::Ollama;
+        app.model_id = None;
+        app.ollama_model = Some(OllamaModel {
+            model_name: "llama3".to_string(),
+            tag: "8b".to_string(),
+            display_name: "llama3:8b".to_string(),
+            weights_path: "/path".to_string(),
+            size_bytes: 1,
+        });
+        app.output_path = None;
+        assert!(app.effective_output().ends_with("llama3_8b.llamafile"));
+    }
+
+    #[test]
+    fn lmstudio_model_sets_output_filename() {
+        let mut app = test_app();
+        app.model_source = ModelTab::LmStudio;
+        app.model_id = None;
+        app.lmstudio_model = Some(LMStudioModel {
+            dir_name: "org/model-name".to_string(),
+            display_name: "Model Name".to_string(),
+            dir_path: "/path".to_string(),
+            files: vec![],
+            total_size_bytes: 1,
+        });
+        app.output_path = None;
+        assert!(app.effective_output().ends_with("org_model-name.llamafile"));
+    }
+
+    #[test]
+    fn explicit_output_path_overrides_auto() {
+        let mut app = test_app();
+        app.output_path = Some("/custom/output.llamafile".to_string());
+        assert_eq!(app.effective_output(), "/custom/output.llamafile");
+    }
+
+    // ── GPU libs ──
+
+    #[test]
+    fn available_gpu_libs_from_selected_release() {
+        let app = test_app();
+        let libs = app.available_gpu_libs();
+        // The default release should have at least CUDA and/or ROCm
+        assert!(!libs.is_empty(), "default release should have GPU libs");
+        for lib in &libs {
+            assert!(lib.size > 0);
+        }
+    }
+
+    // ── Model tab navigation ──
+
+    #[test]
+    fn model_tab_cycles() {
+        assert_eq!(ModelTab::Registry.next(), ModelTab::Ollama);
+        assert_eq!(ModelTab::Ollama.next(), ModelTab::LmStudio);
+        assert_eq!(ModelTab::LmStudio.next(), ModelTab::Registry);
+        assert_eq!(ModelTab::Registry.prev(), ModelTab::LmStudio);
+    }
+
+    // ── Log filtering ──
+
+    #[test]
+    fn log_level_filtering() {
+        let mut app = test_app();
+        app.add_log(LogLevel::Debug, "debug msg".to_string());
+        app.add_log(LogLevel::Info, "info msg".to_string());
+        app.add_log(LogLevel::Error, "error msg".to_string());
+
+        app.log_level = LogLevel::Info;
+        assert_eq!(app.filtered_logs().len(), 2);
+
+        app.log_level = LogLevel::Error;
+        assert_eq!(app.filtered_logs().len(), 1);
+
+        app.log_level = LogLevel::Debug;
+        assert_eq!(app.filtered_logs().len(), 3);
+    }
+
+    #[test]
+    fn log_capped_at_1000() {
+        let mut app = test_app();
+        for i in 0..1100 {
+            app.add_log(LogLevel::Info, format!("msg {}", i));
+        }
+        assert_eq!(app.logs.len(), 1000);
+        assert!(app.logs.last().unwrap().message.contains("1099"));
+    }
+}
