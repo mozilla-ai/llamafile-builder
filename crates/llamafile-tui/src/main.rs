@@ -309,12 +309,8 @@ async fn run_app(
                             builder.set_output_path(std::path::Path::new(path));
                         }
 
-                        for spec in &gpu_libs {
-                            if let Ok((accel, os_list)) = crate::parse_gpu_spec(spec) {
-                                for os in os_list {
-                                    builder.add_gpu_lib(accel, os);
-                                }
-                            }
+                        for &(accel, os) in &gpu_libs {
+                            builder.add_gpu_lib(accel, os);
                         }
 
                         if let Some(ref path) = custom_zipalign {

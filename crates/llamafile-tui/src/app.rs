@@ -6,6 +6,32 @@ use llamafile_core::models::*;
 use llamafile_core::cache::Cache;
 use llamafile_core::Builder;
 
+/// An available GPU library from the selected release.
+#[derive(Debug, Clone)]
+pub struct GpuLibOption {
+    pub accel: GpuAccel,
+    pub os: Os,
+    pub size: u64,
+}
+
+impl GpuLibOption {
+    pub fn label(&self) -> String {
+        let accel_desc = match self.accel {
+            GpuAccel::Cuda => "CUDA — NVIDIA GPUs",
+            GpuAccel::Rocm => "ROCm — AMD GPUs",
+            GpuAccel::Vulkan => "Vulkan",
+        };
+        let os_desc = match self.os {
+            Os::Linux => "Linux (.so)",
+            Os::Windows => "Windows (.dll)",
+        };
+        format!(
+            "{} — {} — {}",
+            accel_desc, os_desc, format_size(self.size),
+        )
+    }
+}
+
 /// Which section of the dashboard is focused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -104,7 +130,7 @@ pub enum Popup {
         dropdown_open: bool,
         dropdown_selected: usize,
     },
-    GpuEdit { specs: Vec<String>, selected: usize, adding: bool, add_buf: String },
+    GpuSelect { available: Vec<GpuLibOption>, selected: Vec<bool>, cursor: usize },
     ArgsEdit { textarea: tui_textarea::TextArea<'static>, original: String },
     Confirm { message: String, action: ConfirmAction },
 }
@@ -191,7 +217,7 @@ pub struct App {
     pub quantizations: HashMap<String, String>,
     pub config_values: HashMap<String, serde_json::Value>,
     pub output_path: Option<String>,
-    pub gpu_libs: Vec<String>,
+    pub gpu_libs: Vec<(GpuAccel, Os)>,
     pub custom_zipalign: Option<String>,
     pub args_file: Option<String>,
     pub args_override: Option<String>,
@@ -406,12 +432,8 @@ impl App {
         }
 
         // GPU
-        for spec in &self.gpu_libs {
-            if let Ok((accel, os_list)) = crate::parse_gpu_spec(spec) {
-                for os in os_list {
-                    builder.add_gpu_lib(accel, os);
-                }
-            }
+        for &(accel, os) in &self.gpu_libs {
+            builder.add_gpu_lib(accel, os);
         }
 
         // Custom zipalign
@@ -434,6 +456,41 @@ impl App {
         }
 
         Ok(builder)
+    }
+
+    /// Get the currently selected release.
+    pub fn selected_release(&self) -> Option<&LlamafileRelease> {
+        let group_name = self.version_group.as_ref()?;
+        let version = self.version.as_ref()?;
+        let group = self.config.versions.iter().find(|g| &g.name == group_name)?;
+        group.releases.iter().find(|r| &r.version == version)
+    }
+
+    /// Enumerate GPU libraries available in the selected release.
+    pub fn available_gpu_libs(&self) -> Vec<GpuLibOption> {
+        let mut out = Vec::new();
+        let release = match self.selected_release() {
+            Some(r) => r,
+            None => return out,
+        };
+        let gpu_libs = match release.gpu_libs.as_ref() {
+            Some(g) => g,
+            None => return out,
+        };
+        for (accel, by_platform) in [
+            (GpuAccel::Cuda, gpu_libs.cuda.as_ref()),
+            (GpuAccel::Rocm, gpu_libs.rocm.as_ref()),
+        ] {
+            if let Some(bp) = by_platform {
+                if let Some(lib) = &bp.linux {
+                    out.push(GpuLibOption { accel, os: Os::Linux, size: lib.size_bytes });
+                }
+                if let Some(lib) = &bp.windows {
+                    out.push(GpuLibOption { accel, os: Os::Windows, size: lib.size_bytes });
+                }
+            }
+        }
+        out
     }
 
     pub fn add_log(&mut self, level: LogLevel, msg: String) {

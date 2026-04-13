@@ -51,7 +51,7 @@ pub fn handle_key(app: &mut App, key: event::KeyEvent) -> bool {
         Popup::QuantSelect { .. } => handle_quant_popup(app, key),
         Popup::OutputEdit { .. } => handle_input_popup(app, key),
         Popup::ConfigEdit { .. } => handle_config_popup(app, key),
-        Popup::GpuEdit { .. } => handle_gpu_popup(app, key),
+        Popup::GpuSelect { .. } => handle_gpu_popup(app, key),
         Popup::ArgsEdit { .. } => handle_args_edit(app, key),
         Popup::Confirm { .. } => handle_confirm_popup(app, key),
     }
@@ -135,11 +135,14 @@ fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
                     open_config_popup(app);
                 }
                 Focus::Gpu => {
-                    app.popup = Popup::GpuEdit {
-                        specs: app.gpu_libs.clone(),
-                        selected: 0,
-                        adding: false,
-                        add_buf: String::new(),
+                    let available = app.available_gpu_libs();
+                    let selected: Vec<bool> = available.iter()
+                        .map(|opt| app.gpu_libs.contains(&(opt.accel, opt.os)))
+                        .collect();
+                    app.popup = Popup::GpuSelect {
+                        available,
+                        selected,
+                        cursor: 0,
                     };
                 }
                 Focus::Build => {
@@ -461,58 +464,34 @@ fn handle_config_popup(app: &mut App, key: event::KeyEvent) -> bool {
 }
 
 fn handle_gpu_popup(app: &mut App, key: event::KeyEvent) -> bool {
-    if let Popup::GpuEdit {
-        ref mut specs,
+    if let Popup::GpuSelect {
+        ref available,
         ref mut selected,
-        ref mut adding,
-        ref mut add_buf,
+        ref mut cursor,
     } = app.popup
     {
-        if *adding {
-            match key.code {
-                KeyCode::Enter => {
-                    if !add_buf.is_empty() {
-                        // Validate
-                        if crate::parse_gpu_spec(add_buf).is_ok() {
-                            if !specs.contains(add_buf) {
-                                specs.push(add_buf.clone());
-                            }
-                        }
-                    }
-                    *adding = false;
-                    add_buf.clear();
+        let len = available.len();
+        match key.code {
+            KeyCode::Up => *cursor = cursor.saturating_sub(1),
+            KeyCode::Down => {
+                if len > 0 {
+                    *cursor = (*cursor + 1).min(len - 1);
                 }
-                KeyCode::Esc => {
-                    *adding = false;
-                    add_buf.clear();
-                }
-                KeyCode::Backspace => {
-                    add_buf.pop();
-                }
-                KeyCode::Char(c) => add_buf.push(c),
-                _ => {}
             }
-        } else {
-            match key.code {
-                KeyCode::Up => *selected = selected.saturating_sub(1),
-                KeyCode::Down => {
-                    *selected = (*selected + 1).min(specs.len().saturating_sub(1))
+            KeyCode::Char(' ') | KeyCode::Enter => {
+                if *cursor < selected.len() {
+                    selected[*cursor] = !selected[*cursor];
                 }
-                KeyCode::Char('a') => *adding = true,
-                KeyCode::Char('d') | KeyCode::Delete => {
-                    if *selected < specs.len() {
-                        specs.remove(*selected);
-                        if *selected >= specs.len() && *selected > 0 {
-                            *selected -= 1;
-                        }
-                    }
-                }
-                KeyCode::Esc => {
-                    app.gpu_libs = specs.clone();
-                    app.popup = Popup::None;
-                }
-                _ => {}
             }
+            KeyCode::Esc => {
+                // Apply selections back to app state
+                app.gpu_libs = available.iter().zip(selected.iter())
+                    .filter(|(_, &checked)| checked)
+                    .map(|(opt, _)| (opt.accel, opt.os))
+                    .collect();
+                app.popup = Popup::None;
+            }
+            _ => {}
         }
     }
     true

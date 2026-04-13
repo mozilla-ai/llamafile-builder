@@ -1,7 +1,9 @@
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 
+use crate::app;
 use crate::app::*;
+use llamafile_core::models::{GpuAccel, Os};
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let chunks = if app.log_expanded {
@@ -36,8 +38,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Popup::ConfigEdit { entries, selected, editing, edit_buf, dropdown_open, dropdown_selected } => {
             draw_config_popup_full(frame, app, entries, *selected, *editing, edit_buf, *dropdown_open, *dropdown_selected)
         }
-        Popup::GpuEdit { specs, selected, adding, add_buf } => {
-            draw_gpu_popup(frame, specs, *selected, *adding, add_buf)
+        Popup::GpuSelect { available, selected, cursor } => {
+            draw_gpu_popup(frame, available, selected, *cursor)
         }
         Popup::ArgsEdit { textarea, .. } => {
             let area = centered_rect(72, 22, frame.area());
@@ -170,7 +172,18 @@ fn draw_dashboard(frame: &mut Frame, app: &App, area: Rect) {
     let gpu = if app.gpu_libs.is_empty() {
         "(none)".to_string()
     } else {
-        app.gpu_libs.join(", ")
+        app.gpu_libs.iter().map(|(accel, os)| {
+            let a = match accel {
+                GpuAccel::Cuda => "CUDA",
+                GpuAccel::Rocm => "ROCm",
+                GpuAccel::Vulkan => "Vulkan",
+            };
+            let o = match os {
+                Os::Linux => "Linux",
+                Os::Windows => "Windows",
+            };
+            format!("{}:{}", a, o)
+        }).collect::<Vec<_>>().join(", ")
     };
     let label = format!(" {} GPU        {}", marker, gpu);
     frame.render_widget(Paragraph::new(label).style(style_for(Focus::Gpu)), rows[row_idx]);
@@ -622,59 +635,43 @@ fn draw_config_popup_full(
 
 fn draw_gpu_popup(
     frame: &mut Frame,
-    specs: &[String],
-    selected: usize,
-    adding: bool,
-    add_buf: &str,
+    available: &[app::GpuLibOption],
+    selected: &[bool],
+    cursor: usize,
 ) {
-    let height = (specs.len() + 6).min(14) as u16;
+    let height = (available.len() + 4).max(5).min(14) as u16;
     let area = centered_rect(55, height, frame.area());
     frame.render_widget(Clear, area);
-    let help = if adding {
-        " Type spec (cuda, rocm:linux)  Enter=add  Esc=cancel "
-    } else {
-        " a=add  d=delete  ↑↓=navigate  Esc=close "
-    };
     let block = Block::bordered()
         .title(" GPU Libraries ")
-        .title_bottom(help);
+        .title_bottom(" Space=toggle  ↑↓=navigate  Esc=close ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let rows = Layout::vertical([
-        Constraint::Min(1),
-        Constraint::Length(if adding { 1 } else { 0 }),
-    ])
-    .split(inner);
-
-    if specs.is_empty() && !adding {
+    if available.is_empty() {
         frame.render_widget(
-            Paragraph::new("  (none) — press 'a' to add")
+            Paragraph::new("  No GPU libraries available for this release")
                 .style(Style::default().fg(Color::DarkGray)),
-            rows[0],
+            inner,
         );
     } else {
-        let items: Vec<ListItem> = specs
+        let items: Vec<ListItem> = available
             .iter()
             .enumerate()
-            .map(|(i, s)| {
-                let style = if i == selected {
+            .map(|(i, opt)| {
+                let checked = selected.get(i).copied().unwrap_or(false);
+                let marker = if checked { "[x]" } else { "[ ]" };
+                let style = if i == cursor {
                     Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else if checked {
+                    Style::default().fg(Color::Green)
                 } else {
                     Style::default()
                 };
-                ListItem::new(format!("  {}", s)).style(style)
+                ListItem::new(format!("  {} {}", marker, opt.label())).style(style)
             })
             .collect();
-        frame.render_widget(List::new(items), rows[0]);
-    }
-
-    if adding {
-        let text = format!(" Add: {}_", add_buf);
-        frame.render_widget(
-            Paragraph::new(text).style(Style::default().fg(Color::Cyan)),
-            rows[1],
-        );
+        frame.render_widget(List::new(items), inner);
     }
 }
 
