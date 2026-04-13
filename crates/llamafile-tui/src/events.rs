@@ -113,25 +113,7 @@ fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
                     app.popup = Popup::OutputEdit { input: current };
                 }
                 Focus::Config => {
-                    let defaults =
-                        llamafile_core::args::default_config_values(&app.config.config_schema);
-                    let mut entries: Vec<(String, String)> = defaults
-                        .iter()
-                        .map(|(k, v)| {
-                            let val = app
-                                .config_values
-                                .get(k)
-                                .unwrap_or(v);
-                            (k.clone(), val.to_string())
-                        })
-                        .collect();
-                    entries.sort_by(|a, b| a.0.cmp(&b.0));
-                    app.popup = Popup::ConfigEdit {
-                        entries,
-                        selected: 0,
-                        editing: false,
-                        edit_buf: String::new(),
-                    };
+                    open_config_popup(app);
                 }
                 Focus::Gpu => {
                     app.popup = Popup::GpuEdit {
@@ -280,21 +262,48 @@ fn handle_input_popup(app: &mut App, key: event::KeyEvent) -> bool {
 }
 
 fn handle_config_popup(app: &mut App, key: event::KeyEvent) -> bool {
+    use crate::config_ui::ConfigEntry;
+
     if let Popup::ConfigEdit {
-        ref mut entries,
+        ref entries,
         ref mut selected,
         ref mut editing,
         ref mut edit_buf,
+        ref mut dropdown_open,
+        ref mut dropdown_selected,
     } = app.popup
     {
-        if *editing {
+        let entries_clone = entries.clone();
+        let entry = entries_clone.get(*selected);
+
+        if *dropdown_open {
+            // Dropdown selection mode
+            if let Some(ConfigEntry::Dropdown { key: k, options, .. }) = entry {
+                match key.code {
+                    KeyCode::Up => *dropdown_selected = dropdown_selected.saturating_sub(1),
+                    KeyCode::Down => *dropdown_selected = (*dropdown_selected + 1).min(options.len().saturating_sub(1)),
+                    KeyCode::Enter => {
+                        if let Some(opt) = options.get(*dropdown_selected) {
+                            let val: serde_json::Value = serde_json::from_str(opt)
+                                .unwrap_or_else(|_| serde_json::Value::String(opt.clone()));
+                            app.config_values.insert(k.clone(), val);
+                        }
+                        *dropdown_open = false;
+                    }
+                    KeyCode::Esc => *dropdown_open = false,
+                    _ => {}
+                }
+            }
+        } else if *editing {
+            // Text/number editing mode
             match key.code {
                 KeyCode::Enter => {
-                    if let Some((key_name, _)) = entries.get(*selected) {
-                        let parsed: serde_json::Value = serde_json::from_str(edit_buf)
-                            .unwrap_or_else(|_| serde_json::Value::String(edit_buf.clone()));
-                        app.config_values.insert(key_name.clone(), parsed.clone());
-                        entries[*selected].1 = parsed.to_string();
+                    if let Some(entry) = entry {
+                        if let Some(k) = entry.key() {
+                            let parsed: serde_json::Value = serde_json::from_str(edit_buf)
+                                .unwrap_or_else(|_| serde_json::Value::String(edit_buf.clone()));
+                            app.config_values.insert(k.to_string(), parsed);
+                        }
                     }
                     *editing = false;
                     edit_buf.clear();
@@ -303,22 +312,113 @@ fn handle_config_popup(app: &mut App, key: event::KeyEvent) -> bool {
                     *editing = false;
                     edit_buf.clear();
                 }
-                KeyCode::Backspace => {
-                    edit_buf.pop();
-                }
+                KeyCode::Backspace => { edit_buf.pop(); }
                 KeyCode::Char(c) => edit_buf.push(c),
                 _ => {}
             }
         } else {
+            // Navigation mode
             match key.code {
-                KeyCode::Up => *selected = selected.saturating_sub(1),
-                KeyCode::Down => {
-                    *selected = (*selected + 1).min(entries.len().saturating_sub(1))
+                KeyCode::Up => {
+                    // Skip non-interactive entries going up
+                    let mut idx = selected.saturating_sub(1);
+                    while idx > 0 && !entries_clone.get(idx).map(|e| e.is_interactive()).unwrap_or(false) {
+                        idx -= 1;
+                    }
+                    if entries_clone.get(idx).map(|e| e.is_interactive()).unwrap_or(false) {
+                        *selected = idx;
+                    }
                 }
-                KeyCode::Enter => {
-                    if let Some((_, val)) = entries.get(*selected) {
-                        *edit_buf = val.clone();
-                        *editing = true;
+                KeyCode::Down => {
+                    let mut idx = *selected + 1;
+                    while idx < entries_clone.len() && !entries_clone.get(idx).map(|e| e.is_interactive()).unwrap_or(false) {
+                        idx += 1;
+                    }
+                    if idx < entries_clone.len() {
+                        *selected = idx;
+                    }
+                }
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    if let Some(entry) = entry {
+                        let defaults = llamafile_core::args::default_config_values(&app.config.config_schema);
+                        let mut need_rebuild = false;
+                        match entry {
+                            ConfigEntry::SectionHeader { toggle_key: Some(k), .. } => {
+                                let current = app.config_values.get(k)
+                                    .or_else(|| defaults.get(k))
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(true);
+                                app.config_values.insert(k.clone(), serde_json::Value::Bool(!current));
+                                need_rebuild = true; // section expanded/collapsed
+                            }
+                            ConfigEntry::Bool { key: k, .. } => {
+                                let current = app.config_values.get(k)
+                                    .or_else(|| defaults.get(k))
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false);
+                                app.config_values.insert(k.clone(), serde_json::Value::Bool(!current));
+                            }
+                            ConfigEntry::Dropdown { .. } => {
+                                if let ConfigEntry::Dropdown { ref options, .. } = entry {
+                                    let current = entry.format_value(&app.config_values, &defaults);
+                                    let idx = options.iter().position(|o| *o == current).unwrap_or(0);
+                                    *dropdown_selected = idx;
+                                    *dropdown_open = true;
+                                }
+                            }
+                            ConfigEntry::Slider { .. } => {
+                                let current = entry.format_value(&app.config_values, &defaults);
+                                *edit_buf = current;
+                                *editing = true;
+                            }
+                            ConfigEntry::Text { .. } => {
+                                let current = entry.format_value(&app.config_values, &defaults);
+                                *edit_buf = current;
+                                *editing = true;
+                            }
+                            _ => {}
+                        }
+                        if need_rebuild {
+                            // Rebuild entries to show/hide section contents
+                            let sel_label = entries_clone.get(*selected).map(|e| e.label().to_string());
+                            rebuild_config_entries(app);
+                            // Try to keep selection on the same entry
+                            if let Popup::ConfigEdit { ref entries, ref mut selected, .. } = app.popup {
+                                if let Some(label) = sel_label {
+                                    if let Some(idx) = entries.iter().position(|e| e.label() == label) {
+                                        *selected = idx;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                KeyCode::Left => {
+                    // Decrease slider value
+                    if let Some(ConfigEntry::Slider { key: k, min, step, .. }) = entry {
+                        let defaults = llamafile_core::args::default_config_values(&app.config.config_schema);
+                        let current = app.config_values.get(k)
+                            .or_else(|| defaults.get(k))
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(*min);
+                        let new_val = (current - step).max(*min);
+                        let val = serde_json::Number::from_f64(new_val)
+                            .unwrap_or(serde_json::Number::from(0));
+                        app.config_values.insert(k.clone(), serde_json::Value::Number(val));
+                    }
+                }
+                KeyCode::Right => {
+                    // Increase slider value
+                    if let Some(ConfigEntry::Slider { key: k, max, step, .. }) = entry {
+                        let defaults = llamafile_core::args::default_config_values(&app.config.config_schema);
+                        let current = app.config_values.get(k)
+                            .or_else(|| defaults.get(k))
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(0.0);
+                        let new_val = (current + step).min(*max);
+                        let val = serde_json::Number::from_f64(new_val)
+                            .unwrap_or(serde_json::Number::from(0));
+                        app.config_values.insert(k.clone(), serde_json::Value::Number(val));
                     }
                 }
                 KeyCode::Esc => app.popup = Popup::None,
@@ -385,6 +485,28 @@ fn handle_gpu_popup(app: &mut App, key: event::KeyEvent) -> bool {
         }
     }
     true
+}
+
+fn open_config_popup(app: &mut App) {
+    let defaults = llamafile_core::args::default_config_values(&app.config.config_schema);
+    let entries = crate::config_ui::flatten_schema(&app.config.config_schema, &app.config_values, &defaults);
+    let first_interactive = entries.iter().position(|e| e.is_interactive()).unwrap_or(0);
+    app.popup = Popup::ConfigEdit {
+        entries,
+        selected: first_interactive,
+        editing: false,
+        edit_buf: String::new(),
+        dropdown_open: false,
+        dropdown_selected: 0,
+    };
+}
+
+fn rebuild_config_entries(app: &mut App) {
+    let defaults = llamafile_core::args::default_config_values(&app.config.config_schema);
+    let entries = crate::config_ui::flatten_schema(&app.config.config_schema, &app.config_values, &defaults);
+    if let Popup::ConfigEdit { entries: ref mut e, .. } = app.popup {
+        *e = entries;
+    }
 }
 
 fn handle_confirm_popup(app: &mut App, key: event::KeyEvent) -> bool {

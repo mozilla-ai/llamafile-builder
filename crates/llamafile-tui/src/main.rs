@@ -1,4 +1,5 @@
 mod app;
+mod config_ui;
 mod events;
 mod log_layer;
 mod ui;

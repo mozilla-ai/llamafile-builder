@@ -33,8 +33,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
             draw_quant_popup(frame, role, options, *selected)
         }
         Popup::OutputEdit { input } => draw_input_popup(frame, "Output Path", input),
-        Popup::ConfigEdit { entries, selected, editing, edit_buf } => {
-            draw_config_popup(frame, entries, *selected, *editing, edit_buf)
+        Popup::ConfigEdit { entries, selected, editing, edit_buf, dropdown_open, dropdown_selected } => {
+            draw_config_popup_full(frame, app, entries, *selected, *editing, edit_buf, *dropdown_open, *dropdown_selected)
         }
         Popup::GpuEdit { specs, selected, adding, add_buf } => {
             draw_gpu_popup(frame, specs, *selected, *adding, add_buf)
@@ -410,45 +410,116 @@ fn draw_input_popup(frame: &mut Frame, title: &str, input: &str) {
     );
 }
 
-fn draw_config_popup(
+fn draw_config_popup_full(
     frame: &mut Frame,
-    entries: &[(String, String)],
+    app: &App,
+    entries: &[crate::config_ui::ConfigEntry],
     selected: usize,
     editing: bool,
     edit_buf: &str,
+    dropdown_open: bool,
+    dropdown_selected: usize,
 ) {
-    let height = (entries.len() + 4).min(22) as u16;
-    let area = centered_rect(65, height, frame.area());
+    use crate::config_ui::ConfigEntry;
+
+    let defaults = llamafile_core::args::default_config_values(&app.config.config_schema);
+
+    let height = (entries.len() + 5).min(22) as u16;
+    let area = centered_rect(68, height, frame.area());
     frame.render_widget(Clear, area);
-    let help = if editing {
+
+    let desc = entries.get(selected).map(|e| e.description()).unwrap_or("");
+    let help = if dropdown_open {
+        " ↑↓=navigate  Enter=select  Esc=cancel "
+    } else if editing {
         " Type value  Enter=save  Esc=cancel "
+    } else if entries.get(selected).map(|e| matches!(e, ConfigEntry::Slider { .. })).unwrap_or(false) {
+        " ←→=adjust  Enter=type value  Esc=close "
     } else {
-        " ↑↓=navigate  Enter=edit  Esc=close "
+        " ↑↓=navigate  Enter/Space=toggle/edit  Esc=close "
     };
     let block = Block::bordered()
-        .title(" Edit Configuration ")
+        .title(" Configuration ")
         .title_bottom(help);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    let rows = Layout::vertical([
+        Constraint::Length(1), // description
+        Constraint::Length(1), // blank
+        Constraint::Min(1),   // entries
+    ]).split(inner);
+
+    frame.render_widget(
+        Paragraph::new(format!(" {}", desc)).style(Style::default().fg(Color::Cyan)),
+        rows[0],
+    );
+
     let list_items: Vec<ListItem> = entries
         .iter()
         .enumerate()
-        .map(|(i, (key, val))| {
-            let style = if i == selected {
+        .map(|(i, entry)| {
+            let is_selected = i == selected;
+            let indent = "  ".repeat(entry.indent());
+            let value = entry.format_value(&app.config_values, &defaults);
+            let marker = if is_selected && entry.is_interactive() { ">" } else { " " };
+
+            let line = match entry {
+                ConfigEntry::SectionHeader { label, toggle_key: Some(_), .. } => {
+                    format!("{} {} ── {} ──", marker, value, label)
+                }
+                ConfigEntry::SectionHeader { label, toggle_key: None, .. } => {
+                    format!("      ── {} ──", label)
+                }
+                ConfigEntry::Bool { label, .. } => {
+                    format!("{}  {} {} {}", marker, indent, value, label)
+                }
+                _ if editing && is_selected => {
+                    format!("{}  {} {}: {}_", marker, indent, entry.label(), edit_buf)
+                }
+                _ => {
+                    format!("{}  {} {}: {}", marker, indent, entry.label(), value)
+                }
+            };
+
+            let style = if is_selected && entry.is_interactive() {
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else if matches!(entry, ConfigEntry::SectionHeader { .. }) {
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
-            let display = if editing && i == selected {
-                format!("  {} = {}_", key, edit_buf)
-            } else {
-                format!("  {} = {}", key, val)
-            };
-            ListItem::new(display).style(style)
+
+            ListItem::new(line).style(style)
         })
         .collect();
-    frame.render_widget(List::new(list_items), inner);
+    frame.render_widget(List::new(list_items), rows[2]);
+
+    // Draw dropdown overlay if open
+    if dropdown_open {
+        if let Some(ConfigEntry::Dropdown { options, .. }) = entries.get(selected) {
+            let dd_height = (options.len() + 2).min(10) as u16;
+            let dd_area = centered_rect(30, dd_height, frame.area());
+            frame.render_widget(Clear, dd_area);
+            let dd_block = Block::bordered().title(" Select ");
+            let dd_inner = dd_block.inner(dd_area);
+            frame.render_widget(dd_block, dd_area);
+
+            let dd_items: Vec<ListItem> = options
+                .iter()
+                .enumerate()
+                .map(|(i, opt)| {
+                    let style = if i == dropdown_selected {
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    };
+                    ListItem::new(format!("  {}", opt)).style(style)
+                })
+                .collect();
+            frame.render_widget(List::new(dd_items), dd_inner);
+        }
+    }
 }
 
 fn draw_gpu_popup(

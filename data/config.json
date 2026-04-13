@@ -12,7 +12,7 @@
       "label": "Inference",
       "description": "Set up inference parameters",
       "items": [
-        { "type": "dropdown", "key": "context_length", "label": "Context Length", "description": "Maximum context window size", "default": 4096, "options": [2048, 4096, 8192, 16384, 32768, 65536, 131072], "flag": "--ctx-size" },
+        { "type": "dropdown", "key": "context_length", "label": "Context Length", "description": "Maximum context window size", "default": 16384, "options": [2048, 4096, 8192, 16384, 32768, 65536, 131072], "flag": "--ctx-size" },
         { "type": "slider", "key": "temperature", "label": "Temperature", "description": "Sampling temperature for generation", "default": 0.7, "min": 0, "max": 2, "step": 0.1, "flag": "--temp" }
       ]
     },
@@ -23,7 +23,7 @@
       "flag": "--server",
       "label": "Server Mode",
       "description": "Run as an HTTP server with OpenAI-compatible API",
-      "default": true,
+      "default": false,
       "items": [
         { "type": "text", "key": "host", "label": "Listen Host", "description": "Network interface to bind to", "default": "127.0.0.1", "value_type": "string", "flag": "--host" },
         { "type": "text", "key": "port", "label": "Port", "description": "HTTP server port", "default": 8080, "value_type": "number", "flag": "--port" },
