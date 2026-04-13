@@ -87,12 +87,32 @@ fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
         KeyCode::Enter => {
             match app.focus {
                 Focus::Version => {
-                    app.popup = Popup::VersionSelect { selected: 0 };
+                    // Find index of currently selected version in the flat list
+                    let mut idx = 0;
+                    let mut found = false;
+                    for group in &app.config.versions {
+                        for release in &group.releases {
+                            if Some(&group.name) == app.version_group.as_ref()
+                                && Some(&release.version) == app.version.as_ref()
+                            {
+                                found = true;
+                                break;
+                            }
+                            idx += 1;
+                        }
+                        if found { break; }
+                    }
+                    if !found { idx = 0; }
+                    app.popup = Popup::VersionSelect { selected: idx };
                 }
                 Focus::Model => {
+                    // Find index of currently selected model (unfiltered list)
+                    let idx = app.model_id.as_ref()
+                        .and_then(|id| app.config.models.iter().position(|m| &m.id == id))
+                        .unwrap_or(0);
                     app.popup = Popup::ModelSelect {
                         search: String::new(),
-                        selected: 0,
+                        selected: idx,
                     };
                 }
                 Focus::Weights => {
@@ -101,10 +121,11 @@ fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
                             let options: Vec<String> =
                                 file.quantizations.iter().map(|q| q.name.clone()).collect();
                             if !options.is_empty() {
+                                let idx = current_quant_index(app, "weights", &options);
                                 app.popup = Popup::QuantSelect {
                                     role: "weights".to_string(),
                                     options,
-                                    selected: 0,
+                                    selected: idx,
                                 };
                             }
                         }
@@ -117,10 +138,11 @@ fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
                                 let options: Vec<String> =
                                     file.quantizations.iter().map(|q| q.name.clone()).collect();
                                 if !options.is_empty() {
+                                    let idx = current_quant_index(app, "mmproj", &options);
                                     app.popup = Popup::QuantSelect {
                                         role: "mmproj".to_string(),
                                         options,
-                                        selected: 0,
+                                        selected: idx,
                                     };
                                 }
                             }
@@ -560,6 +582,14 @@ fn rebuild_config_entries(app: &mut App) {
     if let Popup::ConfigEdit { entries: ref mut e, .. } = app.popup {
         *e = entries;
     }
+}
+
+/// Find the index of the currently selected quantization in an options list.
+/// Falls back to 0 (first/default) if no explicit selection exists.
+fn current_quant_index(app: &App, role: &str, options: &[String]) -> usize {
+    app.quantizations.get(role)
+        .and_then(|name| options.iter().position(|o| o.eq_ignore_ascii_case(name)))
+        .unwrap_or(0)
 }
 
 fn handle_confirm_popup(app: &mut App, key: event::KeyEvent) -> bool {

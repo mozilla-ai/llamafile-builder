@@ -32,7 +32,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Popup::VersionSelect { selected } => draw_version_popup(frame, app, *selected),
         Popup::ModelSelect { search, selected } => draw_model_popup(frame, app, search, *selected),
         Popup::QuantSelect { role, options, selected } => {
-            draw_quant_popup(frame, role, options, *selected)
+            let active_name = app.quantizations.get(role);
+            draw_quant_popup(frame, role, options, *selected, active_name)
         }
         Popup::OutputEdit { input } => draw_input_popup(frame, "Output Path", input),
         Popup::ConfigEdit { entries, selected, editing, edit_buf, dropdown_open, dropdown_selected } => {
@@ -401,11 +402,19 @@ fn draw_version_popup(frame: &mut Frame, app: &App, selected: usize) {
     frame.render_widget(block, area);
 
     let mut items = Vec::new();
+    let mut active_idx = 0;
+    let mut idx = 0;
     for group in &app.config.versions {
         for release in &group.releases {
+            if Some(&group.name) == app.version_group.as_ref()
+                && Some(&release.version) == app.version.as_ref()
+            {
+                active_idx = idx;
+            }
             let tag = if group.default { " (default)" } else { "" };
             let label = format!("{} / {} [{}]{}", group.name, release.version, group.tag, tag);
             items.push(label);
+            idx += 1;
         }
     }
 
@@ -413,12 +422,13 @@ fn draw_version_popup(frame: &mut Frame, app: &App, selected: usize) {
         .iter()
         .enumerate()
         .map(|(i, label)| {
+            let marker = if i == active_idx { "*" } else { " " };
             let style = if i == selected {
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
-            ListItem::new(format!("  {}", label)).style(style)
+            ListItem::new(format!(" {} {}", marker, label)).style(style)
         })
         .collect();
     frame.render_widget(List::new(list_items), inner);
@@ -461,8 +471,11 @@ fn draw_model_popup(frame: &mut Frame, app: &App, search: &str, selected: usize)
                 .map(|q| q.size_bytes)
                 .sum();
             let tags = model.tags.join(", ");
+            let active = app.model_id.as_ref() == Some(&model.id);
+            let marker = if active { "*" } else { " " };
             let label = format!(
-                "  {} — {} {} [{}]",
+                " {} {} — {} {} [{}]",
+                marker,
                 model.name,
                 model.parameters,
                 llamafile_core::models::format_size(size),
@@ -479,7 +492,7 @@ fn draw_model_popup(frame: &mut Frame, app: &App, search: &str, selected: usize)
     frame.render_widget(List::new(list_items), rows[2]);
 }
 
-fn draw_quant_popup(frame: &mut Frame, role: &str, options: &[String], selected: usize) {
+fn draw_quant_popup(frame: &mut Frame, role: &str, options: &[String], selected: usize, active_name: Option<&String>) {
     let height = (options.len() + 4).min(12) as u16;
     let area = centered_rect(45, height, frame.area());
     frame.render_widget(Clear, area);
@@ -490,16 +503,22 @@ fn draw_quant_popup(frame: &mut Frame, role: &str, options: &[String], selected:
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // If no explicit selection, first option is the default
+    let active_idx = active_name
+        .and_then(|name| options.iter().position(|o| o.eq_ignore_ascii_case(name)))
+        .unwrap_or(0);
+
     let list_items: Vec<ListItem> = options
         .iter()
         .enumerate()
         .map(|(i, name)| {
+            let marker = if i == active_idx { "*" } else { " " };
             let style = if i == selected {
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
-            ListItem::new(format!("  {}", name)).style(style)
+            ListItem::new(format!(" {} {}", marker, name)).style(style)
         })
         .collect();
     frame.render_widget(List::new(list_items), inner);

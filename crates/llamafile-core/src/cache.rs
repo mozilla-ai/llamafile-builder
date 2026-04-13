@@ -67,6 +67,8 @@ impl Cache {
     }
 
     /// Determine the local path where a component would be cached.
+    /// For URL sources, returns a path in our cache. For HuggingFace sources,
+    /// checks hf-hub's shared cache. For Local sources, returns the path as-is.
     pub fn path_for(&self, component: &Component) -> Option<PathBuf> {
         match &component.source {
             ComponentSource::Url(url) => {
@@ -81,8 +83,9 @@ impl Cache {
             ComponentSource::HuggingFace {
                 repo_id, filename, ..
             } => {
-                let safe_repo = repo_id.replace('/', "--");
-                Some(self.base_dir.join("hf").join(safe_repo).join(filename))
+                let hf_cache = hf_hub::Cache::from_env();
+                let hf_repo = hf_cache.model(repo_id.clone());
+                hf_repo.get(filename)
             }
             ComponentSource::Local(path) => Some(path.clone()),
             ComponentSource::Generated => None,
@@ -102,7 +105,20 @@ impl Cache {
                 }
             }
             ComponentSource::Generated => CacheStatus::Valid(PathBuf::new()),
-            ComponentSource::Url(_) | ComponentSource::HuggingFace { .. } => {
+            ComponentSource::HuggingFace {
+                repo_id, filename, ..
+            } => {
+                let hf_cache = hf_hub::Cache::from_env();
+                let hf_repo = hf_cache.model(repo_id.clone());
+                match hf_repo.get(filename) {
+                    Some(path) => {
+                        tracing::debug!(path = %path.display(), "in HF cache");
+                        CacheStatus::Valid(path)
+                    }
+                    None => CacheStatus::Missing,
+                }
+            }
+            ComponentSource::Url(_) => {
                 let path = match self.path_for(component) {
                     Some(p) => p,
                     None => return CacheStatus::Missing,
