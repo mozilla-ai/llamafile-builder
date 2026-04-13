@@ -75,6 +75,7 @@ fn draw_dashboard(frame: &mut Frame, app: &App, area: Rect) {
         Constraint::Length(1), // gpu
         Constraint::Length(1), // blank
         Constraint::Length(1), // status
+        Constraint::Length(1), // download progress (or blank)
         Constraint::Min(1),   // buttons
     ]);
 
@@ -217,6 +218,27 @@ fn draw_dashboard(frame: &mut Frame, app: &App, area: Rect) {
         }
     };
     frame.render_widget(Paragraph::new(status_text).style(status_style), rows[row_idx]);
+    row_idx += 1;
+
+    // Download progress (below build status)
+    if let Some(ref dl) = app.download_info {
+        let bar_width = 20;
+        let filled = (dl.percentage / 100.0 * bar_width as f32) as usize;
+        let empty = bar_width - filled;
+        let dl_text = format!(
+            "   [{}{}] {:.0}% {} ({}/{})",
+            "█".repeat(filled),
+            "░".repeat(empty),
+            dl.percentage,
+            dl.filename,
+            llamafile_core::models::format_size(dl.bytes_downloaded),
+            llamafile_core::models::format_size(dl.bytes_total),
+        );
+        frame.render_widget(
+            Paragraph::new(dl_text).style(Style::default().fg(Color::Cyan)),
+            rows[row_idx],
+        );
+    }
     row_idx += 1;
 
     // Buttons row

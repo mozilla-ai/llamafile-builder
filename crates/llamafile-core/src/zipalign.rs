@@ -40,7 +40,7 @@ pub async fn zipalign_bundle(
     }
 
     let cmd_line = format!("$ {} {}", zipalign.display(), args.join(" "));
-    tracing::info!("{cmd_line}");
+    tracing::debug!("{cmd_line}");
 
     // Try direct exec first; if it fails with ENOEXEC (Exec format error),
     // retry via `sh`. This handles APE (Actually Portable Executable) binaries

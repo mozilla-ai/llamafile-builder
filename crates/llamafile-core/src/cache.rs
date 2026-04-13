@@ -198,49 +198,158 @@ impl Cache {
                 repo_id, filename, ..
             } => {
                 tracing::info!(repo_id, filename, "resolving HuggingFace model");
+                self.download_hf(repo_id, filename).await
+            }
+        }
+    }
 
-                // Try hf-hub first (uses standard ~/.cache/huggingface/hub/ layout)
-                let api = hf_hub::api::tokio::ApiBuilder::new()
-                    .with_progress(false)
-                    .build()
-                    .map_err(|e| {
-                        DownloadError::Io(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            format!("Failed to create HF API client: {e}"),
-                        ))
-                    })?;
+    /// Download a file via hf-hub with local cache check first.
+    ///
+    /// hf-hub's `download_with_progress` always re-downloads (it doesn't check
+    /// its own cache), so we use `hf_hub::Cache` for the local check and only
+    /// call the network path on a cache miss.
+    async fn download_hf(
+        &self,
+        repo_id: &str,
+        filename: &str,
+    ) -> std::result::Result<PathBuf, DownloadError> {
+        // Check hf-hub's own cache first (pure filesystem, no network)
+        let hf_cache = hf_hub::Cache::from_env();
+        let hf_repo = hf_cache.model(repo_id.to_string());
+        if let Some(path) = hf_repo.get(filename) {
+            tracing::info!(path = %path.display(), "already in HF cache");
+            return Ok(path);
+        }
 
-                let repo = api.model(repo_id.clone());
-                match repo.get(filename).await {
-                    Ok(path) => {
-                        tracing::info!(path = %path.display(), "resolved from HF cache");
-                        Ok(path)
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "hf-hub failed, falling back to direct download");
-                        let url = format!(
-                            "https://huggingface.co/{}/resolve/main/{}",
-                            repo_id, filename
+        // Cache miss — download with progress
+        let api = hf_hub::api::tokio::ApiBuilder::new()
+            .with_progress(false)
+            .build()
+            .map_err(|e| {
+                DownloadError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to create HF API client: {e}"),
+                ))
+            })?;
+        let repo = api.model(repo_id.to_string());
+        let progress = TracingProgress::new(filename.to_string());
+        match repo.download_with_progress(filename, progress).await {
+            Ok(path) => {
+                tracing::info!(path = %path.display(), "download complete");
+                Ok(path)
+            }
+            Err(e) => {
+                let err_msg = e.to_string();
+                // Surface lock file path so the user can remove it if stale
+                if let Some(lock_path) = extract_lock_path(&err_msg) {
+                    tracing::error!(
+                        "HF download blocked by lock file: {}\n\
+                         If no other download is running, remove it with:\n  \
+                         rm {}", lock_path.display(), lock_path.display()
+                    );
+                }
+                Err(DownloadError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("HF download failed: {err_msg}"),
+                )))
+            }
+        }
+    }
+}
+
+/// Extract a lock file path from an hf-hub error message like
+/// "Lock acquisition failed: /path/to/file.lock"
+fn extract_lock_path(err_msg: &str) -> Option<PathBuf> {
+    let prefix = "Lock acquisition failed: ";
+    let start = err_msg.find(prefix)? + prefix.len();
+    let path_str = err_msg[start..].trim();
+    if path_str.ends_with(".lock") {
+        Some(PathBuf::from(path_str))
+    } else {
+        None
+    }
+}
+
+/// Progress reporter that emits tracing events during HF downloads.
+/// Uses a shared atomic counter so all clones (one per parallel chunk)
+/// contribute to the same total.
+#[derive(Clone)]
+struct TracingProgress {
+    filename: String,
+    total: u64,
+    shared_downloaded: Arc<std::sync::atomic::AtomicU64>,
+    last_reported_pct: Arc<std::sync::atomic::AtomicU32>,
+    last_log: std::time::Instant,
+}
+
+impl TracingProgress {
+    fn new(filename: String) -> Self {
+        Self {
+            filename,
+            total: 0,
+            shared_downloaded: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            last_reported_pct: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            last_log: std::time::Instant::now(),
+        }
+    }
+}
+
+impl hf_hub::api::tokio::Progress for TracingProgress {
+    async fn init(&mut self, size: usize, filename: &str) {
+        self.total = size as u64;
+        self.shared_downloaded.store(0, std::sync::atomic::Ordering::Relaxed);
+        self.filename = filename.to_string();
+        tracing::info!(
+            filename = %self.filename,
+            bytes_total = self.total,
+            "download started"
+        );
+    }
+
+    async fn update(&mut self, size: usize) {
+        let downloaded = self.shared_downloaded.fetch_add(size as u64, std::sync::atomic::Ordering::Relaxed) + size as u64;
+        let now = std::time::Instant::now();
+        if now.duration_since(self.last_log).as_millis() >= 500 {
+            self.last_log = now;
+            let percentage = if self.total > 0 {
+                (downloaded as f64 / self.total as f64) * 100.0
+            } else {
+                0.0
+            };
+            tracing::debug!(
+                filename = %self.filename,
+                bytes_downloaded = downloaded,
+                bytes_total = self.total,
+                percentage = format!("{:.1}", percentage),
+                "downloading"
+            );
+            // INFO at 10% milestones -- use atomic CAS so only one clone reports each step
+            let pct_10 = (percentage as u32) / 10 * 10; // round down to nearest 10
+            if pct_10 > 0 {
+                let prev = self.last_reported_pct.load(std::sync::atomic::Ordering::Relaxed);
+                if pct_10 > prev {
+                    if self.last_reported_pct.compare_exchange(
+                        prev, pct_10,
+                        std::sync::atomic::Ordering::Relaxed,
+                        std::sync::atomic::Ordering::Relaxed,
+                    ).is_ok() {
+                        tracing::info!(
+                            filename = %self.filename,
+                            percentage = format!("{:.0}%", percentage),
+                            "downloading"
                         );
-                        let dest = self
-                            .path_for(component)
-                            .expect("HF components always have a cache path");
-                        let resume = dest.exists();
-                        download::download_file(
-                            &url,
-                            &dest,
-                            component.expected_size,
-                            component.expected_sha256.as_deref(),
-                            self.hf_token.as_deref(),
-                            resume,
-                            cancel_flag,
-                        )
-                        .await?;
-                        Ok(dest)
                     }
                 }
             }
         }
+    }
+
+    async fn finish(&mut self) {
+        tracing::info!(
+            filename = %self.filename,
+            bytes_total = self.total,
+            "download complete"
+        );
     }
 }
 

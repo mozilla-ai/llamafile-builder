@@ -29,6 +29,23 @@ fn tracing_to_log_level(level: &tracing::Level) -> LogLevel {
 
 impl<S: Subscriber> Layer<S> for TuiLogLayer {
     fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
+        // Filter out noisy connection pool / TLS messages
+        let target = event.metadata().target();
+        if target.starts_with("hyper::") || target.starts_with("reqwest::") || target.starts_with("rustls::") {
+            return;
+        }
+
+        // Also filter by message content for libraries that don't set proper targets
+        let mut peek = PeekVisitor::default();
+        event.record(&mut peek);
+        if peek.message.contains("pooling idle connection")
+            || peek.message.contains("reuse idle connection")
+            || peek.message.contains("connecting to")
+            || peek.message.contains("connected to")
+        {
+            return;
+        }
+
         let level = tracing_to_log_level(event.metadata().level());
         let mut visitor = MessageVisitor::default();
         event.record(&mut visitor);
@@ -63,6 +80,24 @@ impl<S: Subscriber> Layer<S> for TuiLogLayer {
 }
 
 #[derive(Default)]
+struct PeekVisitor {
+    message: String,
+}
+
+impl Visit for PeekVisitor {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.message = format!("{:?}", value);
+        }
+    }
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if field.name() == "message" {
+            self.message = value.to_string();
+        }
+    }
+}
+
+#[derive(Default)]
 struct MessageVisitor {
     message: String,
     fields: Vec<(String, String)>,
@@ -70,24 +105,26 @@ struct MessageVisitor {
 
 impl Visit for MessageVisitor {
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        if field.name() == "message" {
+        let name = field.name();
+        if name == "message" {
             self.message = format!("{:?}", value);
             // Remove surrounding quotes if present
             if self.message.starts_with('"') && self.message.ends_with('"') {
                 self.message = self.message[1..self.message.len() - 1].to_string();
             }
-        } else {
+        } else if !name.starts_with("log.") {
             self.fields
-                .push((field.name().to_string(), format!("{:?}", value)));
+                .push((name.to_string(), format!("{:?}", value)));
         }
     }
 
     fn record_str(&mut self, field: &Field, value: &str) {
-        if field.name() == "message" {
+        let name = field.name();
+        if name == "message" {
             self.message = value.to_string();
-        } else {
+        } else if !name.starts_with("log.") {
             self.fields
-                .push((field.name().to_string(), value.to_string()));
+                .push((name.to_string(), value.to_string()));
         }
     }
 

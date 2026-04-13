@@ -240,12 +240,22 @@ pub async fn download_file(
             } else {
                 0.0
             };
-            tracing::info!(
+            tracing::debug!(
+                filename = %filename,
                 bytes_downloaded = downloaded,
                 bytes_total = total_size,
                 percentage = format!("{:.1}", percentage),
                 "downloading"
             );
+            // INFO at 10% intervals
+            let pct_int = percentage as u32;
+            if pct_int % 10 == 0 && pct_int > 0 {
+                tracing::info!(
+                    filename = %filename,
+                    percentage = format!("{:.0}%", percentage),
+                    "downloading"
+                );
+            }
         }
     }
 

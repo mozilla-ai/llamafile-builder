@@ -123,6 +123,15 @@ pub enum BuildStatus {
     Failed { error: String },
 }
 
+/// Current download progress, parsed from tracing events.
+#[derive(Debug, Clone)]
+pub struct DownloadInfo {
+    pub filename: String,
+    pub bytes_downloaded: u64,
+    pub bytes_total: u64,
+    pub percentage: f32,
+}
+
 /// Log level filter for the log pane view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
@@ -192,6 +201,7 @@ pub struct App {
     pub focus: Focus,
     pub popup: Popup,
     pub build_status: BuildStatus,
+    pub download_info: Option<DownloadInfo>,
     pub logs: Vec<LogEntry>,
     pub log_expanded: bool,
     pub log_level: LogLevel,
@@ -220,6 +230,7 @@ impl App {
             focus: Focus::Version,
             popup: Popup::None,
             build_status: BuildStatus::Idle,
+            download_info: None,
             logs: Vec::new(),
             log_expanded: false,
             log_level: LogLevel::Info,

@@ -446,6 +446,12 @@ impl Builder {
         self.cancel_flag.store(true, Ordering::Relaxed);
     }
 
+    /// Use an external cancel flag (shared with the caller).
+    /// This allows the caller to cancel the build from outside.
+    pub fn set_cancel_flag(&mut self, flag: Arc<AtomicBool>) {
+        self.cancel_flag = flag;
+    }
+
     /// Run the build pipeline. Returns the path to the created llamafile.
     ///
     /// All progress is observable via `tracing` spans and events.
@@ -478,7 +484,7 @@ impl Builder {
         // Phase 4: Write .args
         let args_path = {
             let args_content = self.resolved_args();
-            tracing::info!(content_length = args_content.len(), "writing .args configuration");
+            tracing::debug!(content_length = args_content.len(), "writing .args configuration");
             tracing::debug!(content = %args_content, ".args content");
             crate::file_ops::write_temp_file(&args_content, ".args")
                 .await
@@ -510,7 +516,7 @@ impl Builder {
             .map(|m| m.len())
             .unwrap_or(0);
 
-        tracing::info!(
+        tracing::debug!(
             path = %output_path.display(),
             size = final_size,
             size_human = %format_size(final_size),
@@ -737,7 +743,7 @@ impl Builder {
         let mut paths = Vec::new();
 
         if self.gpu_libs.is_empty() {
-            tracing::info!("no GPU libraries to bundle");
+            tracing::debug!("no GPU libraries to bundle");
             return paths;
         }
 
@@ -797,7 +803,7 @@ impl Builder {
         let output_path = PathBuf::from(&self.state.output_path);
 
         // Copy runtime to output
-        tracing::info!(
+        tracing::debug!(
             src = %runtime_path.display(),
             dest = %output_path.display(),
             "copying runtime to output"
@@ -815,19 +821,19 @@ impl Builder {
         // Collect files to bundle
         let mut files_to_bundle: Vec<PathBuf> = Vec::new();
 
-        tracing::info!(path = args_path, "bundling .args");
+        tracing::debug!(path = args_path, "bundling .args");
         files_to_bundle.push(PathBuf::from(args_path));
 
-        tracing::info!(path = %weights_path.display(), "bundling model weights");
+        tracing::debug!(path = %weights_path.display(), "bundling model weights");
         files_to_bundle.push(weights_path.to_path_buf());
 
         if let Some(mmproj) = mmproj_path {
-            tracing::info!(path = %mmproj.display(), "bundling mmproj");
+            tracing::debug!(path = %mmproj.display(), "bundling mmproj");
             files_to_bundle.push(mmproj.to_path_buf());
         }
 
         for gpu_path in gpu_lib_paths {
-            tracing::info!(path = %gpu_path.display(), "bundling GPU library");
+            tracing::debug!(path = %gpu_path.display(), "bundling GPU library");
             files_to_bundle.push(gpu_path.clone());
         }
 
@@ -837,13 +843,13 @@ impl Builder {
             let prompt_path = crate::file_ops::write_temp_file(&prompt, ".args.prompt")
                 .await
                 .map_err(|e| crate::Error::Build(format!("Failed to write .args.prompt: {e}")))?;
-            tracing::info!("bundling agent prompt");
+            tracing::debug!("bundling agent prompt");
             files_to_bundle.push(PathBuf::from(prompt_path));
         }
 
         // Run zipalign
         let file_refs: Vec<&Path> = files_to_bundle.iter().map(|p| p.as_path()).collect();
-        tracing::info!(file_count = file_refs.len(), "running zipalign");
+        tracing::debug!(file_count = file_refs.len(), "running zipalign");
 
         let log_lines = crate::zipalign::zipalign_bundle(
             &output_path,
