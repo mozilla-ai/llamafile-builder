@@ -3,8 +3,12 @@
 The TUI provides an interactive terminal wizard for configuring and building llamafiles, using [ratatui](https://ratatui.rs/) and [crossterm](https://docs.rs/crossterm/).
 
 ```bash
-cargo run -p llamafile-tui
+cargo run -p llamafile-tui    # debug
+make release                  # or build release, then run:
+./target/release/llamafile-builder-tui
 ```
+
+See [README.md](README.md#building) for cross-compilation to other platforms.
 
 ## Layout
 

@@ -1,9 +1,9 @@
 # CLI Usage
 
-Build the CLI:
+Build the CLI (see [README.md](README.md#building) for cross-compilation):
 
 ```bash
-cargo build -p llamafile-cli
+make                # or: cargo build -p llamafile-cli
 alias lb=./target/debug/llamafile-builder
 ```
 

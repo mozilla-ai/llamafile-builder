@@ -84,6 +84,72 @@ llamafile itself is designed to run everywhere -- that is its core value proposi
 | Source build | User compiles from source; must work with standard Rust toolchain |
 
 
+## Building
+
+### Quick start
+
+```bash
+make          # debug build for current platform
+make test     # run all 121 tests
+make release  # release build for current platform
+```
+
+### Cross-compilation
+
+All 5 supported targets can be cross-compiled from a Mac using `cargo-zigbuild` and Zig as a drop-in C cross-compiler. No Docker needed.
+
+**One-time setup:**
+
+```bash
+make setup    # installs zig, cargo-zigbuild, and all Rust targets
+```
+
+Or manually:
+
+```bash
+brew install zig
+cargo install cargo-zigbuild
+rustup target add x86_64-apple-darwin x86_64-unknown-linux-gnu \
+  aarch64-unknown-linux-gnu x86_64-pc-windows-gnu
+```
+
+**Build all targets:**
+
+```bash
+make all      # cross-compile CLI + TUI for all 5 targets (release)
+make dist     # same, plus copy binaries to dist/
+make sizes    # show binary sizes
+```
+
+**Build a single target:**
+
+```bash
+make target T=x86_64-unknown-linux-gnu
+```
+
+### Supported build targets
+
+| Target | Platform |
+|--------|----------|
+| `aarch64-apple-darwin` | Mac Silicon |
+| `x86_64-apple-darwin` | Mac Intel |
+| `x86_64-unknown-linux-gnu` | Linux x86 |
+| `aarch64-unknown-linux-gnu` | Linux ARM (Raspberry Pi) |
+| `x86_64-pc-windows-gnu` | Windows x86 |
+
+All binaries are 2.5–4 MB, statically linked for TLS (rustls, no OpenSSL dependency).
+
+### Dependencies
+
+| Dependency | What it's for | How to install |
+|------------|---------------|----------------|
+| Rust (stable) | Compiler | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+| Zig | C cross-compiler for `ring` (TLS crypto) | `brew install zig` |
+| cargo-zigbuild | Bridges cargo and zig | `cargo install cargo-zigbuild` |
+
+Zig and cargo-zigbuild are only needed for cross-compilation. Native builds (`make` / `make release`) require only Rust.
+
+
 ## The problem
 
 The builder's functionality is pure computation: fetch data over HTTP, verify checksums, generate text files, invoke a command-line tool (zipalign). None of this inherently requires a graphical toolkit, a display server, or GPU-capable rendering.

@@ -345,7 +345,11 @@ async fn run_app(
 
         if event::poll(poll_time)? {
             if let Event::Key(key) = event::read()? {
-                events::handle_key(app, key);
+                // Only handle key press events (not release/repeat).
+                // On Windows, crossterm reports both Press and Release for each keypress.
+                if key.kind == event::KeyEventKind::Press {
+                    events::handle_key(app, key);
+                }
             }
         }
 
