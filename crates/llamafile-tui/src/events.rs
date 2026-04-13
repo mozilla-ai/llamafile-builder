@@ -49,7 +49,7 @@ pub fn handle_key(app: &mut App, key: event::KeyEvent) -> bool {
         Popup::VersionSelect { .. } => handle_version_popup(app, key),
         Popup::ModelSelect { .. } => handle_model_popup(app, key),
         Popup::QuantSelect { .. } => handle_quant_popup(app, key),
-        Popup::OutputEdit { .. } => handle_input_popup(app, key),
+        Popup::OutputEdit { .. } => handle_output_popup(app, key),
         Popup::ConfigEdit { .. } => handle_config_popup(app, key),
         Popup::GpuSelect { .. } => handle_gpu_popup(app, key),
         Popup::ArgsEdit { .. } => handle_args_edit(app, key),
@@ -151,7 +151,15 @@ fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
                 }
                 Focus::Output => {
                     let current = app.effective_output();
-                    app.popup = Popup::OutputEdit { input: current };
+                    let mut textarea = tui_textarea::TextArea::new(vec![current.clone()]);
+                    textarea.set_block(
+                        ratatui::widgets::Block::bordered()
+                            .title(" Output Path ")
+                            .title_bottom(" Esc=save & close ")
+                    );
+                    textarea.set_cursor_line_style(ratatui::style::Style::default());
+                    textarea.move_cursor(tui_textarea::CursorMove::End);
+                    app.popup = Popup::OutputEdit { textarea, original: current };
                 }
                 Focus::Config => {
                     open_config_popup(app);
@@ -299,20 +307,27 @@ fn handle_quant_popup(app: &mut App, key: event::KeyEvent) -> bool {
     true
 }
 
-fn handle_input_popup(app: &mut App, key: event::KeyEvent) -> bool {
-    if let Popup::OutputEdit { ref mut input } = app.popup {
-        match key.code {
-            KeyCode::Enter => {
-                app.output_path = Some(input.clone());
-                app.popup = Popup::None;
+fn handle_output_popup(app: &mut App, key: event::KeyEvent) -> bool {
+    // Esc saves and closes
+    if key.code == KeyCode::Esc {
+        if let Popup::OutputEdit { ref textarea, ref original } = app.popup {
+            let content = textarea.lines().join("");
+            if content != *original {
+                app.output_path = Some(content);
             }
-            KeyCode::Esc => app.popup = Popup::None,
-            KeyCode::Backspace => {
-                input.pop();
-            }
-            KeyCode::Char(c) => input.push(c),
-            _ => {}
         }
+        app.popup = Popup::None;
+        return true;
+    }
+
+    // Block Enter (newlines) — output path must stay one line
+    if key.code == KeyCode::Enter {
+        return true;
+    }
+
+    // Forward everything else to the textarea
+    if let Popup::OutputEdit { ref mut textarea, .. } = app.popup {
+        textarea.input(key);
     }
     true
 }

@@ -35,7 +35,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
             let active_name = app.quantizations.get(role);
             draw_quant_popup(frame, role, options, *selected, active_name)
         }
-        Popup::OutputEdit { input } => draw_input_popup(frame, "Output Path", input),
+        Popup::OutputEdit { textarea, .. } => {
+            let area = centered_rect(72, 3, frame.area());
+            frame.render_widget(Clear, area);
+            frame.render_widget(&*textarea, area);
+        }
         Popup::ConfigEdit { entries, selected, editing, edit_buf, dropdown_open, dropdown_selected } => {
             draw_config_popup_full(frame, app, entries, *selected, *editing, edit_buf, *dropdown_open, *dropdown_selected)
         }
@@ -541,21 +545,6 @@ fn draw_quant_popup(frame: &mut Frame, role: &str, options: &[String], selected:
     frame.render_widget(List::new(list_items), inner);
 }
 
-fn draw_input_popup(frame: &mut Frame, title: &str, input: &str) {
-    let area = centered_rect(70, 5, frame.area());
-    frame.render_widget(Clear, area);
-    let block = Block::bordered()
-        .title(format!(" {} ", title))
-        .title_bottom(" Type path  Enter=confirm  Esc=cancel ");
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let text = format!(" {}_", input);
-    frame.render_widget(
-        Paragraph::new(text).style(Style::default().fg(Color::Cyan)),
-        inner,
-    );
-}
 
 fn draw_config_popup_full(
     frame: &mut Frame,

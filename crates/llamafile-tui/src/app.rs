@@ -122,7 +122,7 @@ pub enum Popup {
     VersionSelect { selected: usize },
     ModelSelect { search: String, selected: usize },
     QuantSelect { role: String, options: Vec<String>, selected: usize },
-    OutputEdit { input: String },
+    OutputEdit { textarea: tui_textarea::TextArea<'static>, original: String },
     ConfigEdit {
         entries: Vec<crate::config_ui::ConfigEntry>,
         selected: usize,
