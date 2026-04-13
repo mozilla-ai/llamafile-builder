@@ -58,8 +58,85 @@ pub enum Commands {
     /// Show system information
     SystemInfo,
 
+    /// Configure build parameters incrementally
+    Config {
+        #[command(subcommand)]
+        cmd: ConfigCmd,
+    },
+
     /// Build a llamafile
     Build(BuildArgs),
+}
+
+#[derive(Subcommand)]
+pub enum ConfigCmd {
+    /// Select llamafile version
+    SetVersion {
+        /// Version group name (e.g. "llamafile 0.10")
+        group: String,
+        /// Version string (e.g. "0.10.0")
+        version: String,
+    },
+    /// Select a model from the registry
+    SetModel {
+        /// Model ID / HuggingFace repo ID (e.g. "Qwen/Qwen3-0.6B-GGUF")
+        id: String,
+    },
+    /// Use a custom local .gguf file
+    SetModelFile {
+        /// Path to .gguf file
+        path: PathBuf,
+    },
+    /// Select quantization for a file role
+    SetQuantization {
+        /// File role (e.g. "weights", "mmproj")
+        role: String,
+        /// Quantization name (e.g. "Q4_K_M", "Q8_0")
+        name: String,
+    },
+    /// Set output file path
+    SetOutput {
+        /// Output .llamafile path
+        path: PathBuf,
+    },
+    /// Set a config value (e.g. context_length, temperature, server_enabled)
+    Set {
+        /// Config key
+        key: String,
+        /// Value (JSON or plain string)
+        value: String,
+    },
+    /// Override .args with a custom file
+    SetArgsFile {
+        /// Path to custom .args file
+        path: PathBuf,
+    },
+    /// Add a GPU library (e.g. "cuda", "cuda:linux", "rocm:windows")
+    AddGpu {
+        /// GPU spec: accel or accel:os
+        spec: String,
+    },
+    /// Remove a GPU library
+    RemoveGpu {
+        /// GPU spec to remove
+        spec: String,
+    },
+    /// Use a custom llamafile runtime binary
+    SetRuntime {
+        /// Path to llamafile binary
+        path: PathBuf,
+    },
+    /// Use a custom zipalign binary
+    SetZipalign {
+        /// Path to zipalign binary
+        path: PathBuf,
+    },
+    /// Show current build configuration
+    Show,
+    /// Preview the .args file content
+    ShowArgs,
+    /// Reset all build configuration
+    Reset,
 }
 
 #[derive(Subcommand)]
@@ -93,9 +170,10 @@ pub enum LmStudioCmd {
 
 #[derive(Args)]
 pub struct BuildArgs {
-    /// Model ID from registry, or path to a local .gguf file
+    /// Model ID from registry, or path to a local .gguf file.
+    /// If omitted, builds from saved config (see 'config' subcommand).
     #[arg(long)]
-    pub model: String,
+    pub model: Option<String>,
 
     /// Quantization variant name (e.g. Q4_K_M, Q8_0)
     #[arg(long)]

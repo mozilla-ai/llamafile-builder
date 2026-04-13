@@ -117,22 +117,29 @@ Cargo workspace with `llamafile-core` (library) and `llamafile-cli` (binary) cra
 **Goal**: The CLI supports incremental configuration across multiple invocations, persisting state between them (NFR-5).
 
 ### Changes:
-- **State persistence**: Builder state is serialized to a config file (e.g. `~/.llamafile-builder/build-state.json`) between CLI invocations.
+- **State persistence**: Builder state is serialized to `~/.llamafile-builder/build-state.json` between CLI invocations.
 - **New subcommands**:
-  - `llamafile-builder config set-version <group> <version>` -- select version
-  - `llamafile-builder config set-model <id|path>` -- select model
-  - `llamafile-builder config set <key> <value>` -- set a config value
-  - `llamafile-builder config show` -- show current build state and resolved components
-  - `llamafile-builder config reset` -- clear state
-  - `llamafile-builder build` (no `--model` required) -- build from saved state
+  - `config set-version <group> <version>` -- select version
+  - `config set-model <id>` -- select registry model by HF repo ID
+  - `config set-model-file <path>` -- select custom local .gguf
+  - `config set-quantization <role> <name>` -- select quantization for a role
+  - `config set-output <path>` -- set output path
+  - `config set <key> <value>` -- set a config value (context_length, temperature, etc.)
+  - `config set-args-file <path>` -- override .args with custom file
+  - `config add-gpu <accel>[:<os>]` -- add GPU library
+  - `config remove-gpu <accel>[:<os>]` -- remove GPU library
+  - `config set-runtime <path>` -- use custom llamafile binary
+  - `config set-zipalign <path>` -- use custom zipalign binary
+  - `config show` -- display current state and resolved components
+  - `config show-args` -- preview the .args content that would be generated
+  - `config reset` -- clear all state
+  - `build` (no `--model` required) -- build from saved state
 - The existing one-shot `build --model <id>` continues to work unchanged.
 
 ### Verify:
-- `llamafile-builder config set-version "llamafile 0.10" "0.10.0"` persists state
-- `llamafile-builder config set-model qwen3-0.6b` persists state
-- `llamafile-builder config show` displays resolved components
-- `llamafile-builder build` uses persisted state
-- `llamafile-builder config reset` clears state
+- Multi-step: set-version, set-model, show, show-args, build -- each persists and the next reads it
+- config reset clears state
+- One-shot build still works independently of saved state
 - This is the integration test for the Builder's stateful API (NFR-12).
 
 ---

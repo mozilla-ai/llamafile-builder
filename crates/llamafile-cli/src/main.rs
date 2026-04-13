@@ -1,5 +1,6 @@
 mod cli;
 mod commands;
+mod state_file;
 
 use clap::Parser;
 use std::path::PathBuf;
@@ -29,7 +30,11 @@ fn exit_code_for_error(error: &str) -> ExitCode {
     }
 }
 
-fn get_config_dir() -> PathBuf {
+pub fn get_state_path() -> PathBuf {
+    get_config_dir().join("build-state.json")
+}
+
+pub fn get_config_dir() -> PathBuf {
     directories::BaseDirs::new()
         .map(|dirs| {
             if cfg!(target_os = "windows") {
@@ -41,7 +46,7 @@ fn get_config_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".llamafile-builder"))
 }
 
-fn get_cache_dir() -> PathBuf {
+pub fn get_cache_dir() -> PathBuf {
     directories::BaseDirs::new()
         .map(|dirs| {
             if cfg!(target_os = "windows") {
@@ -211,6 +216,16 @@ async fn main() -> ExitCode {
                 );
             }
             ExitCode::SUCCESS
+        }
+        Some(Commands::Config { ref cmd }) => {
+            let state_path = get_state_path();
+            match commands::config::run(cmd, &config, &state_path, cli.json) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    tracing::error!("{e}");
+                    ExitCode::from(1)
+                }
+            }
         }
         Some(Commands::Build(ref args)) => {
             match commands::build::run(args, config, cache).await {
