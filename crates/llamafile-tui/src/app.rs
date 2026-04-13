@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use llamafile_core::config_manager::BuilderConfig;
 use llamafile_core::models::*;
@@ -227,6 +228,7 @@ pub struct App {
     pub focus: Focus,
     pub popup: Popup,
     pub build_status: BuildStatus,
+    pub build_started_at: Option<Instant>,
     pub download_info: Option<DownloadInfo>,
     pub logs: Vec<LogEntry>,
     pub log_expanded: bool,
@@ -256,6 +258,7 @@ impl App {
             focus: Focus::Version,
             popup: Popup::None,
             build_status: BuildStatus::Idle,
+            build_started_at: None,
             download_info: None,
             logs: Vec::new(),
             log_expanded: false,

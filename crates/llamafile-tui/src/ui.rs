@@ -216,16 +216,33 @@ fn draw_dashboard(frame: &mut Frame, app: &App, area: Rect) {
             let bar_width = 20;
             let filled = (progress * bar_width as f32) as usize;
             let empty = bar_width - filled;
+            let elapsed = app.build_started_at
+                .map(|t| t.elapsed().as_secs())
+                .unwrap_or(0);
+            let time_str = if elapsed >= 60 {
+                format!("{}m{:02}s", elapsed / 60, elapsed % 60)
+            } else {
+                format!("{}s", elapsed)
+            };
             format!(
-                "   [{}{}] {:.0}% {}",
+                "   [{}{}] {:.0}% {} ({})",
                 "█".repeat(filled),
                 "░".repeat(empty),
                 progress * 100.0,
-                phase
+                phase,
+                time_str,
             )
         }
         BuildStatus::Complete { path, size } => {
-            format!("   Done: {} ({})", path, llamafile_core::models::format_size(*size))
+            let elapsed = app.build_started_at
+                .map(|t| t.elapsed().as_secs())
+                .unwrap_or(0);
+            let time_str = if elapsed >= 60 {
+                format!("{}m{:02}s", elapsed / 60, elapsed % 60)
+            } else {
+                format!("{}s", elapsed)
+            };
+            format!("   Done: {} ({}) in {}", path, llamafile_core::models::format_size(*size), time_str)
         }
         BuildStatus::Failed { error } => {
             let max_len = area.width.saturating_sub(14) as usize; // "   Failed: " + margin

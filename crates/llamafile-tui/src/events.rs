@@ -174,6 +174,7 @@ fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
                             phase: "starting".to_string(),
                             progress: 0.0,
                         };
+                        app.build_started_at = Some(std::time::Instant::now());
                     }
                 }
                 Focus::ShowArgs => {
