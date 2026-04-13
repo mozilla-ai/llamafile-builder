@@ -19,12 +19,12 @@ pub fn handle_key(app: &mut App, key: event::KeyEvent) -> bool {
     // Log controls (only when no popup is open)
     if matches!(app.popup, Popup::None) {
         match key.code {
-            KeyCode::Char('+') => {
+            KeyCode::Char('<') => {
                 app.log_level = app.log_level.lower();
                 app.log_scroll_offset = 0;
                 return true;
             }
-            KeyCode::Char('-') => {
+            KeyCode::Char('>') => {
                 app.log_level = app.log_level.raise();
                 app.log_scroll_offset = 0;
                 return true;

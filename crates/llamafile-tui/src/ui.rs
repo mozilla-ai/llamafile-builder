@@ -228,16 +228,42 @@ fn draw_dashboard(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let desc = app.focus.description();
-    let keys = match app.focus {
-        Focus::Build => "Enter=build",
-        Focus::ShowArgs => "Enter=preview",
-        Focus::Quit => "Enter=quit",
-        Focus::Mmproj => "Space=toggle  Enter=change  ↑↓=navigate",
-        _ => "Enter=change  ↑↓=navigate",
+    let bg = Style::default().fg(Color::DarkGray).bg(Color::DarkGray);
+    let key_style = Style::default().fg(Color::White).bg(Color::DarkGray).add_modifier(Modifier::BOLD);
+    let text_style = Style::default().fg(Color::Gray).bg(Color::DarkGray);
+
+    let keys: Vec<Span> = match app.focus {
+        Focus::Build => vec![
+            Span::styled("Enter", key_style), Span::styled("=build", text_style),
+        ],
+        Focus::ShowArgs => vec![
+            Span::styled("Enter", key_style), Span::styled("=preview", text_style),
+        ],
+        Focus::Quit => vec![
+            Span::styled("Enter", key_style), Span::styled("=quit", text_style),
+        ],
+        Focus::Mmproj => vec![
+            Span::styled("Space", key_style), Span::styled("=toggle  ", text_style),
+            Span::styled("Enter", key_style), Span::styled("=change  ", text_style),
+            Span::styled("↑↓", key_style), Span::styled("=navigate", text_style),
+        ],
+        _ => vec![
+            Span::styled("Enter", key_style), Span::styled("=change  ", text_style),
+            Span::styled("↑↓", key_style), Span::styled("=navigate", text_style),
+        ],
     };
-    let line = format!(" {}  │  {}  │  l=logs  q=quit", desc, keys);
-    let style = Style::default().fg(Color::White).bg(Color::DarkGray);
-    frame.render_widget(Paragraph::new(line).style(style), area);
+
+    let mut spans = vec![
+        Span::styled(format!(" {}  │  ", desc), text_style),
+    ];
+    spans.extend(keys);
+    spans.extend(vec![
+        Span::styled("  │  ", text_style),
+        Span::styled("l", key_style), Span::styled("=logs  ", text_style),
+        Span::styled("q", key_style), Span::styled("=quit", text_style),
+    ]);
+
+    frame.render_widget(Paragraph::new(Line::from(spans)).style(bg), area);
 }
 
 fn draw_log_pane(frame: &mut Frame, app: &App, area: Rect) {
@@ -245,15 +271,21 @@ fn draw_log_pane(frame: &mut Frame, app: &App, area: Rect) {
     let count = filtered.len();
 
     if app.log_expanded {
-        let scroll_info = if app.log_scroll_offset > 0 {
-            format!(" (↑{}) ", app.log_scroll_offset)
-        } else {
-            String::new()
+        let level_nav = match app.log_level {
+            crate::app::LogLevel::Error => "ERROR >".to_string(),
+            crate::app::LogLevel::Debug => "< DEBUG".to_string(),
+            _ => format!("< {} >", app.log_level.as_str()),
         };
-        let block = Block::bordered().title(format!(
-            " Logs ({}, {}/{}) [-]{} (l +/- [/]) ",
-            app.log_level.as_str(), count, app.logs.len(), scroll_info
-        ));
+        let block = Block::bordered().title(Line::from(vec![
+            Span::raw(" Logs "),
+            Span::styled(level_nav, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::raw(format!(" ({}/{}) ", count, app.logs.len())),
+            Span::styled("l", Style::default().fg(Color::White)),
+            Span::raw("=collapse "),
+            Span::styled("[", Style::default().fg(Color::White)),
+            Span::styled("]", Style::default().fg(Color::White)),
+            Span::raw("=scroll "),
+        ]));
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
@@ -280,8 +312,18 @@ fn draw_log_pane(frame: &mut Frame, app: &App, area: Rect) {
         let paragraph = Paragraph::new(lines).scroll((scroll_y, 0));
         frame.render_widget(paragraph, inner);
     } else {
-        let block = Block::bordered()
-            .title(format!(" Logs ({}) [+] (l +/- [/]) ", app.log_level.as_str()));
+        let level_nav = match app.log_level {
+            crate::app::LogLevel::Error => "ERROR >".to_string(),
+            crate::app::LogLevel::Debug => "< DEBUG".to_string(),
+            _ => format!("< {} >", app.log_level.as_str()),
+        };
+        let block = Block::bordered().title(Line::from(vec![
+            Span::raw(" Logs "),
+            Span::styled(level_nav, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::raw(" "),
+            Span::styled("l", Style::default().fg(Color::White)),
+            Span::raw("=expand "),
+        ]));
         let inner = block.inner(area);
         frame.render_widget(block, area);
         let last = filtered.last().map(|e| e.message.as_str()).unwrap_or("");
