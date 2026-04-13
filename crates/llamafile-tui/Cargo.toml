@@ -1,0 +1,20 @@
+[package]
+name = "llamafile-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Terminal UI for llamafile-builder"
+
+[[bin]]
+name = "llamafile-builder-tui"
+path = "src/main.rs"
+
+[dependencies]
+llamafile-core = { path = "../llamafile-core" }
+ratatui = "0.29"
+crossterm = "0.28"
+tokio = { workspace = true, features = ["full"] }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["registry"] }
+directories = { workspace = true }
