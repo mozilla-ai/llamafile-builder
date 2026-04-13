@@ -175,9 +175,13 @@ pub struct BuildArgs {
     #[arg(long)]
     pub model: Option<String>,
 
-    /// Quantization variant name (e.g. Q4_K_M, Q8_0)
+    /// Quantization for weights (e.g. Q4_K_M, Q8_0)
     #[arg(long)]
     pub quantization: Option<String>,
+
+    /// Quantization for mmproj / vision adapter (e.g. F16, Q8_0)
+    #[arg(long)]
+    pub mmproj_quantization: Option<String>,
 
     /// Output file path
     #[arg(short, long)]

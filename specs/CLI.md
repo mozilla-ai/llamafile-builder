@@ -47,7 +47,7 @@ lb build --model unsloth/gpt-oss-20b-GGUF --quantization Q8_0   # explicit
 lb build --model unsloth/gpt-oss-20b-GGUF --quantization MXFP4  # case-insensitive
 ```
 
-`--quantization` applies to the weights role. Multimodal models automatically include the mmproj at its default quantization.
+`--quantization` applies to the weights role. `--mmproj-quantization` selects the mmproj quantization. Multimodal models automatically include the mmproj at its default quantization if not specified.
 
 ### Multimodal model (ministral-3-3b)
 
@@ -56,6 +56,14 @@ lb build --model mistralai/Ministral-3-3B-Instruct-2512-GGUF
 ```
 
 Automatically includes both weights (Q4_K_M) and mmproj (BF16). The .args file contains `--mmproj /zip/<mmproj-filename>.gguf`.
+
+### Multimodal with explicit quantizations (qwen3-vl-4b)
+
+```bash
+lb build --model Qwen/Qwen3-VL-4B-Instruct-GGUF --quantization Q8_0 --mmproj-quantization Q8_0
+```
+
+Selects Q8_0 for both weights and vision adapter (instead of defaults Q4_K_M + F16).
 
 ### Overrides
 

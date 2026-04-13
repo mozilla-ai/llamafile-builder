@@ -11,7 +11,10 @@ pub async fn run(args: &BuildArgs, config: BuilderConfig, cache: Cache) -> Resul
         saved_state_from_args(args, model)?
     } else {
         let state_path = crate::get_state_path();
-        SavedState::load(&state_path).unwrap_or_default()
+        let mut s = SavedState::load(&state_path).unwrap_or_default();
+        // Merge CLI overrides into saved state
+        merge_cli_overrides(&mut s, args)?;
+        s
     };
 
     let builder = state_file::build_from_state(&saved, config, cache)?;
@@ -64,6 +67,9 @@ fn saved_state_from_args(args: &BuildArgs, model: &str) -> Result<SavedState, St
     if let Some(ref q) = args.quantization {
         saved.quantizations.insert("weights".to_string(), q.clone());
     }
+    if let Some(ref q) = args.mmproj_quantization {
+        saved.quantizations.insert("mmproj".to_string(), q.clone());
+    }
 
     // Output
     if let Some(ref output) = args.output {
@@ -95,6 +101,45 @@ fn saved_state_from_args(args: &BuildArgs, model: &str) -> Result<SavedState, St
     }
 
     Ok(saved)
+}
+
+/// Merge CLI args as overrides into an existing SavedState (multi-step mode).
+/// Only non-None/non-empty args are applied.
+fn merge_cli_overrides(saved: &mut SavedState, args: &BuildArgs) -> Result<(), String> {
+    if let Some(ref v) = args.version {
+        saved.version = Some(v.clone());
+        saved.version_group = None; // will be resolved by build_from_state
+    }
+    if let Some(ref runtime) = args.runtime {
+        saved.custom_runtime = Some(runtime.to_string_lossy().to_string());
+        saved.version = None;
+        saved.version_group = None;
+    }
+    if let Some(ref output) = args.output {
+        saved.output_path = Some(output.to_string_lossy().to_string());
+    }
+    if let Some(ctx) = args.context_length {
+        saved.config_values.insert("context_length".to_string(), serde_json::json!(ctx));
+    }
+    if let Some(ref q) = args.quantization {
+        saved.quantizations.insert("weights".to_string(), q.clone());
+    }
+    if let Some(ref q) = args.mmproj_quantization {
+        saved.quantizations.insert("mmproj".to_string(), q.clone());
+    }
+    if let Some(ref path) = args.args_file {
+        saved.args_file = Some(path.to_string_lossy().to_string());
+    }
+    for gpu in &args.gpu {
+        parse_gpu_spec(gpu)?;
+        if !saved.gpu_libs.contains(gpu) {
+            saved.gpu_libs.push(gpu.clone());
+        }
+    }
+    if let Some(ref path) = args.zipalign {
+        saved.custom_zipalign = Some(path.to_string_lossy().to_string());
+    }
+    Ok(())
 }
 
 pub fn parse_gpu_spec(spec: &str) -> Result<(GpuAccel, Vec<Os>), String> {

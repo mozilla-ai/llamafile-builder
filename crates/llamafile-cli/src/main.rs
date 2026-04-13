@@ -20,10 +20,7 @@ fn exit_code_for_error(error: &str) -> ExitCode {
         ExitCode::from(5)
     } else if e.contains("download") || e.contains("http") || e.contains("auth") {
         ExitCode::from(3)
-    } else if e.contains("not found in registry")
-        || e.contains("invalid")
-        || e.contains("not found. use")
-    {
+    } else if e.contains("not found") || e.contains("invalid") {
         ExitCode::from(2)
     } else {
         ExitCode::from(4) // build failed
