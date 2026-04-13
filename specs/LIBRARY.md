@@ -216,11 +216,23 @@ Every selection resolves to a list of `Component`s via `resolved_components()`.
 struct Component {
     role: ComponentRole,
     source: ComponentSource,
-    zip_path: String,             // path inside the llamafile, e.g. "/zip/model.gguf"
+    zip_path: String,
     expected_size: Option<u64>,
     expected_sha256: Option<String>,
 }
 ```
+
+**`zip_path` semantics**: llamafile uses [cosmopolitan libc](https://justine.lol/cosmopolitan/) which mounts bundled ZIP content at `/zip/` at runtime. Files that the llamafile binary needs to load at runtime (model weights, .args, GPU libraries) must be placed under `/zip/` in the bundle. Components that are **not** loaded at runtime have an empty `zip_path`:
+
+| Component | zip_path | Reason |
+|-----------|----------|--------|
+| Weights | `/zip/model.gguf` | loaded by llamafile |
+| MmprojWeights | `/zip/mmproj.gguf` | loaded by llamafile |
+| ArgsFile | `/zip/.args` | loaded by llamafile |
+| ArgsPrompt | `/zip/.args.prompt` | loaded by llamafile |
+| GpuLib | `ggml-cuda.so` (no `/zip/` prefix) | loaded by OS dynamic linker |
+| Runtime | `""` (empty) | **is** the base executable, not bundled into itself |
+| Zipalign | `""` (empty) | build tool only, not bundled |
 
 | `ComponentRole` | Description |
 |-----------------|-------------|

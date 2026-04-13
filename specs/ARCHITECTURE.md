@@ -84,6 +84,16 @@ No `clap`, no `axum`, no `ratatui`, no rendering libraries of any kind.
 
 The current codebase embeds `versions.json`, `models.json`, and `config.json` at compile time. The new design replaces this with a `ConfigManager` that:
 
+All JSON config files use a **versioned envelope format**:
+```json
+{
+  "config_version": 1,
+  "min_builder_version": "0.1.0",
+  "data": [ ... ]
+}
+```
+`config_version` is a monotonically increasing integer. `min_builder_version` declares the minimum builder version required to interpret this config. `data` contains the actual array of versions, models, or config schema items. The ConfigManager also accepts bare arrays for backward compatibility with user-edited configs.
+
 1. **On first run**: uses bundled fallback configs (compiled in as defaults) and writes them to a local config directory.
 2. **On startup** (if update checking is enabled): fetches configs from a remote URL, compares version fields, and replaces local copies if newer.
 3. **On version mismatch**: if the fetched config declares a minimum builder version higher than the running binary, warns the user instead of applying it.
@@ -270,6 +280,15 @@ Downloads use two systems depending on the component source:
 - Handles auth via `HF_TOKEN` env var and `~/.cache/huggingface/token`
 - Supports async downloads (tokio feature)
 
+**HF download strategy**: the `Cache::ensure()` method for HuggingFace sources follows this sequence:
+
+1. **Local cache check first**: `hf_hub::Cache::from_env().model(repo_id).get(filename)` performs a pure filesystem check against hf-hub's cache. No network access. If the file is found, return immediately.
+2. **Download on cache miss**: `download_with_progress()` downloads via hf-hub with our custom `TracingProgress` reporter (shared `Arc<AtomicU64>` counter for parallel chunks, `compare_exchange` for deduplicating milestone logs).
+3. **Lock file handling**: if hf-hub fails with "Lock acquisition failed" (stale `.lock` file from an interrupted download or a concurrent process), the error message is surfaced to the user with the lock file path so they can decide whether to remove it. We do not auto-remove lock files — they may belong to a concurrent download.
+4. **No fallback downloader**: HuggingFace sources are never downloaded with our own HTTP downloader. Interoperability with llama.cpp and other tools that share the HF cache is the priority (NFR-8).
+
+Note: hf-hub's `download_with_progress()` does not check its own cache — it always downloads. This is why step 1 (our manual cache check) is essential to avoid re-downloading files on every build.
+
 **Non-HF files** (`ComponentSource::Url`) -- runtimes, GPU libraries, zipalign -- use our own `Downloader` backed by `reqwest`, with resume support (HTTP Range), SHA256 verification, and progress reporting via `tracing`.
 
 **Zipalign as a managed dependency**: zipalign is not assumed to be pre-installed. It comes from the same release as the llamafile runtime and is downloaded and cached alongside it. The `versions.json` config includes zipalign download URLs per release. Users may override with `use_custom_zipalign()` if they have a local copy.
@@ -315,17 +334,24 @@ pub enum CacheStatus {
 
 ### Observability
 
-All operations in the core library are instrumented with `tracing` spans and events. The library does not own any UI-facing progress types or channels -- it is the responsibility of the interface layer (CLI, server, TUI) to subscribe to tracing events and present them however it chooses.
+**Tracing is the sole observability mechanism.** The core library has no UI-facing progress types, no callback channels, no event emitters. All operations are instrumented with `tracing` events. Each interface layer subscribes to these events and presents them however it chooses:
 
-Key spans emitted during a build:
-- `build{output=...}` -- outer span for the entire build
-- `ensure_runtime` -- downloading or locating the llamafile binary
-- `ensure_model` -- downloading or locating model weights
-- `write_config` -- generating and writing the .args file
-- `ensure_gpu_libs` -- downloading or locating GPU libraries
-- `create_executable` -- copying runtime, running zipalign
+- **CLI**: standard `tracing_subscriber` writing to stderr at INFO level.
+- **TUI**: custom `tracing::Layer` forwarding events to an `mpsc` channel, drained by the render loop.
+- **HTTP server** (planned): tracing events bridged to SSE stream.
 
-Download progress is emitted as INFO-level events with structured fields: `bytes_downloaded`, `bytes_total`, `percentage`, `filename`.
+Key events emitted during a build (all at INFO level unless noted):
+- `build started` with `output` field
+- `preparing zipalign` / `preparing runtime` / `preparing model files`
+- `already cached` (cache hit) or `download started` / `downloading` (with `bytes_downloaded`, `bytes_total`, `percentage`, `filename` fields)
+- `download complete` or `already in HF cache`
+- `writing .args configuration` (DEBUG)
+- `bundling` / `copying runtime` / `running zipalign` (DEBUG)
+- `build complete` with `path` and `size_human` fields (DEBUG)
+
+Download progress events are emitted at DEBUG level (~2/sec) with INFO at 10% milestones. This keeps INFO-level output clean while giving frontends fine-grained progress when they subscribe to DEBUG.
+
+Important constraint: async functions in the core library must not use `#[tracing::instrument]` or hold `EnteredSpan` across `.await` points, as this makes futures `!Send` and prevents `tokio::spawn`.
 
 ### Validation (FR-6)
 
@@ -454,9 +480,15 @@ JSON-RPC 2.0 over stdin/stdout. For scripting scenarios where multiple operation
 
 Methods mirror the core library API one-to-one. This mode is useful for integration with editors, external GUIs, or complex automation that the CLI's one-shot model doesn't suit.
 
-### TUI (optional, `llamafile-tui`)
+Note: the current implementation is missing `cancel`, `list_ollama_models`, and `list_lmstudio_models` methods. These are planned for a future phase.
 
-A separate binary using `ratatui` + `crossterm`. Links directly to `llamafile-core` (no IPC). This is optional and lower priority -- the CLI and web UI cover the primary use cases. The TUI provides a middle ground for users who want a visual wizard in a terminal without launching a browser.
+### TUI (`llamafile-tui`)
+
+A separate binary using `ratatui` + `crossterm`. Links directly to `llamafile-core` (no IPC). The TUI provides an interactive wizard in the terminal without requiring a browser or display server.
+
+The TUI is fully functional: version/model/quantization selection via popup menus, schema-driven configuration editing, multi-select GPU library picker, `.args` editor with `tui-textarea`, real-time log pane with level filtering, and non-blocking builds via `tokio::spawn`.
+
+See [TUI.md](TUI.md) for full reference.
 
 
 ## Project structure
@@ -503,10 +535,15 @@ llamafile-builder/
 |   |       +-- interactive.rs        # JSON-RPC over stdio
 |   |       +-- progress.rs           # Terminal progress display (indicatif)
 |   |
-|   +-- llamafile-tui/                # Optional: terminal UI
+|   +-- llamafile-tui/                # Terminal UI wizard
 |       +-- Cargo.toml
 |       +-- src/
-|           +-- main.rs
+|           +-- main.rs              # Entry point, tokio runtime, build task spawning
+|           +-- app.rs               # App state, Focus/Popup enums, Builder bridge
+|           +-- ui.rs                # Dashboard and popup rendering
+|           +-- events.rs            # Key handling for all popups
+|           +-- config_ui.rs         # Schema flattening for config popup
+|           +-- log_layer.rs         # Custom tracing Layer -> mpsc channel
 |           +-- app.rs
 |           +-- ui.rs
 |           +-- events.rs
