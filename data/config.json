@@ -4,7 +4,6 @@
   "data": [
     { "type": "text", "key": "model_path", "label": "Model path", "description": "Path to model weights", "default": "/zip/${MODEL_FILENAME}", "value_type": "string", "flag": "-m", "hidden": true, "required": true },
     { "type": "text", "key": "mmproj_path", "label": "MMProj path", "description": "Path to mmproj weights", "default": "/zip/${MMPROJ_FILENAME}", "value_type": "string", "flag": "--mmproj", "hidden": true, "conditional": "has_mmproj" },
-    { "type": "bool", "key": "no_mmap", "label": "Disable mmap", "description": "Required for llamafile", "default": true, "flag": "--no-mmap", "hidden": true, "required": true },
     { "type": "text", "key": "gpu_mode", "label": "GPU Mode", "description": "GPU acceleration mode (set to DISABLE for CPU-only)", "default": "", "value_type": "string", "flag": "--gpu", "hidden": true },
 
     {
