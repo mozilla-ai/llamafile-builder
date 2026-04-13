@@ -39,7 +39,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Popup::GpuEdit { specs, selected, adding, add_buf } => {
             draw_gpu_popup(frame, specs, *selected, *adding, add_buf)
         }
-        Popup::ArgsPreview { content } => draw_args_popup(frame, content),
+        Popup::ArgsPreview { content, editing, cursor_line } => draw_args_popup(frame, content, *editing, *cursor_line),
         Popup::Confirm { message, .. } => draw_confirm_popup(frame, message),
     }
 }
@@ -122,9 +122,17 @@ fn draw_dashboard(frame: &mut Frame, app: &App, area: Rect) {
     // Mmproj (only if model has it)
     if has_mmproj {
         let marker = if app.focus == Focus::Mmproj { ">" } else { " " };
-        let quant = app.quant_for_role("mmproj");
-        let label = format!(" {} Mmproj     {}", marker, quant);
-        frame.render_widget(Paragraph::new(label).style(style_for(Focus::Mmproj)), rows[row_idx]);
+        if app.mmproj_disabled {
+            let label = format!(" {} Mmproj     [ ] disabled (Space=enable)", marker);
+            frame.render_widget(
+                Paragraph::new(label).style(Style::default().fg(Color::DarkGray)),
+                rows[row_idx],
+            );
+        } else {
+            let quant = app.quant_for_role("mmproj");
+            let label = format!(" {} Mmproj     [x] {}", marker, quant);
+            frame.render_widget(Paragraph::new(label).style(style_for(Focus::Mmproj)), rows[row_idx]);
+        }
         row_idx += 1;
     }
 
@@ -224,6 +232,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Focus::Build => "Enter=build",
         Focus::ShowArgs => "Enter=preview",
         Focus::Quit => "Enter=quit",
+        Focus::Mmproj => "Space=toggle  Enter=change  ↑↓=navigate",
         _ => "Enter=change  ↑↓=navigate",
     };
     let line = format!(" {}  │  {}  │  l=logs  q=quit", desc, keys);
@@ -232,23 +241,24 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_log_pane(frame: &mut Frame, app: &App, area: Rect) {
-    let toggle = if app.log_expanded { "[-]" } else { "[+]" };
     let filtered = app.filtered_logs();
     let count = filtered.len();
-    let title = format!(
-        " Logs ({}, {}/{}) {} (l=toggle, +/-=level) ",
-        app.log_level.as_str(),
-        count,
-        app.logs.len(),
-        toggle
-    );
-    let block = Block::bordered().title(title);
 
     if app.log_expanded {
+        let scroll_info = if app.log_scroll_offset > 0 {
+            format!(" (↑{}) ", app.log_scroll_offset)
+        } else {
+            String::new()
+        };
+        let block = Block::bordered().title(format!(
+            " Logs ({}, {}/{}) [-]{} (l +/- [/]) ",
+            app.log_level.as_str(), count, app.logs.len(), scroll_info
+        ));
         let inner = block.inner(area);
         frame.render_widget(block, area);
-        let visible_start = count.saturating_sub(inner.height as usize);
-        let items: Vec<ListItem> = filtered[visible_start..]
+
+        // Build the full text with colors
+        let lines: Vec<Line> = filtered
             .iter()
             .map(|entry| {
                 let style = match entry.level {
@@ -257,16 +267,24 @@ fn draw_log_pane(frame: &mut Frame, app: &App, area: Rect) {
                     crate::app::LogLevel::Info => Style::default(),
                     crate::app::LogLevel::Debug => Style::default().fg(Color::DarkGray),
                 };
-                ListItem::new(entry.message.as_str()).style(style)
+                Line::styled(entry.message.as_str(), style)
             })
             .collect();
-        frame.render_widget(List::new(items), inner);
+
+        // Scroll from bottom: total lines - visible height - offset
+        let total_lines = lines.len() as u16;
+        let visible_height = inner.height;
+        let max_scroll = total_lines.saturating_sub(visible_height);
+        let scroll_y = max_scroll.saturating_sub(app.log_scroll_offset);
+
+        let paragraph = Paragraph::new(lines).scroll((scroll_y, 0));
+        frame.render_widget(paragraph, inner);
     } else {
+        let block = Block::bordered()
+            .title(format!(" Logs ({}) [+] (l +/- [/]) ", app.log_level.as_str()));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
         let last = filtered.last().map(|e| e.message.as_str()).unwrap_or("");
-        let collapsed_block = Block::bordered()
-            .title(format!(" Logs ({}) [+] ", app.log_level.as_str()));
-        let inner = collapsed_block.inner(area);
-        frame.render_widget(collapsed_block, area);
         frame.render_widget(
             Paragraph::new(format!(" {}", last)).style(Style::default().fg(Color::DarkGray)),
             inner,
@@ -580,15 +598,42 @@ fn draw_gpu_popup(
     }
 }
 
-fn draw_args_popup(frame: &mut Frame, content: &str) {
+fn draw_args_popup(frame: &mut Frame, content: &str, editing: bool, cursor_line: usize) {
     let area = centered_rect(72, 22, frame.area());
     frame.render_widget(Clear, area);
+    let help = if editing {
+        " ↑↓=line  Type=edit  Enter=newline  Esc=done "
+    } else {
+        " e=edit  ↑↓=scroll  Esc=close "
+    };
+    let title = if editing { " .args (editing) " } else { " .args preview " };
     let block = Block::bordered()
-        .title(" .args preview ")
-        .title_bottom(" Esc=close ");
+        .title(title)
+        .title_bottom(help);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    frame.render_widget(Paragraph::new(content), inner);
+
+    let lines: Vec<&str> = content.lines().collect();
+    let visible_height = inner.height as usize;
+    let scroll = cursor_line.saturating_sub(visible_height.saturating_sub(1));
+
+    let items: Vec<ListItem> = lines.iter()
+        .enumerate()
+        .skip(scroll)
+        .take(visible_height)
+        .map(|(i, line)| {
+            let style = if i == cursor_line && editing {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else if i == cursor_line {
+                Style::default().fg(Color::Cyan)
+            } else {
+                Style::default()
+            };
+            let prefix = if i == cursor_line { ">" } else { " " };
+            ListItem::new(format!("{} {}", prefix, line)).style(style)
+        })
+        .collect();
+    frame.render_widget(List::new(items), inner);
 }
 
 fn draw_confirm_popup(frame: &mut Frame, message: &str) {

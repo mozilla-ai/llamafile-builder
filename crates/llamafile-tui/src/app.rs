@@ -99,7 +99,7 @@ pub enum Popup {
         dropdown_selected: usize,
     },
     GpuEdit { specs: Vec<String>, selected: usize, adding: bool, add_buf: String },
-    ArgsPreview { content: String },
+    ArgsPreview { content: String, editing: bool, cursor_line: usize },
     Confirm { message: String, action: ConfirmAction },
 }
 
@@ -179,6 +179,8 @@ pub struct App {
     pub gpu_libs: Vec<String>,
     pub custom_zipalign: Option<String>,
     pub args_file: Option<String>,
+    pub args_override: Option<String>,
+    pub mmproj_disabled: bool,
 
     // UI state
     pub focus: Focus,
@@ -187,6 +189,7 @@ pub struct App {
     pub logs: Vec<LogEntry>,
     pub log_expanded: bool,
     pub log_level: LogLevel,
+    pub log_scroll_offset: u16, // scroll offset from the bottom (0 = tail)
     pub should_quit: bool,
 }
 
@@ -206,12 +209,15 @@ impl App {
             gpu_libs: Vec::new(),
             custom_zipalign: None,
             args_file: None,
+            args_override: None,
+            mmproj_disabled: false,
             focus: Focus::Version,
             popup: Popup::None,
             build_status: BuildStatus::Idle,
             logs: Vec::new(),
             log_expanded: false,
             log_level: LogLevel::Info,
+            log_scroll_offset: 0,
             should_quit: false,
         };
         // Apply defaults
@@ -309,28 +315,24 @@ impl App {
         let defaults = llamafile_core::args::default_config_values(&self.config.config_schema);
         let mut parts = Vec::new();
 
-        let show_keys = ["server_enabled", "context_length", "temperature"];
-        for key in show_keys {
+        // Mode: server+CLI or CLI-only
+        let server_on = self.config_values.get("server_enabled")
+            .or_else(|| defaults.get("server_enabled"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let mode = if server_on { "mode=Server" } else { "mode=Combined" };
+        parts.push(mode.to_string());
+
+        // Other key params
+        for key in ["context_length", "temperature"] {
             let val = self.config_values.get(key).or_else(|| defaults.get(key));
             if let Some(v) = val {
-                let overridden = self.config_values.contains_key(key);
                 let display = match v {
-                    serde_json::Value::Bool(b) => {
-                        if key == "server_enabled" {
-                            if *b { "server=on" } else { "server=off" }.to_string()
-                        } else {
-                            format!("{}={}", key, b)
-                        }
-                    }
                     serde_json::Value::Number(n) => format!("{}={}", key, n),
                     serde_json::Value::String(s) => format!("{}={}", key, s),
                     _ => format!("{}={}", key, v),
                 };
-                if overridden {
-                    parts.push(format!("{}*", display));
-                } else {
-                    parts.push(display);
-                }
+                parts.push(display);
             }
         }
         parts.join("  ")
@@ -396,8 +398,15 @@ impl App {
             builder.use_custom_zipalign(std::path::Path::new(path));
         }
 
-        // Args file
-        if let Some(ref path) = self.args_file {
+        // Disable mmproj if user toggled it off
+        if self.mmproj_disabled {
+            builder.disable_file_role("mmproj");
+        }
+
+        // Args override (from manual editing or file)
+        if let Some(ref content) = self.args_override {
+            builder.set_args_override(content);
+        } else if let Some(ref path) = self.args_file {
             if let Ok(content) = std::fs::read_to_string(path) {
                 builder.set_args_override(&content);
             }

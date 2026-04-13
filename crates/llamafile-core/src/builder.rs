@@ -376,6 +376,14 @@ impl Builder {
         );
     }
 
+    /// Disable a file role (e.g. "mmproj") -- it won't be downloaded or bundled.
+    /// Useful for building text-only from a multimodal model.
+    pub fn disable_file_role(&mut self, role: &str) {
+        self.state.model_file_selections.remove(role);
+        self.state.resolved_mmproj_path = None;
+        self.state.resolved_mmproj_filename = None;
+    }
+
     // ── Configuration ──
 
     pub fn set_config_value(&mut self, key: &str, value: serde_json::Value) {

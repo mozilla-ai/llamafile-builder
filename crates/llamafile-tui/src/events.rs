@@ -16,14 +16,30 @@ pub fn handle_key(app: &mut App, key: event::KeyEvent) -> bool {
         return true;
     }
 
-    // Log level: + = more verbose, - = less verbose
-    if matches!(key.code, KeyCode::Char('+')) && matches!(app.popup, Popup::None) {
-        app.log_level = app.log_level.lower();
-        return true;
-    }
-    if matches!(key.code, KeyCode::Char('-')) && matches!(app.popup, Popup::None) {
-        app.log_level = app.log_level.raise();
-        return true;
+    // Log controls (only when no popup is open)
+    if matches!(app.popup, Popup::None) {
+        match key.code {
+            KeyCode::Char('+') => {
+                app.log_level = app.log_level.lower();
+                app.log_scroll_offset = 0;
+                return true;
+            }
+            KeyCode::Char('-') => {
+                app.log_level = app.log_level.raise();
+                app.log_scroll_offset = 0;
+                return true;
+            }
+            KeyCode::Char('[') if app.log_expanded => {
+                let max = app.filtered_logs().len() as u16;
+                app.log_scroll_offset = (app.log_scroll_offset + 1).min(max.saturating_sub(1));
+                return true;
+            }
+            KeyCode::Char(']') if app.log_expanded => {
+                app.log_scroll_offset = app.log_scroll_offset.saturating_sub(1);
+                return true;
+            }
+            _ => {}
+        }
     }
 
     // Popup handling
@@ -35,12 +51,7 @@ pub fn handle_key(app: &mut App, key: event::KeyEvent) -> bool {
         Popup::OutputEdit { .. } => handle_input_popup(app, key),
         Popup::ConfigEdit { .. } => handle_config_popup(app, key),
         Popup::GpuEdit { .. } => handle_gpu_popup(app, key),
-        Popup::ArgsPreview { .. } => {
-            if matches!(key.code, KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter) {
-                app.popup = Popup::None;
-            }
-            true
-        }
+        Popup::ArgsPreview { .. } => handle_args_popup(app, key),
         Popup::Confirm { .. } => handle_confirm_popup(app, key),
     }
 }
@@ -67,6 +78,10 @@ fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
             }
             true
         }
+        KeyCode::Char(' ') if app.focus == Focus::Mmproj => {
+            app.mmproj_disabled = !app.mmproj_disabled;
+            true
+        }
         KeyCode::Enter => {
             match app.focus {
                 Focus::Version => {
@@ -83,7 +98,7 @@ fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
                         if let Some(file) = model.files.iter().find(|f| f.role == "weights") {
                             let options: Vec<String> =
                                 file.quantizations.iter().map(|q| q.name.clone()).collect();
-                            if options.len() > 1 {
+                            if !options.is_empty() {
                                 app.popup = Popup::QuantSelect {
                                     role: "weights".to_string(),
                                     options,
@@ -94,16 +109,18 @@ fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
                     }
                 }
                 Focus::Mmproj => {
-                    if let Some(model) = app.selected_model() {
-                        if let Some(file) = model.files.iter().find(|f| f.role == "mmproj") {
-                            let options: Vec<String> =
-                                file.quantizations.iter().map(|q| q.name.clone()).collect();
-                            if options.len() > 1 {
-                                app.popup = Popup::QuantSelect {
-                                    role: "mmproj".to_string(),
-                                    options,
-                                    selected: 0,
-                                };
+                    if !app.mmproj_disabled {
+                        if let Some(model) = app.selected_model() {
+                            if let Some(file) = model.files.iter().find(|f| f.role == "mmproj") {
+                                let options: Vec<String> =
+                                    file.quantizations.iter().map(|q| q.name.clone()).collect();
+                                if !options.is_empty() {
+                                    app.popup = Popup::QuantSelect {
+                                        role: "mmproj".to_string(),
+                                        options,
+                                        selected: 0,
+                                    };
+                                }
                             }
                         }
                     }
@@ -130,14 +147,17 @@ fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
                             phase: "starting".to_string(),
                             progress: 0.0,
                         };
-                        app.log_expanded = true;
                     }
                 }
                 Focus::ShowArgs => {
-                    if let Ok(builder) = app.make_builder() {
-                        let content = builder.resolved_args();
-                        app.popup = Popup::ArgsPreview { content };
-                    }
+                    let content = if let Some(ref ov) = app.args_override {
+                        ov.clone()
+                    } else if let Ok(builder) = app.make_builder() {
+                        builder.resolved_args()
+                    } else {
+                        "(error generating .args)".to_string()
+                    };
+                    app.popup = Popup::ArgsPreview { content, editing: false, cursor_line: 0 };
                 }
                 Focus::Quit => {
                     app.should_quit = true;
@@ -478,6 +498,72 @@ fn handle_gpu_popup(app: &mut App, key: event::KeyEvent) -> bool {
                 }
                 KeyCode::Esc => {
                     app.gpu_libs = specs.clone();
+                    app.popup = Popup::None;
+                }
+                _ => {}
+            }
+        }
+    }
+    true
+}
+
+fn handle_args_popup(app: &mut App, key: event::KeyEvent) -> bool {
+    if let Popup::ArgsPreview {
+        ref mut content,
+        ref mut editing,
+        ref mut cursor_line,
+    } = app.popup
+    {
+        if *editing {
+            let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+            if lines.is_empty() {
+                lines.push(String::new());
+            }
+            match key.code {
+                KeyCode::Up => *cursor_line = cursor_line.saturating_sub(1),
+                KeyCode::Down => *cursor_line = (*cursor_line + 1).min(lines.len().saturating_sub(1)),
+                KeyCode::Enter => {
+                    // Insert new line after cursor
+                    lines.insert(*cursor_line + 1, String::new());
+                    *cursor_line += 1;
+                    *content = lines.join("\n");
+                }
+                KeyCode::Backspace => {
+                    let is_empty = lines.get(*cursor_line).map(|l| l.is_empty()).unwrap_or(false);
+                    if is_empty && lines.len() > 1 {
+                        lines.remove(*cursor_line);
+                        *cursor_line = cursor_line.saturating_sub(1);
+                    } else if let Some(line) = lines.get_mut(*cursor_line) {
+                        line.pop();
+                    }
+                    *content = lines.join("\n");
+                }
+                KeyCode::Char(c) => {
+                    if let Some(line) = lines.get_mut(*cursor_line) {
+                        line.push(c);
+                    }
+                    *content = lines.join("\n");
+                }
+                KeyCode::Esc => {
+                    // Save edited content as args override
+                    app.args_file = None;
+                    app.args_override = Some(content.clone());
+                    *editing = false;
+                }
+                _ => {}
+            }
+        } else {
+            match key.code {
+                KeyCode::Char('e') => {
+                    *editing = true;
+                    *cursor_line = 0;
+                }
+                KeyCode::Up => *cursor_line = cursor_line.saturating_sub(1),
+                KeyCode::Down => {
+                    let line_count = content.lines().count();
+                    *cursor_line = (*cursor_line + 1).min(line_count.saturating_sub(1));
+                }
+                KeyCode::Esc | KeyCode::Char('q') => {
                     app.popup = Popup::None;
                 }
                 _ => {}
