@@ -12,21 +12,20 @@
       "description": "Set up inference parameters",
       "items": [
         { "type": "dropdown", "key": "context_length", "label": "Context Length", "description": "Maximum context window size", "default": 16384, "options": [2048, 4096, 8192, 16384, 32768, 65536, 131072], "flag": "--ctx-size" },
-        { "type": "slider", "key": "temperature", "label": "Temperature", "description": "Sampling temperature for generation", "default": 0.7, "min": 0, "max": 2, "step": 0.1, "flag": "--temp" }
+        { "type": "slider", "key": "temperature", "label": "Temperature", "description": "Sampling temperature for generation", "default": 0.8, "min": 0, "max": 2, "step": 0.1, "flag": "--temp" }
       ]
     },
 
     {
       "type": "section",
-      "key": "server_enabled",
-      "flag": "--server",
-      "label": "Server Mode",
+      "label": "HTTP Server",
       "description": "Run as an HTTP server with OpenAI-compatible API",
-      "default": false,
+      "default": true,
       "items": [
         { "type": "text", "key": "host", "label": "Listen Host", "description": "Network interface to bind to", "default": "127.0.0.1", "value_type": "string", "flag": "--host" },
         { "type": "text", "key": "port", "label": "Port", "description": "HTTP server port", "default": 8080, "value_type": "number", "flag": "--port" },
-        { "type": "bool", "key": "enable_web_ui", "label": "Enable Web UI", "description": "Serve built-in chat interface", "default": true, "flag": "--webui" }
+        { "type": "bool", "key": "server_enabled", "label": "Run standalone", "description": "Run the server only, with no terminal chat UI", "default": false, "flag": "--server" },
+        { "type": "bool", "key": "disable_web_ui", "label": "Disable Web UI", "description": "Run the OpenAI API endpoint, with no Web UI", "default": false, "flag": "--no-webui" }
       ]
     }
   ]
