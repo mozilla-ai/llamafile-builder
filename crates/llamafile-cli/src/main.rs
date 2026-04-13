@@ -1,5 +1,6 @@
 mod cli;
 mod commands;
+mod interactive;
 mod state_file;
 
 use clap::Parser;
@@ -150,6 +151,16 @@ async fn main() -> ExitCode {
             }
         }
         llamafile_core::UpdateMode::Never => {}
+    }
+
+    if cli.interactive {
+        match interactive::run(config).await {
+            Ok(()) => return ExitCode::SUCCESS,
+            Err(e) => {
+                tracing::error!("{e}");
+                return ExitCode::from(1);
+            }
+        }
     }
 
     let cache = Cache::new(get_cache_dir());

@@ -11,6 +11,10 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
 
+    /// Start JSON-RPC interactive mode over stdio
+    #[arg(long)]
+    pub interactive: bool,
+
     /// Override config URL for fetching updates
     #[arg(long, env = "LLAMAFILE_CONFIG_URL")]
     pub config_url: Option<String>,

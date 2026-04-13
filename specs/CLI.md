@@ -183,6 +183,34 @@ lb build --model Qwen/Qwen3-0.6B-GGUF --gpu cuda:linux --gpu cuda:windows  # cro
 ```
 
 
+## Interactive mode (JSON-RPC)
+
+Start a stateful JSON-RPC 2.0 session over stdin/stdout:
+
+```bash
+lb --interactive
+```
+
+Send one JSON object per line on stdin, receive one response per line on stdout. Tracing goes to stderr. See [JSON-RPC.md](JSON-RPC.md) for the full protocol reference and examples.
+
+Quick test:
+
+```bash
+echo '{"jsonrpc":"2.0","id":1,"method":"list_versions"}' | lb --interactive 2>/dev/null
+```
+
+Multi-step session:
+
+```bash
+cat << 'EOF' | lb --interactive 2>/dev/null
+{"jsonrpc":"2.0","id":1,"method":"set_model","params":{"id":"Qwen/Qwen3-0.6B-GGUF"}}
+{"jsonrpc":"2.0","id":2,"method":"set_config","params":{"key":"server_enabled","value":false}}
+{"jsonrpc":"2.0","id":3,"method":"show_args"}
+{"jsonrpc":"2.0","id":4,"method":"build"}
+EOF
+```
+
+
 ## Verbosity
 
 ```bash
