@@ -351,8 +351,9 @@ fn handle_config_popup(app: &mut App, key: event::KeyEvent) -> bool {
             match key.code {
                 KeyCode::Up => {
                     // Skip non-interactive entries going up
-                    let mut idx = selected.saturating_sub(1);
-                    while idx > 0 && !entries_clone.get(idx).map(|e| e.is_interactive()).unwrap_or(false) {
+                    let mut idx = if *selected > 0 { *selected - 1 } else { 0 };
+                    while !entries_clone.get(idx).map(|e| e.is_interactive()).unwrap_or(false) {
+                        if idx == 0 { break; }
                         idx -= 1;
                     }
                     if entries_clone.get(idx).map(|e| e.is_interactive()).unwrap_or(false) {
@@ -501,7 +502,7 @@ fn handle_gpu_popup(app: &mut App, key: event::KeyEvent) -> bool {
                 KeyCode::Char('d') | KeyCode::Delete => {
                     if *selected < specs.len() {
                         specs.remove(*selected);
-                        if *selected > 0 {
+                        if *selected >= specs.len() && *selected > 0 {
                             *selected -= 1;
                         }
                     }

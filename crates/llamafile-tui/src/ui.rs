@@ -214,7 +214,12 @@ fn draw_dashboard(frame: &mut Frame, app: &App, area: Rect) {
             format!("   Done: {} ({})", path, llamafile_core::models::format_size(*size))
         }
         BuildStatus::Failed { error } => {
-            format!("   Failed: {}", error)
+            let max_len = area.width.saturating_sub(14) as usize; // "   Failed: " + margin
+            if error.len() > max_len {
+                format!("   Failed: {}...", &error[..max_len])
+            } else {
+                format!("   Failed: {}", error)
+            }
         }
     };
     frame.render_widget(Paragraph::new(status_text).style(status_style), rows[row_idx]);
