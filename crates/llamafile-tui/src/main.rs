@@ -232,6 +232,8 @@ async fn run_app(
                     let custom_runtime = app.custom_runtime.clone();
                     let model_id = app.model_id.clone();
                     let custom_model_file = app.custom_model_file.clone();
+                    let ollama_model = app.ollama_model.clone();
+                    let lmstudio_model = app.lmstudio_model.clone();
                     let quantizations = app.quantizations.clone();
                     let config_values = app.config_values.clone();
                     let output_path = app.output_path.clone();
@@ -258,6 +260,10 @@ async fn run_app(
 
                         if let Some(ref path) = custom_model_file {
                             builder.select_custom_model(std::path::Path::new(path));
+                        } else if let Some(ref model) = ollama_model {
+                            builder.select_ollama_model(model.clone());
+                        } else if let Some(ref model) = lmstudio_model {
+                            builder.select_lmstudio_model(model.clone());
                         } else if let Some(ref id) = model_id {
                             builder.select_registry_model(id);
                         } else {

@@ -66,11 +66,14 @@ impl Focus {
     }
 
     /// Navigate to next focusable section, skipping disabled ones.
-    pub fn next(self, has_mmproj: bool, args_overridden: bool) -> Focus {
+    pub fn next(self, has_mmproj: bool, args_overridden: bool, local_model: bool) -> Focus {
         let all = Self::ordered();
         let idx = all.iter().position(|&f| f == self).unwrap_or(0);
         for offset in 1..all.len() {
             let candidate = all[(idx + offset) % all.len()];
+            if (candidate == Focus::Weights || candidate == Focus::Mmproj) && local_model {
+                continue;
+            }
             if candidate == Focus::Mmproj && !has_mmproj {
                 continue;
             }
@@ -83,11 +86,14 @@ impl Focus {
     }
 
     /// Navigate to previous focusable section, skipping disabled ones.
-    pub fn prev(self, has_mmproj: bool, args_overridden: bool) -> Focus {
+    pub fn prev(self, has_mmproj: bool, args_overridden: bool, local_model: bool) -> Focus {
         let all = Self::ordered();
         let idx = all.iter().position(|&f| f == self).unwrap_or(0);
         for offset in 1..all.len() {
             let candidate = all[(idx + all.len() - offset) % all.len()];
+            if (candidate == Focus::Weights || candidate == Focus::Mmproj) && local_model {
+                continue;
+            }
             if candidate == Focus::Mmproj && !has_mmproj {
                 continue;
             }
@@ -115,12 +121,52 @@ impl Focus {
     }
 }
 
+/// Which model source tab is active in the model popup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelTab {
+    Registry,
+    Ollama,
+    LmStudio,
+}
+
+impl ModelTab {
+    pub fn label(self) -> &'static str {
+        match self {
+            ModelTab::Registry => "Registry",
+            ModelTab::Ollama => "Ollama",
+            ModelTab::LmStudio => "LM Studio",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            ModelTab::Registry => ModelTab::Ollama,
+            ModelTab::Ollama => ModelTab::LmStudio,
+            ModelTab::LmStudio => ModelTab::Registry,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            ModelTab::Registry => ModelTab::LmStudio,
+            ModelTab::Ollama => ModelTab::Registry,
+            ModelTab::LmStudio => ModelTab::Ollama,
+        }
+    }
+}
+
 /// What popup overlay is showing, if any.
 #[derive(Debug, Clone)]
 pub enum Popup {
     None,
     VersionSelect { selected: usize },
-    ModelSelect { search: String, selected: usize },
+    ModelSelect {
+        tab: ModelTab,
+        search: String,
+        selected: usize,
+        ollama_models: Vec<OllamaModel>,
+        lmstudio_models: Vec<LMStudioModel>,
+    },
     QuantSelect { role: String, options: Vec<String>, selected: usize },
     OutputEdit { textarea: tui_textarea::TextArea<'static>, original: String },
     ConfigEdit {
@@ -213,8 +259,11 @@ pub struct App {
     pub version_group: Option<String>,
     pub version: Option<String>,
     pub custom_runtime: Option<String>,
+    pub model_source: ModelTab,
     pub model_id: Option<String>,
     pub custom_model_file: Option<String>,
+    pub ollama_model: Option<OllamaModel>,
+    pub lmstudio_model: Option<LMStudioModel>,
     pub quantizations: HashMap<String, String>,
     pub config_values: HashMap<String, serde_json::Value>,
     pub output_path: Option<String>,
@@ -245,8 +294,11 @@ impl App {
             version_group: None,
             version: None,
             custom_runtime: None,
+            model_source: ModelTab::Registry,
             model_id: None,
             custom_model_file: None,
+            ollama_model: None,
+            lmstudio_model: None,
             quantizations: HashMap::new(),
             config_values: HashMap::new(),
             output_path: None,
@@ -299,6 +351,11 @@ impl App {
         })
     }
 
+    /// Whether the model comes from a local source (Ollama/LM Studio) with no quantization choices.
+    pub fn is_local_model(&self) -> bool {
+        self.model_source == ModelTab::Ollama || self.model_source == ModelTab::LmStudio
+    }
+
     /// Whether the selected model has an mmproj file.
     pub fn has_mmproj(&self) -> bool {
         self.selected_model()
@@ -337,7 +394,16 @@ impl App {
         if let Some(ref p) = self.output_path {
             return p.clone();
         }
-        // Compute auto path from model
+        // Compute auto path from model source
+        let dir = llamafile_core::models::get_default_output_dir();
+        if let Some(ref ollama) = self.ollama_model {
+            let stem = format!("{}_{}", ollama.model_name, ollama.tag);
+            return format!("{}/{}.llamafile", dir, stem);
+        }
+        if let Some(ref lms) = self.lmstudio_model {
+            let stem = lms.dir_name.replace('/', "_");
+            return format!("{}/{}.llamafile", dir, stem);
+        }
         if let Some(model) = self.selected_model() {
             if let Some(file) = model.files.iter().find(|f| f.role == "weights") {
                 let quant_name = self.quantizations.get("weights")
@@ -348,7 +414,6 @@ impl App {
                     .or_else(|| file.quantizations.first())
                 {
                     let stem = q.filename.trim_end_matches(".gguf").trim_end_matches(".GGUF");
-                    let dir = llamafile_core::models::get_default_output_dir();
                     return format!("{}/{}.llamafile", dir, stem);
                 }
             }
@@ -405,6 +470,10 @@ impl App {
         // Model
         if let Some(ref path) = self.custom_model_file {
             builder.select_custom_model(std::path::Path::new(path));
+        } else if let Some(ref model) = self.ollama_model {
+            builder.select_ollama_model(model.clone());
+        } else if let Some(ref model) = self.lmstudio_model {
+            builder.select_lmstudio_model(model.clone());
         } else if let Some(ref id) = self.model_id {
             builder.select_registry_model(id);
         } else {

@@ -60,13 +60,14 @@ pub fn handle_key(app: &mut App, key: event::KeyEvent) -> bool {
 fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
     let has_mmproj = app.has_mmproj();
     let args_overridden = app.args_override.is_some();
+    let local_model = app.is_local_model();
     match key.code {
         KeyCode::Down | KeyCode::Tab => {
-            app.focus = app.focus.next(has_mmproj, args_overridden);
+            app.focus = app.focus.next(has_mmproj, args_overridden, local_model);
             true
         }
         KeyCode::Up | KeyCode::BackTab => {
-            app.focus = app.focus.prev(has_mmproj, args_overridden);
+            app.focus = app.focus.prev(has_mmproj, args_overridden, local_model);
             true
         }
         KeyCode::Char('q') => {
@@ -106,13 +107,29 @@ fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
                     app.popup = Popup::VersionSelect { selected: idx };
                 }
                 Focus::Model => {
-                    // Find index of currently selected model (unfiltered list)
-                    let idx = app.model_id.as_ref()
-                        .and_then(|id| app.config.models.iter().position(|m| &m.id == id))
-                        .unwrap_or(0);
+                    // Scan local model sources
+                    let ollama_models = llamafile_core::ollama::get_ollama_models(None);
+                    let lmstudio_models = llamafile_core::lmstudio::get_lmstudio_models(None);
+
+                    // Determine initial tab and cursor from current selection
+                    let tab = app.model_source;
+                    let selected = match tab {
+                        ModelTab::Registry => app.model_id.as_ref()
+                            .and_then(|id| app.config.models.iter().position(|m| &m.id == id))
+                            .unwrap_or(0),
+                        ModelTab::Ollama => app.ollama_model.as_ref()
+                            .and_then(|sel| ollama_models.iter().position(|m| m.model_name == sel.model_name))
+                            .unwrap_or(0),
+                        ModelTab::LmStudio => app.lmstudio_model.as_ref()
+                            .and_then(|sel| lmstudio_models.iter().position(|m| m.dir_name == sel.dir_name))
+                            .unwrap_or(0),
+                    };
                     app.popup = Popup::ModelSelect {
+                        tab,
                         search: String::new(),
-                        selected: idx,
+                        selected,
+                        ollama_models,
+                        lmstudio_models,
                     };
                 }
                 Focus::Weights => {
@@ -242,43 +259,107 @@ fn handle_version_popup(app: &mut App, key: event::KeyEvent) -> bool {
 
 fn handle_model_popup(app: &mut App, key: event::KeyEvent) -> bool {
     if let Popup::ModelSelect {
+        ref mut tab,
         ref mut search,
         ref mut selected,
+        ref ollama_models,
+        ref lmstudio_models,
     } = app.popup
     {
-        let filtered = llamafile_core::search_models(
-            &app.config.models,
-            Some(search.as_str()).filter(|s| !s.is_empty()),
-            None,
-        );
-        let count = filtered.len();
-
+        // Tab switching (left/right arrows)
         match key.code {
-            KeyCode::Up => *selected = selected.saturating_sub(1),
-            KeyCode::Down => *selected = (*selected + 1).min(count.saturating_sub(1)),
-            KeyCode::Enter => {
+            KeyCode::Left => {
+                *tab = tab.prev();
+                *selected = 0;
+                return true;
+            }
+            KeyCode::Right => {
+                *tab = tab.next();
+                *selected = 0;
+                return true;
+            }
+            _ => {}
+        }
+
+        match *tab {
+            ModelTab::Registry => {
                 let filtered = llamafile_core::search_models(
                     &app.config.models,
                     Some(search.as_str()).filter(|s| !s.is_empty()),
                     None,
                 );
-                if let Some(model) = filtered.get(*selected) {
-                    app.model_id = Some(model.id.clone());
-                    app.custom_model_file = None;
-                    app.quantizations.clear();
+                let count = filtered.len();
+
+                match key.code {
+                    KeyCode::Up => *selected = selected.saturating_sub(1),
+                    KeyCode::Down => *selected = (*selected + 1).min(count.saturating_sub(1)),
+                    KeyCode::Enter => {
+                        if let Some(model) = filtered.get(*selected) {
+                            app.model_source = ModelTab::Registry;
+                            app.model_id = Some(model.id.clone());
+                            app.custom_model_file = None;
+                            app.ollama_model = None;
+                            app.lmstudio_model = None;
+                            app.quantizations.clear();
+                        }
+                        app.popup = Popup::None;
+                    }
+                    KeyCode::Esc => app.popup = Popup::None,
+                    KeyCode::Backspace => {
+                        search.pop();
+                        *selected = 0;
+                    }
+                    KeyCode::Char(c) => {
+                        search.push(c);
+                        *selected = 0;
+                    }
+                    _ => {}
                 }
-                app.popup = Popup::None;
             }
-            KeyCode::Esc => app.popup = Popup::None,
-            KeyCode::Backspace => {
-                search.pop();
-                *selected = 0;
+            ModelTab::Ollama => {
+                let count = ollama_models.len();
+                match key.code {
+                    KeyCode::Up => *selected = selected.saturating_sub(1),
+                    KeyCode::Down => if count > 0 {
+                        *selected = (*selected + 1).min(count - 1);
+                    },
+                    KeyCode::Enter => {
+                        if let Some(model) = ollama_models.get(*selected) {
+                            app.model_source = ModelTab::Ollama;
+                            app.ollama_model = Some(model.clone());
+                            app.model_id = None;
+                            app.custom_model_file = None;
+                            app.lmstudio_model = None;
+                            app.quantizations.clear();
+                        }
+                        app.popup = Popup::None;
+                    }
+                    KeyCode::Esc => app.popup = Popup::None,
+                    _ => {}
+                }
             }
-            KeyCode::Char(c) => {
-                search.push(c);
-                *selected = 0;
+            ModelTab::LmStudio => {
+                let count = lmstudio_models.len();
+                match key.code {
+                    KeyCode::Up => *selected = selected.saturating_sub(1),
+                    KeyCode::Down => if count > 0 {
+                        *selected = (*selected + 1).min(count - 1);
+                    },
+                    KeyCode::Enter => {
+                        if let Some(model) = lmstudio_models.get(*selected) {
+                            app.model_source = ModelTab::LmStudio;
+                            app.lmstudio_model = Some(model.clone());
+                            app.model_id = None;
+                            app.custom_model_file = None;
+                            app.ollama_model = None;
+                            app.quantizations.clear();
+                        }
+                        app.popup = Popup::None;
+                    }
+                    KeyCode::Esc => app.popup = Popup::None,
+                    _ => {}
+                }
             }
-            _ => {}
         }
     }
     true

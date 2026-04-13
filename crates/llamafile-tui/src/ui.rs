@@ -3,7 +3,7 @@ use ratatui::widgets::*;
 
 use crate::app;
 use crate::app::*;
-use llamafile_core::models::{GpuAccel, Os};
+use llamafile_core::models::{GpuAccel, Os, OllamaModel, LMStudioModel, format_size};
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let chunks = if app.log_expanded {
@@ -30,7 +30,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
     match &app.popup {
         Popup::None => {}
         Popup::VersionSelect { selected } => draw_version_popup(frame, app, *selected),
-        Popup::ModelSelect { search, selected } => draw_model_popup(frame, app, search, *selected),
+        Popup::ModelSelect { tab, search, selected, ollama_models, lmstudio_models } => {
+            draw_model_popup(frame, app, *tab, search, *selected, ollama_models, lmstudio_models)
+        }
         Popup::QuantSelect { role, options, selected } => {
             let active_name = app.quantizations.get(role);
             draw_quant_popup(frame, role, options, *selected, active_name)
@@ -107,45 +109,54 @@ fn draw_dashboard(frame: &mut Frame, app: &App, area: Rect) {
 
     // Model
     let marker = if app.focus == Focus::Model { ">" } else { " " };
-    let model_name = app.selected_model()
-        .map(|m| format!("{} ({})", m.name, m.parameters))
-        .unwrap_or_else(|| "(none)".to_string());
+    let model_name = match app.model_source {
+        app::ModelTab::Registry => app.selected_model()
+            .map(|m| format!("{} ({})", m.name, m.parameters))
+            .unwrap_or_else(|| "(none)".to_string()),
+        app::ModelTab::Ollama => app.ollama_model.as_ref()
+            .map(|m| format!("[Ollama] {}", m.display_name))
+            .unwrap_or_else(|| "(none)".to_string()),
+        app::ModelTab::LmStudio => app.lmstudio_model.as_ref()
+            .map(|m| format!("[LM Studio] {}", m.display_name))
+            .unwrap_or_else(|| "(none)".to_string()),
+    };
     let label = format!(" {} Model      {}", marker, model_name);
     frame.render_widget(Paragraph::new(label).style(style_for(Focus::Model)), rows[row_idx]);
     row_idx += 1;
 
-    // Weights
-    let marker = if app.focus == Focus::Weights { ">" } else { " " };
-    let quant = app.quant_for_role("weights");
-    let size = app.selected_model().and_then(|m| {
-        m.files.iter().find(|f| f.role == "weights").and_then(|f| {
-            let qname = app.quantizations.get("weights")
-                .map(|s| s.as_str())
-                .unwrap_or(f.quantizations.first().map(|q| q.name.as_str()).unwrap_or(""));
-            f.quantizations.iter().find(|q| q.name == qname)
-                .or(f.quantizations.first())
-                .map(|q| llamafile_core::models::format_size(q.size_bytes))
-        })
-    }).unwrap_or_default();
-    let label = format!(" {} Weights    {} ({})", marker, quant, size);
-    frame.render_widget(Paragraph::new(label).style(style_for(Focus::Weights)), rows[row_idx]);
-    row_idx += 1;
-
-    // Mmproj (only if model has it)
-    if has_mmproj {
-        let marker = if app.focus == Focus::Mmproj { ">" } else { " " };
-        if app.mmproj_disabled {
-            let label = format!(" {} Mmproj     [ ] disabled (Space=enable)", marker);
-            frame.render_widget(
-                Paragraph::new(label).style(Style::default().fg(Color::DarkGray)),
-                rows[row_idx],
-            );
-        } else {
-            let quant = app.quant_for_role("mmproj");
-            let label = format!(" {} Mmproj     [x] {}", marker, quant);
-            frame.render_widget(Paragraph::new(label).style(style_for(Focus::Mmproj)), rows[row_idx]);
-        }
+    // Weights and Mmproj (hidden for Ollama/LM Studio models)
+    if !app.is_local_model() {
+        let marker = if app.focus == Focus::Weights { ">" } else { " " };
+        let quant = app.quant_for_role("weights");
+        let size = app.selected_model().and_then(|m| {
+            m.files.iter().find(|f| f.role == "weights").and_then(|f| {
+                let qname = app.quantizations.get("weights")
+                    .map(|s| s.as_str())
+                    .unwrap_or(f.quantizations.first().map(|q| q.name.as_str()).unwrap_or(""));
+                f.quantizations.iter().find(|q| q.name == qname)
+                    .or(f.quantizations.first())
+                    .map(|q| llamafile_core::models::format_size(q.size_bytes))
+            })
+        }).unwrap_or_default();
+        let label = format!(" {} Weights    {} ({})", marker, quant, size);
+        frame.render_widget(Paragraph::new(label).style(style_for(Focus::Weights)), rows[row_idx]);
         row_idx += 1;
+
+        if has_mmproj {
+            let marker = if app.focus == Focus::Mmproj { ">" } else { " " };
+            if app.mmproj_disabled {
+                let label = format!(" {} Mmproj     [ ] disabled (Space=enable)", marker);
+                frame.render_widget(
+                    Paragraph::new(label).style(Style::default().fg(Color::DarkGray)),
+                    rows[row_idx],
+                );
+            } else {
+                let quant = app.quant_for_role("mmproj");
+                let label = format!(" {} Mmproj     [x] {}", marker, quant);
+                frame.render_widget(Paragraph::new(label).style(style_for(Focus::Mmproj)), rows[row_idx]);
+            }
+            row_idx += 1;
+        }
     }
 
     // blank
@@ -455,62 +466,142 @@ fn draw_version_popup(frame: &mut Frame, app: &App, selected: usize) {
     frame.render_widget(List::new(list_items), inner);
 }
 
-fn draw_model_popup(frame: &mut Frame, app: &App, search: &str, selected: usize) {
+fn draw_model_popup(
+    frame: &mut Frame,
+    app: &App,
+    tab: app::ModelTab,
+    search: &str,
+    selected: usize,
+    ollama_models: &[OllamaModel],
+    lmstudio_models: &[LMStudioModel],
+) {
     let area = centered_rect(72, 22, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::bordered()
         .title(" Select Model ")
-        .title_bottom(" Type to search  ↑↓=navigate  Enter=select  Esc=cancel ");
+        .title_bottom(" ←→=source  ↑↓=navigate  Enter=select  Esc=cancel ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     let rows = Layout::vertical([
-        Constraint::Length(1), // search
-        Constraint::Length(1), // blank
+        Constraint::Length(1), // tabs
+        Constraint::Length(1), // search or blank
         Constraint::Min(1),   // list
     ])
     .split(inner);
 
-    let search_line = format!(" Search: {}_", search);
-    frame.render_widget(
-        Paragraph::new(search_line).style(Style::default().fg(Color::Cyan)),
-        rows[0],
-    );
+    // Tab bar
+    let tabs = [app::ModelTab::Registry, app::ModelTab::Ollama, app::ModelTab::LmStudio];
+    let tab_spans: Vec<Span> = tabs.iter().flat_map(|&t| {
+        let style = if t == tab {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        vec![Span::styled(format!(" {} ", t.label()), style), Span::raw("  ")]
+    }).collect();
+    frame.render_widget(Paragraph::new(Line::from(tab_spans)), rows[0]);
 
-    let filtered = llamafile_core::search_models(
-        &app.config.models,
-        Some(search).filter(|s| !s.is_empty()),
-        None,
-    );
-
-    let list_items: Vec<ListItem> = filtered
-        .iter()
-        .enumerate()
-        .map(|(i, model)| {
-            let size: u64 = model.files.iter()
-                .flat_map(|f| f.quantizations.first())
-                .map(|q| q.size_bytes)
-                .sum();
-            let tags = model.tags.join(", ");
-            let active = app.model_id.as_ref() == Some(&model.id);
-            let marker = if active { "*" } else { " " };
-            let label = format!(
-                " {} {} — {} {} [{}]",
-                marker,
-                model.name,
-                model.parameters,
-                llamafile_core::models::format_size(size),
-                tags
+    match tab {
+        app::ModelTab::Registry => {
+            let search_line = format!(" Search: {}_", search);
+            frame.render_widget(
+                Paragraph::new(search_line).style(Style::default().fg(Color::Cyan)),
+                rows[1],
             );
-            let style = if i == selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+
+            let filtered = llamafile_core::search_models(
+                &app.config.models,
+                Some(search).filter(|s| !s.is_empty()),
+                None,
+            );
+
+            let list_items: Vec<ListItem> = filtered
+                .iter()
+                .enumerate()
+                .map(|(i, model)| {
+                    let size: u64 = model.files.iter()
+                        .flat_map(|f| f.quantizations.first())
+                        .map(|q| q.size_bytes)
+                        .sum();
+                    let tags = model.tags.join(", ");
+                    let active = app.model_source == app::ModelTab::Registry
+                        && app.model_id.as_ref() == Some(&model.id);
+                    let marker = if active { "*" } else { " " };
+                    let label = format!(
+                        " {} {} — {} {} [{}]",
+                        marker, model.name, model.parameters,
+                        llamafile_core::models::format_size(size), tags
+                    );
+                    let style = if i == selected {
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    };
+                    ListItem::new(label).style(style)
+                })
+                .collect();
+            frame.render_widget(List::new(list_items), rows[2]);
+        }
+        app::ModelTab::Ollama => {
+            if ollama_models.is_empty() {
+                frame.render_widget(
+                    Paragraph::new("  No Ollama models found").style(Style::default().fg(Color::DarkGray)),
+                    rows[2],
+                );
             } else {
-                Style::default()
-            };
-            ListItem::new(label).style(style)
-        })
-        .collect();
-    frame.render_widget(List::new(list_items), rows[2]);
+                let list_items: Vec<ListItem> = ollama_models
+                    .iter()
+                    .enumerate()
+                    .map(|(i, m)| {
+                        let active = app.model_source == app::ModelTab::Ollama
+                            && app.ollama_model.as_ref().map(|o| &o.model_name) == Some(&m.model_name);
+                        let marker = if active { "*" } else { " " };
+                        let label = format!(
+                            " {} {} — {}",
+                            marker, m.display_name, format_size(m.size_bytes)
+                        );
+                        let style = if i == selected {
+                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default()
+                        };
+                        ListItem::new(label).style(style)
+                    })
+                    .collect();
+                frame.render_widget(List::new(list_items), rows[2]);
+            }
+        }
+        app::ModelTab::LmStudio => {
+            if lmstudio_models.is_empty() {
+                frame.render_widget(
+                    Paragraph::new("  No LM Studio models found").style(Style::default().fg(Color::DarkGray)),
+                    rows[2],
+                );
+            } else {
+                let list_items: Vec<ListItem> = lmstudio_models
+                    .iter()
+                    .enumerate()
+                    .map(|(i, m)| {
+                        let active = app.model_source == app::ModelTab::LmStudio
+                            && app.lmstudio_model.as_ref().map(|l| &l.dir_name) == Some(&m.dir_name);
+                        let marker = if active { "*" } else { " " };
+                        let label = format!(
+                            " {} {} — {}",
+                            marker, m.display_name, format_size(m.total_size_bytes)
+                        );
+                        let style = if i == selected {
+                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default()
+                        };
+                        ListItem::new(label).style(style)
+                    })
+                    .collect();
+                frame.render_widget(List::new(list_items), rows[2]);
+            }
+        }
+    }
 }
 
 fn draw_quant_popup(frame: &mut Frame, role: &str, options: &[String], selected: usize, active_name: Option<&String>) {
