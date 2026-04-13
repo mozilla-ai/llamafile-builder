@@ -50,7 +50,7 @@ Cargo workspace with `llamafile-core` (library) and `llamafile-cli` (binary) cra
 
 ---
 
-## Phase 5a: Config versioning
+## Phase 5a: Config versioning -- DONE
 
 **Goal**: JSON config files carry version metadata so the builder can detect newer configs and reject incompatible ones (NFR-9).
 
@@ -77,7 +77,7 @@ Cargo workspace with `llamafile-core` (library) and `llamafile-cli` (binary) cra
 
 ---
 
-## Phase 5b: HuggingFace downloads via hf-hub
+## Phase 5b: HuggingFace downloads via hf-hub -- DONE
 
 **Goal**: Model downloads use the `hf-hub` crate and the shared HuggingFace cache at `~/.cache/huggingface/hub/`, achieving interoperability with llama.cpp and other tools (NFR-8).
 
@@ -94,7 +94,7 @@ Cargo workspace with `llamafile-core` (library) and `llamafile-cli` (binary) cra
 
 ---
 
-## Phase 5c: Zipalign as a managed dependency
+## Phase 5c: Zipalign as a managed dependency -- DONE
 
 **Goal**: zipalign is downloaded and cached automatically, not assumed to be pre-installed (FR-5).
 
@@ -112,7 +112,7 @@ Cargo workspace with `llamafile-core` (library) and `llamafile-cli` (binary) cra
 
 ---
 
-## Phase 5d: Multi-step CLI
+## Phase 5d: Multi-step CLI -- DONE
 
 **Goal**: The CLI supports incremental configuration across multiple invocations, persisting state between them (NFR-5).
 

@@ -1,60 +1,20 @@
-use std::path::Path;
-
 use llamafile_core::cache::Cache;
 use llamafile_core::config_manager::BuilderConfig;
 use llamafile_core::models::{GpuAccel, Os};
-use llamafile_core::Builder;
 
 use crate::cli::BuildArgs;
 use crate::state_file::{self, SavedState};
 
 pub async fn run(args: &BuildArgs, config: BuilderConfig, cache: Cache) -> Result<(), String> {
-    let mut builder = Builder::new(config, cache);
-
-    if let Some(ref model) = args.model {
-        // One-shot mode: all options from command line
-        configure_from_args(&mut builder, args, model)?;
+    // Build saved state: either from file (multi-step) or from CLI args (one-shot)
+    let saved = if let Some(ref model) = args.model {
+        saved_state_from_args(args, model)?
     } else {
-        // Multi-step mode: load saved state
         let state_path = crate::get_state_path();
-        let saved = SavedState::load(&state_path).ok_or(
-            "No --model specified and no saved configuration found.\n\
-             Use 'config set-model <id>' first, or pass --model on the command line."
-                .to_string(),
-        )?;
-        if saved.is_empty() {
-            return Err(
-                "Saved configuration is empty. Use 'config set-*' commands first.".to_string(),
-            );
-        }
-        state_file::apply_to_builder(&saved, &mut builder)?;
+        SavedState::load(&state_path).unwrap_or_default()
+    };
 
-        // CLI args still override saved state where provided
-        if let Some(ref v) = args.version {
-            let found = find_version(&builder, v)?;
-            builder.select_version(&found.0, &found.1);
-        }
-        if let Some(ref output) = args.output {
-            builder.set_output_path(output);
-        }
-        if let Some(ctx) = args.context_length {
-            builder.set_config_value("context_length", serde_json::json!(ctx));
-        }
-        if let Some(ref args_file) = args.args_file {
-            let content = std::fs::read_to_string(args_file)
-                .map_err(|e| format!("Failed to read args file: {e}"))?;
-            builder.set_args_override(&content);
-        }
-        for gpu in &args.gpu {
-            let (accel, os_list) = parse_gpu_spec(gpu)?;
-            for os in os_list {
-                builder.add_gpu_lib(accel, os);
-            }
-        }
-        if let Some(ref zipalign) = args.zipalign {
-            builder.use_custom_zipalign(zipalign);
-        }
-    }
+    let builder = state_file::build_from_state(&saved, config, cache)?;
 
     // Validate
     let msgs = builder.validate();
@@ -77,100 +37,64 @@ pub async fn run(args: &BuildArgs, config: BuilderConfig, cache: Cache) -> Resul
     Ok(())
 }
 
-/// Configure builder entirely from CLI arguments (one-shot mode).
-fn configure_from_args(
-    builder: &mut Builder,
-    args: &BuildArgs,
-    model: &str,
-) -> Result<(), String> {
-    // Select version
+/// Convert one-shot CLI args into a SavedState (not persisted).
+fn saved_state_from_args(args: &BuildArgs, model: &str) -> Result<SavedState, String> {
+    let mut saved = SavedState::default();
+
+    // Version
     if let Some(ref runtime) = args.runtime {
-        builder.use_custom_runtime(runtime);
+        saved.custom_runtime = Some(runtime.to_string_lossy().to_string());
     } else if let Some(ref v) = args.version {
-        let found = find_version(builder, v)?;
-        builder.select_version(&found.0, &found.1);
-    } else if !builder.select_default_version() {
-        return Err("No llamafile versions available in config.".to_string());
+        // We don't know the group name from just the version string.
+        // Store it as version only; build_from_state will need to resolve it.
+        // For now, search through config at apply time -- store a marker.
+        saved.version = Some(v.clone());
     }
+    // If neither runtime nor version specified, defaults will apply
 
-    // Select model
-    let model_path = Path::new(model);
+    // Model
+    let model_path = std::path::Path::new(model);
     if model_path.exists() && model_path.extension().is_some_and(|e| e == "gguf") {
-        builder.select_custom_model(model_path);
+        saved.custom_model_file = Some(model.to_string());
     } else {
-        builder.select_registry_model(model);
-        if builder.state().selected_model_id.is_none() {
-            return Err(format!(
-                "Model '{}' not found in registry. Use 'models' to list available models.",
-                model
-            ));
-        }
+        saved.model_id = Some(model.to_string());
     }
 
-    // Select quantization
-    if let Some(ref quant_name) = args.quantization {
-        if let Some(model_id) = builder.state().selected_model_id.clone() {
-            if let Some(m) = builder.config().models.iter().find(|m| m.id == model_id) {
-                if let Some(weights_file) = m.files.iter().find(|f| f.role == "weights") {
-                    if let Some(idx) = weights_file
-                        .quantizations
-                        .iter()
-                        .position(|q| q.name.eq_ignore_ascii_case(quant_name))
-                    {
-                        builder.select_quantization("weights", idx);
-                    } else {
-                        let available: Vec<_> = weights_file
-                            .quantizations
-                            .iter()
-                            .map(|q| q.name.as_str())
-                            .collect();
-                        return Err(format!(
-                            "Quantization '{}' not found. Available: {}",
-                            quant_name,
-                            available.join(", ")
-                        ));
-                    }
-                }
-            }
-        }
+    // Quantization
+    if let Some(ref q) = args.quantization {
+        saved.quantizations.insert("weights".to_string(), q.clone());
     }
 
+    // Output
     if let Some(ref output) = args.output {
-        builder.set_output_path(output);
+        saved.output_path = Some(output.to_string_lossy().to_string());
     }
+
+    // Context length
     if let Some(ctx) = args.context_length {
-        builder.set_config_value("context_length", serde_json::json!(ctx));
+        saved
+            .config_values
+            .insert("context_length".to_string(), serde_json::json!(ctx));
     }
-    if let Some(ref args_file) = args.args_file {
-        let content = std::fs::read_to_string(args_file)
-            .map_err(|e| format!("Failed to read args file: {e}"))?;
-        builder.set_args_override(&content);
+
+    // Args file
+    if let Some(ref path) = args.args_file {
+        saved.args_file = Some(path.to_string_lossy().to_string());
     }
+
+    // GPU
     for gpu in &args.gpu {
-        let (accel, os_list) = parse_gpu_spec(gpu)?;
-        for os in os_list {
-            builder.add_gpu_lib(accel, os);
-        }
-    }
-    if let Some(ref zipalign) = args.zipalign {
-        builder.use_custom_zipalign(zipalign);
+        // Validate the spec early
+        parse_gpu_spec(gpu)?;
+        saved.gpu_libs.push(gpu.clone());
     }
 
-    Ok(())
-}
-
-fn find_version(builder: &Builder, version_str: &str) -> Result<(String, String), String> {
-    for group in &builder.config().versions {
-        for release in &group.releases {
-            if release.version.contains(version_str) {
-                return Ok((group.name.clone(), release.version.clone()));
-            }
-        }
+    // Custom zipalign
+    if let Some(ref path) = args.zipalign {
+        saved.custom_zipalign = Some(path.to_string_lossy().to_string());
     }
-    Err(format!(
-        "Version '{}' not found. Use 'versions' to list available versions.",
-        version_str
-    ))
+
+    Ok(saved)
 }
 
 pub fn parse_gpu_spec(spec: &str) -> Result<(GpuAccel, Vec<Os>), String> {

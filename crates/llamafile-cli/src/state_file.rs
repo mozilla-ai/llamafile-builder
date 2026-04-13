@@ -61,23 +61,33 @@ impl SavedState {
         let _ = std::fs::remove_file(path);
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.version_group.is_none()
-            && self.version.is_none()
-            && self.custom_runtime.is_none()
-            && self.model_id.is_none()
-            && self.custom_model_file.is_none()
-            && self.quantizations.is_empty()
-            && self.config_values.is_empty()
-            && self.args_file.is_none()
-            && self.output_path.is_none()
-            && self.gpu_libs.is_empty()
-            && self.custom_zipalign.is_none()
-    }
 }
 
-/// Apply saved state to a Builder.
-pub fn apply_to_builder(
+/// Create a fully configured Builder from saved state + defaults.
+/// This is the single place where defaults are applied.
+pub fn build_from_state(
+    saved: &SavedState,
+    config: llamafile_core::BuilderConfig,
+    cache: llamafile_core::Cache,
+) -> Result<llamafile_core::Builder, String> {
+    let mut builder = llamafile_core::Builder::new(config, cache);
+
+    // Apply defaults for anything not explicitly configured
+    if saved.version_group.is_none() && saved.version.is_none() && saved.custom_runtime.is_none() {
+        builder.select_default_version();
+    }
+    if saved.model_id.is_none() && saved.custom_model_file.is_none() {
+        builder.select_default_model();
+    }
+
+    // Apply saved overrides on top
+    apply_to_builder(saved, &mut builder)?;
+
+    Ok(builder)
+}
+
+/// Apply saved state to a Builder (without defaults -- use build_from_state instead).
+fn apply_to_builder(
     saved: &SavedState,
     builder: &mut llamafile_core::Builder,
 ) -> Result<(), String> {
@@ -88,6 +98,22 @@ pub fn apply_to_builder(
         (&saved.version_group, &saved.version)
     {
         builder.select_version(group, version);
+    } else if let Some(ref version) = saved.version {
+        // Version string without group -- search for it in the config
+        let found = builder.config().versions.iter().find_map(|g| {
+            g.releases
+                .iter()
+                .find(|r| r.version.contains(version.as_str()))
+                .map(|r| (g.name.clone(), r.version.clone()))
+        });
+        if let Some((group, ver)) = found {
+            builder.select_version(&group, &ver);
+        } else {
+            return Err(format!(
+                "Version '{}' not found. Use 'versions' to list available versions.",
+                version
+            ));
+        }
     }
 
     // Model
@@ -193,28 +219,28 @@ mod tests {
         assert!(loaded.custom_model_file.is_none());
     }
 
-    #[test]
-    fn apply_to_builder_sets_version_and_model() {
-        let config = llamafile_core::config_manager::parse_config_data::<Vec<llamafile_core::LlamafileVersionGroup>>(
-            include_str!("../../../data/versions.json"),
-        ).unwrap();
-        let models = llamafile_core::config_manager::parse_config_data::<Vec<llamafile_core::Model>>(
-            include_str!("../../../data/models.json"),
-        ).unwrap();
-        let schema = llamafile_core::config_manager::parse_config_data::<Vec<llamafile_core::ConfigSchemaItem>>(
-            include_str!("../../../data/config.json"),
-        ).unwrap();
-
-        let builder_config = llamafile_core::BuilderConfig {
-            versions: config,
-            models,
-            config_schema: schema,
+    fn test_config() -> llamafile_core::BuilderConfig {
+        llamafile_core::BuilderConfig {
+            versions: llamafile_core::config_manager::parse_config_data(
+                include_str!("../../../data/versions.json"),
+            ).unwrap(),
+            models: llamafile_core::config_manager::parse_config_data(
+                include_str!("../../../data/models.json"),
+            ).unwrap(),
+            config_schema: llamafile_core::config_manager::parse_config_data(
+                include_str!("../../../data/config.json"),
+            ).unwrap(),
             config_version: 1,
             min_builder_version: None,
-        };
-        let cache = llamafile_core::Cache::new(std::path::PathBuf::from("/tmp/test-cache"));
-        let mut builder = llamafile_core::Builder::new(builder_config, cache);
+        }
+    }
 
+    fn test_cache() -> llamafile_core::Cache {
+        llamafile_core::Cache::new(std::path::PathBuf::from("/tmp/test-cache"))
+    }
+
+    #[test]
+    fn build_from_state_with_explicit_config() {
         let saved = SavedState {
             version_group: Some("llamafile 0.10".to_string()),
             version: Some("0.10.0".to_string()),
@@ -228,7 +254,7 @@ mod tests {
             ..Default::default()
         };
 
-        apply_to_builder(&saved, &mut builder).unwrap();
+        let builder = build_from_state(&saved, test_config(), test_cache()).unwrap();
 
         assert_eq!(builder.state().selected_model_id.as_deref(), Some("Qwen/Qwen3-0.6B-GGUF"));
         assert!(builder.state().resolved_llamafile_path.is_some());
@@ -237,6 +263,18 @@ mod tests {
             builder.state().config_values.get("context_length"),
             Some(&serde_json::json!(16384))
         );
+        assert!(builder.can_build());
+    }
+
+    #[test]
+    fn build_from_state_empty_uses_defaults() {
+        let saved = SavedState::default();
+        let builder = build_from_state(&saved, test_config(), test_cache()).unwrap();
+
+        // Should have default version and model
+        assert!(builder.state().selected_version_group.is_some());
+        assert!(builder.state().selected_model_id.is_some());
+        assert!(builder.state().resolved_llamafile_path.is_some());
         assert!(builder.can_build());
     }
 }

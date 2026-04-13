@@ -100,56 +100,63 @@ pub fn run(
             tracing::info!("custom zipalign set to {}", path.display());
         }
         ConfigCmd::Show => {
-            if saved.is_empty() {
-                println!("No build configuration saved. Use 'config set-*' commands to configure.");
-                return Ok(());
-            }
-
             if json {
                 println!("{}", serde_json::to_string_pretty(&saved).unwrap());
                 return Ok(());
             }
 
-            // Build a temporary Builder to show resolved state
             let cache = Cache::new(crate::get_cache_dir());
-            let mut builder = Builder::new(config.clone(), cache);
-            if let Err(e) = state_file::apply_to_builder(&saved, &mut builder) {
-                eprintln!("Warning: {e}");
-            }
+            let builder = match state_file::build_from_state(&saved, config.clone(), cache) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("Warning: {e}");
+                    // Fall back to empty builder for display
+                    Builder::new(config.clone(), Cache::new(crate::get_cache_dir()))
+                }
+            };
 
             // Version
             if let Some(ref runtime) = saved.custom_runtime {
                 println!("Version:       custom ({})", runtime);
             } else if let (Some(ref g), Some(ref v)) = (&saved.version_group, &saved.version) {
                 println!("Version:       {} / {}", g, v);
+            } else if let Some(ref g) = builder.state().selected_version_group {
+                let v = builder.state().selected_release_version.as_deref().unwrap_or("?");
+                println!("Version:       {} / {} (default)", g, v);
             } else {
-                println!("Version:       (not set)");
+                println!("Version:       (none available)");
             }
 
             // Model
             if let Some(ref path) = saved.custom_model_file {
                 println!("Model:         custom ({})", path);
-            } else if let Some(ref id) = saved.model_id {
-                if let Some(model) = config.models.iter().find(|m| m.id == *id) {
-                    let quant_info: Vec<String> = model
-                        .files
-                        .iter()
-                        .map(|f| {
-                            let selected = saved
-                                .quantizations
-                                .get(&f.role)
-                                .map(|n| n.as_str())
-                                .or_else(|| f.quantizations.first().map(|q| q.name.as_str()))
-                                .unwrap_or("?");
-                            format!("{}:{}", f.role, selected)
-                        })
-                        .collect();
-                    println!("Model:         {} ({})", model.name, quant_info.join(", "));
-                } else {
-                    println!("Model:         {} (not found in registry)", id);
-                }
             } else {
-                println!("Model:         (not set)");
+                let model_id = saved.model_id.as_deref()
+                    .or(builder.state().selected_model_id.as_deref());
+                let is_default = saved.model_id.is_none();
+                if let Some(id) = model_id {
+                    if let Some(model) = config.models.iter().find(|m| m.id == id) {
+                        let quant_info: Vec<String> = model
+                            .files
+                            .iter()
+                            .map(|f| {
+                                let selected = saved
+                                    .quantizations
+                                    .get(&f.role)
+                                    .map(|n| n.as_str())
+                                    .or_else(|| f.quantizations.first().map(|q| q.name.as_str()))
+                                    .unwrap_or("?");
+                                format!("{}:{}", f.role, selected)
+                            })
+                            .collect();
+                        let tag = if is_default { " (default)" } else { "" };
+                        println!("Model:         {} ({}){}", model.name, quant_info.join(", "), tag);
+                    } else {
+                        println!("Model:         {} (not found in registry)", id);
+                    }
+                } else {
+                    println!("Model:         (none available)");
+                }
             }
 
             // Output
@@ -157,8 +164,6 @@ pub fn run(
                 println!("Output:        {}", path);
             } else if !builder.state().output_path.is_empty() {
                 println!("Output:        {} (auto)", builder.state().output_path);
-            } else {
-                println!("Output:        (not set)");
             }
 
             // GPU
@@ -168,40 +173,45 @@ pub fn run(
                 println!("GPU libs:      {}", saved.gpu_libs.join(", "));
             }
 
-            // Config values
-            if !saved.config_values.is_empty() {
-                let pairs: Vec<String> = saved
-                    .config_values
-                    .iter()
-                    .map(|(k, v)| format!("{}={}", k, v))
-                    .collect();
-                println!("Config:        {}", pairs.join(", "));
-            }
-
             // Args override
             if let Some(ref path) = saved.args_file {
-                println!("Args file:     {}", path);
+                println!("Args file:     {} (overrides config below)", path);
+            }
+
+            // Config values: show ALL effective values (defaults + overrides)
+            let all_values = llamafile_core::args::default_config_values(&config.config_schema);
+            println!();
+            println!("Configuration (.args parameters):");
+            let mut keys: Vec<_> = all_values.keys().collect();
+            keys.sort();
+            for key in keys {
+                let default_val = &all_values[key];
+                let is_overridden = saved.config_values.contains_key(key.as_str());
+                let effective = saved.config_values.get(key.as_str()).unwrap_or(default_val);
+                if is_overridden {
+                    println!("  {} = {} (was: {})", key, effective, default_val);
+                } else {
+                    println!("  {} = {}", key, effective);
+                }
             }
 
             // Custom binaries
             if let Some(ref path) = saved.custom_zipalign {
-                println!("Zipalign:      {}", path);
+                println!("\nZipalign:      {}", path);
             }
 
             // Validation
             let msgs = builder.validate();
             let errors: Vec<_> = msgs.iter().filter(|m| m.is_error()).collect();
             let warnings: Vec<_> = msgs.iter().filter(|m| !m.is_error()).collect();
-            if !errors.is_empty() {
+            if !errors.is_empty() || !warnings.is_empty() {
                 println!();
-                for e in &errors {
-                    println!("ERROR: {:?}", e);
-                }
             }
-            if !warnings.is_empty() {
-                for w in &warnings {
-                    println!("WARNING: {:?}", w);
-                }
+            for e in &errors {
+                println!("ERROR: {:?}", e);
+            }
+            for w in &warnings {
+                println!("WARNING: {:?}", w);
             }
             if errors.is_empty() {
                 println!("\nReady to build.");
@@ -209,10 +219,7 @@ pub fn run(
         }
         ConfigCmd::ShowArgs => {
             let cache = Cache::new(crate::get_cache_dir());
-            let mut builder = Builder::new(config.clone(), cache);
-            if let Err(e) = state_file::apply_to_builder(&saved, &mut builder) {
-                return Err(e);
-            }
+            let builder = state_file::build_from_state(&saved, config.clone(), cache)?;
             println!("{}", builder.resolved_args());
         }
         ConfigCmd::Reset => {

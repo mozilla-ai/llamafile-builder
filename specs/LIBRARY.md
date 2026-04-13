@@ -21,13 +21,15 @@ let cache = Cache::new(cache_dir);
 let mut builder = Builder::new(config, cache);
 
 // 3. Configure the build
-builder.select_version("llamafile 0.10", "0.10.0");
-builder.select_registry_model("qwen3-0.6b");
+builder.select_default_version();  // or select_version("llamafile 0.10", "0.10.0")
+builder.select_registry_model("Qwen/Qwen3-0.6B-GGUF");
 
 // 4. Build
 let output = builder.build().await?;
 println!("Built: {}", output.display());
 ```
+
+Note: model IDs are HuggingFace repo IDs (e.g. `"Qwen/Qwen3-0.6B-GGUF"`) for models with `source: "hf"`.
 
 
 ## ConfigManager
@@ -108,6 +110,7 @@ Builder::new(config: BuilderConfig, cache: Cache) -> Self
 ### Version / binaries
 
 ```rust
+.select_default_version() -> bool              // picks version group with default=true
 .select_version(group: &str, version: &str)
 .use_custom_runtime(path: &Path)
 .use_custom_zipalign(path: &Path)
@@ -116,6 +119,7 @@ Builder::new(config: BuilderConfig, cache: Cache) -> Self
 ### Model selection
 
 ```rust
+.select_default_model() -> bool                // picks model with default=true
 .select_registry_model(model_id: &str)
 .select_custom_model(path: &Path)
 .select_ollama_model(model: OllamaModel)
@@ -196,11 +200,12 @@ The `resolved_components()` output reflects all these per-role selections.
 ```
 
 Build phases (all observable via tracing):
-1. `ensure_runtime` -- download or locate the llamafile binary
-2. `ensure_model` -- download or locate model weights (and mmproj)
-3. `write_config` -- generate .args from schema or override
-4. `ensure_gpu_libs` -- download GPU libraries (non-fatal on failure)
-5. `create_executable` -- copy runtime, run zipalign to bundle everything
+1. `ensure_zipalign` -- download or locate zipalign binary
+2. `ensure_runtime` -- download or locate the llamafile binary
+3. `ensure_model` -- download or locate model weights (and mmproj)
+4. `write_config` -- generate .args from schema or override
+5. `ensure_gpu_libs` -- download GPU libraries (non-fatal on failure)
+6. `create_executable` -- copy runtime, run zipalign to bundle everything
 
 
 ## Component model
@@ -261,9 +266,10 @@ Checks performed:
 - Context length vs model training length
 - Large context (32K+) on CPU warning
 - Custom binary exists and is executable
-- Zipalign available in PATH
 - GPU libs on macOS warning (Metal is built-in)
 - Agent shell tool enabled warning
+
+Note: zipalign availability is not checked at validation time -- the builder downloads it automatically during the build (Phase 5c).
 
 
 ## Model discovery
@@ -331,8 +337,8 @@ enum DownloadError {
 
 | Type | Key fields |
 |------|-----------|
-| `LlamafileVersionGroup` | `name`, `tag` (latest/stable), `description`, `releases: Vec<LlamafileRelease>` |
-| `LlamafileRelease` | `version`, `release_date`, `download_url`, `size_bytes`, `sha256`, `gpu_libs: Option<GpuLibs>` |
+| `LlamafileVersionGroup` | `name`, `tag` (latest/stable), `default`, `description`, `releases: Vec<LlamafileRelease>` |
+| `LlamafileRelease` | `version`, `release_date`, `download_url`, `size_bytes`, `sha256`, `zipalign_url`, `zipalign_size_bytes`, `zipalign_sha256`, `gpu_libs: Option<GpuLibs>` |
 | `GpuLibs` | `cuda: Option<GpuLibsByPlatform>`, `rocm: Option<GpuLibsByPlatform>` |
 | `GpuLibsByPlatform` | `linux: Option<GpuLibrary>`, `windows: Option<GpuLibrary>` |
 | `GpuLibrary` | `download_url`, `size_bytes`, `sha256` |
@@ -341,9 +347,9 @@ enum DownloadError {
 
 | Type | Key fields |
 |------|-----------|
-| `Model` | `id`, `name`, `organization`, `parameters`, `param_count`, `description`, `license`, `huggingface_url`, `tags`, `context_length`, `files: Vec<ModelFile>` |
+| `Model` | `id` (HF repo ID for HF sources), `source` ("hf" for HuggingFace), `name`, `organization`, `parameters`, `param_count`, `description`, `license`, `default`, `tags`, `context_length`, `files: Vec<ModelFile>` |
 | `ModelFile` | `role` (weights/mmproj), `label`, `quantizations: Vec<ModelFileQuantization>` |
-| `ModelFileQuantization` | `name` (Q4_K_M, Q8_0, etc.), `size_bytes`, `download_url`, `sha256` |
+| `ModelFileQuantization` | `name` (Q4_K_M, Q8_0, etc.), `filename`, `size_bytes`, `download_url: Option` (fallback for non-HF), `sha256` |
 
 ### Configuration schema
 
@@ -391,17 +397,17 @@ enum DownloadError {
 
 ## Test coverage
 
-105 tests across all modules:
+103 tests across core library (100) and CLI (3):
 
 | Module | Tests | What's covered |
 |--------|-------|----------------|
 | `state` | 20 | All model sources, file selection, output path, resolved paths |
 | `args` | 16 | Schema-driven .args generation, system prompt, size estimation, defaults |
-| `download` | 17 | HF URL detection, token resolution, file info, checksums |
-| `builder` | 13 | Selection methods, resolved_components, resolved_args, validation, GPU libs |
-| `cache` | 10 | Path computation, cache status, local/URL/HF/generated components |
-| `config_manager` | 6 | Load, fallback, invalid JSON, apply update, bundled parsing |
+| `download` | 15 | HF URL detection, token resolution, file info, checksums |
+| `builder` | 17 | resolved_components (simple, multimodal, GPU, agent, custom, quantization), HF source, zipalign, defaults, validation |
+| `cache` | 5 | Cache status: local existing/missing, generated, URL partial/complete/missing |
+| `config_manager` | 6 | Load, fallback, invalid JSON, bare array rejection, apply update, version comparison |
 | `validation` | 5 | Required components, context length, custom binary, large context |
 | `ollama` | 6 | Availability, scanning, missing blobs, empty dirs |
 | `lmstudio` | 7 | Availability, scanning, role inference, non-gguf filtering |
-| `system_info` | 2 | Valid data returned, memory detection |
+| CLI `state_file` | 3 | SavedState round-trip, build_from_state with explicit config, build_from_state with defaults |
