@@ -57,7 +57,6 @@ pub(crate) fn resolve_hf_token(app_token: Option<&str>) -> Option<String> {
     None
 }
 
-#[tracing::instrument(skip_all, fields(path = %path.display()))]
 pub async fn get_file_info(
     path: &Path,
     expected_size: Option<u64>,
@@ -127,7 +126,6 @@ pub async fn get_file_info(
 ///
 /// Progress is reported via `tracing` events at INFO level with fields:
 /// `bytes_downloaded`, `bytes_total`, `percentage`, `filename`.
-#[tracing::instrument(skip(cancel_flag, hf_token), fields(filename))]
 pub async fn download_file(
     url: &str,
     dest: &Path,

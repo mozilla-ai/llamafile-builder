@@ -39,7 +39,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Popup::GpuEdit { specs, selected, adding, add_buf } => {
             draw_gpu_popup(frame, specs, *selected, *adding, add_buf)
         }
-        Popup::ArgsPreview { content, editing, cursor_line } => draw_args_popup(frame, content, *editing, *cursor_line),
+        Popup::ArgsEdit { textarea, .. } => {
+            let area = centered_rect(72, 22, frame.area());
+            frame.render_widget(Clear, area);
+            frame.render_widget(&*textarea, area);
+        }
         Popup::Confirm { message, .. } => draw_confirm_popup(frame, message),
     }
 }
@@ -150,9 +154,14 @@ fn draw_dashboard(frame: &mut Frame, app: &App, area: Rect) {
     row_idx += 1;
 
     // Config
+    let config_style = if app.args_override.is_some() {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        style_for(Focus::Config)
+    };
     let marker = if app.focus == Focus::Config { ">" } else { " " };
     let label = format!(" {} Config     {}", marker, app.config_summary());
-    frame.render_widget(Paragraph::new(label).style(style_for(Focus::Config)), rows[row_idx]);
+    frame.render_widget(Paragraph::new(label).style(config_style), rows[row_idx]);
     row_idx += 1;
 
     // GPU
@@ -272,8 +281,8 @@ fn draw_log_pane(frame: &mut Frame, app: &App, area: Rect) {
 
     if app.log_expanded {
         let level_nav = match app.log_level {
-            crate::app::LogLevel::Error => "ERROR >".to_string(),
-            crate::app::LogLevel::Debug => "< DEBUG".to_string(),
+            crate::app::LogLevel::Error => "< ERROR".to_string(),
+            crate::app::LogLevel::Debug => "DEBUG >".to_string(),
             _ => format!("< {} >", app.log_level.as_str()),
         };
         let block = Block::bordered().title(Line::from(vec![
@@ -307,14 +316,16 @@ fn draw_log_pane(frame: &mut Frame, app: &App, area: Rect) {
         let total_lines = lines.len() as u16;
         let visible_height = inner.height;
         let max_scroll = total_lines.saturating_sub(visible_height);
-        let scroll_y = max_scroll.saturating_sub(app.log_scroll_offset);
+        // Clamp offset so it can't exceed scrollable range
+        let clamped_offset = app.log_scroll_offset.min(max_scroll);
+        let scroll_y = max_scroll.saturating_sub(clamped_offset);
 
         let paragraph = Paragraph::new(lines).scroll((scroll_y, 0));
         frame.render_widget(paragraph, inner);
     } else {
         let level_nav = match app.log_level {
-            crate::app::LogLevel::Error => "ERROR >".to_string(),
-            crate::app::LogLevel::Debug => "< DEBUG".to_string(),
+            crate::app::LogLevel::Error => "< ERROR".to_string(),
+            crate::app::LogLevel::Debug => "DEBUG >".to_string(),
             _ => format!("< {} >", app.log_level.as_str()),
         };
         let block = Block::bordered().title(Line::from(vec![
@@ -640,43 +651,6 @@ fn draw_gpu_popup(
     }
 }
 
-fn draw_args_popup(frame: &mut Frame, content: &str, editing: bool, cursor_line: usize) {
-    let area = centered_rect(72, 22, frame.area());
-    frame.render_widget(Clear, area);
-    let help = if editing {
-        " ↑↓=line  Type=edit  Enter=newline  Esc=done "
-    } else {
-        " e=edit  ↑↓=scroll  Esc=close "
-    };
-    let title = if editing { " .args (editing) " } else { " .args preview " };
-    let block = Block::bordered()
-        .title(title)
-        .title_bottom(help);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let lines: Vec<&str> = content.lines().collect();
-    let visible_height = inner.height as usize;
-    let scroll = cursor_line.saturating_sub(visible_height.saturating_sub(1));
-
-    let items: Vec<ListItem> = lines.iter()
-        .enumerate()
-        .skip(scroll)
-        .take(visible_height)
-        .map(|(i, line)| {
-            let style = if i == cursor_line && editing {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-            } else if i == cursor_line {
-                Style::default().fg(Color::Cyan)
-            } else {
-                Style::default()
-            };
-            let prefix = if i == cursor_line { ">" } else { " " };
-            ListItem::new(format!("{} {}", prefix, line)).style(style)
-        })
-        .collect();
-    frame.render_widget(List::new(items), inner);
-}
 
 fn draw_confirm_popup(frame: &mut Frame, message: &str) {
     let area = centered_rect(50, 5, frame.area());

@@ -90,7 +90,6 @@ impl Cache {
     }
 
     /// Check if a component is already cached without downloading.
-    #[tracing::instrument(skip_all, fields(role = ?component.role, source = %component.source_display()))]
     pub fn check(&self, component: &Component) -> CacheStatus {
         match &component.source {
             ComponentSource::Local(path) => {
@@ -141,7 +140,6 @@ impl Cache {
     /// For `HuggingFace`: tries hf-hub first (shared cache), falls back to direct download.
     /// For `Local`: verifies the file exists.
     /// For `Generated`: no-op, returns empty path.
-    #[tracing::instrument(skip_all, fields(role = ?component.role, source = %component.source_display()))]
     pub async fn ensure(
         &self,
         component: &Component,

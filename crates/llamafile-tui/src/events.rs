@@ -30,8 +30,9 @@ pub fn handle_key(app: &mut App, key: event::KeyEvent) -> bool {
                 return true;
             }
             KeyCode::Char('[') if app.log_expanded => {
-                let max = app.filtered_logs().len() as u16;
-                app.log_scroll_offset = (app.log_scroll_offset + 1).min(max.saturating_sub(1));
+                let total = app.filtered_logs().len() as u16;
+                // Can't scroll more than total lines (renderer will clamp further by visible height)
+                app.log_scroll_offset = (app.log_scroll_offset + 1).min(total);
                 return true;
             }
             KeyCode::Char(']') if app.log_expanded => {
@@ -51,20 +52,21 @@ pub fn handle_key(app: &mut App, key: event::KeyEvent) -> bool {
         Popup::OutputEdit { .. } => handle_input_popup(app, key),
         Popup::ConfigEdit { .. } => handle_config_popup(app, key),
         Popup::GpuEdit { .. } => handle_gpu_popup(app, key),
-        Popup::ArgsPreview { .. } => handle_args_popup(app, key),
+        Popup::ArgsEdit { .. } => handle_args_edit(app, key),
         Popup::Confirm { .. } => handle_confirm_popup(app, key),
     }
 }
 
 fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
     let has_mmproj = app.has_mmproj();
+    let args_overridden = app.args_override.is_some();
     match key.code {
         KeyCode::Down | KeyCode::Tab => {
-            app.focus = app.focus.next(has_mmproj);
+            app.focus = app.focus.next(has_mmproj, args_overridden);
             true
         }
         KeyCode::Up | KeyCode::BackTab => {
-            app.focus = app.focus.prev(has_mmproj);
+            app.focus = app.focus.prev(has_mmproj, args_overridden);
             true
         }
         KeyCode::Char('q') => {
@@ -157,7 +159,15 @@ fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
                     } else {
                         "(error generating .args)".to_string()
                     };
-                    app.popup = Popup::ArgsPreview { content, editing: false, cursor_line: 0 };
+                    let lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+                    let mut textarea = tui_textarea::TextArea::new(lines);
+                    textarea.set_block(
+                        ratatui::widgets::Block::bordered()
+                            .title(" .args editor ")
+                            .title_bottom(" Esc=save & close  Ctrl+R=reset to generated ")
+                    );
+                    textarea.set_cursor_line_style(ratatui::style::Style::default().fg(ratatui::style::Color::Yellow));
+                    app.popup = Popup::ArgsEdit { textarea, original: content };
                 }
                 Focus::Quit => {
                     app.should_quit = true;
@@ -507,68 +517,45 @@ fn handle_gpu_popup(app: &mut App, key: event::KeyEvent) -> bool {
     true
 }
 
-fn handle_args_popup(app: &mut App, key: event::KeyEvent) -> bool {
-    if let Popup::ArgsPreview {
-        ref mut content,
-        ref mut editing,
-        ref mut cursor_line,
-    } = app.popup
-    {
-        if *editing {
-            let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
-            if lines.is_empty() {
-                lines.push(String::new());
-            }
-            match key.code {
-                KeyCode::Up => *cursor_line = cursor_line.saturating_sub(1),
-                KeyCode::Down => *cursor_line = (*cursor_line + 1).min(lines.len().saturating_sub(1)),
-                KeyCode::Enter => {
-                    // Insert new line after cursor
-                    lines.insert(*cursor_line + 1, String::new());
-                    *cursor_line += 1;
-                    *content = lines.join("\n");
-                }
-                KeyCode::Backspace => {
-                    let is_empty = lines.get(*cursor_line).map(|l| l.is_empty()).unwrap_or(false);
-                    if is_empty && lines.len() > 1 {
-                        lines.remove(*cursor_line);
-                        *cursor_line = cursor_line.saturating_sub(1);
-                    } else if let Some(line) = lines.get_mut(*cursor_line) {
-                        line.pop();
-                    }
-                    *content = lines.join("\n");
-                }
-                KeyCode::Char(c) => {
-                    if let Some(line) = lines.get_mut(*cursor_line) {
-                        line.push(c);
-                    }
-                    *content = lines.join("\n");
-                }
-                KeyCode::Esc => {
-                    // Save edited content as args override
-                    app.args_file = None;
-                    app.args_override = Some(content.clone());
-                    *editing = false;
-                }
-                _ => {}
-            }
-        } else {
-            match key.code {
-                KeyCode::Char('e') => {
-                    *editing = true;
-                    *cursor_line = 0;
-                }
-                KeyCode::Up => *cursor_line = cursor_line.saturating_sub(1),
-                KeyCode::Down => {
-                    let line_count = content.lines().count();
-                    *cursor_line = (*cursor_line + 1).min(line_count.saturating_sub(1));
-                }
-                KeyCode::Esc | KeyCode::Char('q') => {
-                    app.popup = Popup::None;
-                }
-                _ => {}
+fn handle_args_edit(app: &mut App, key: event::KeyEvent) -> bool {
+    if key.code == KeyCode::Esc {
+        // Only save as override if the content was actually changed
+        if let Popup::ArgsEdit { ref textarea, ref original } = app.popup {
+            let content = textarea.lines().join("\n");
+            if content != *original {
+                app.args_file = None;
+                app.args_override = Some(content);
             }
         }
+        app.popup = Popup::None;
+        return true;
+    }
+
+    // Ctrl+R = reset to generated (discard override)
+    if key.code == KeyCode::Char('r') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        app.args_override = None;
+        app.args_file = None;
+        // Regenerate and reopen
+        let content = if let Ok(builder) = app.make_builder() {
+            builder.resolved_args()
+        } else {
+            "(error generating .args)".to_string()
+        };
+        let lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+        let mut textarea = tui_textarea::TextArea::new(lines);
+        textarea.set_block(
+            ratatui::widgets::Block::bordered()
+                .title(" .args editor ")
+                .title_bottom(" Esc=save & close  Ctrl+R=reset to generated ")
+        );
+        textarea.set_cursor_line_style(ratatui::style::Style::default().fg(ratatui::style::Color::Yellow));
+        app.popup = Popup::ArgsEdit { textarea, original: content };
+        return true;
+    }
+
+    // Forward all other keys to the textarea
+    if let Popup::ArgsEdit { ref mut textarea, .. } = app.popup {
+        textarea.input(crossterm::event::Event::Key(key.into()));
     }
     true
 }

@@ -11,7 +11,7 @@
       "label": "Inference",
       "description": "Set up inference parameters",
       "items": [
-        { "type": "dropdown", "key": "context_length", "label": "Context Length", "description": "Maximum context window size", "default": 16384, "options": [2048, 4096, 8192, 16384, 32768, 65536, 131072], "flag": "--ctx-size" },
+        { "type": "dropdown", "key": "context_length", "label": "Context Length", "description": "Maximum context window size (0 for model max)", "default": 0, "options": [0, 2048, 4096, 8192, 16384, 32768, 65536, 131072], "flag": "--ctx-size" },
         { "type": "slider", "key": "temperature", "label": "Temperature", "description": "Sampling temperature for generation", "default": 0.8, "min": 0, "max": 2, "step": 0.1, "flag": "--temp" }
       ]
     },

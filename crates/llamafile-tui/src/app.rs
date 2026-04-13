@@ -39,12 +39,15 @@ impl Focus {
     }
 
     /// Navigate to next focusable section, skipping disabled ones.
-    pub fn next(self, has_mmproj: bool) -> Focus {
+    pub fn next(self, has_mmproj: bool, args_overridden: bool) -> Focus {
         let all = Self::ordered();
         let idx = all.iter().position(|&f| f == self).unwrap_or(0);
         for offset in 1..all.len() {
             let candidate = all[(idx + offset) % all.len()];
             if candidate == Focus::Mmproj && !has_mmproj {
+                continue;
+            }
+            if candidate == Focus::Config && args_overridden {
                 continue;
             }
             return candidate;
@@ -53,12 +56,15 @@ impl Focus {
     }
 
     /// Navigate to previous focusable section, skipping disabled ones.
-    pub fn prev(self, has_mmproj: bool) -> Focus {
+    pub fn prev(self, has_mmproj: bool, args_overridden: bool) -> Focus {
         let all = Self::ordered();
         let idx = all.iter().position(|&f| f == self).unwrap_or(0);
         for offset in 1..all.len() {
             let candidate = all[(idx + all.len() - offset) % all.len()];
             if candidate == Focus::Mmproj && !has_mmproj {
+                continue;
+            }
+            if candidate == Focus::Config && args_overridden {
                 continue;
             }
             return candidate;
@@ -99,7 +105,7 @@ pub enum Popup {
         dropdown_selected: usize,
     },
     GpuEdit { specs: Vec<String>, selected: usize, adding: bool, add_buf: String },
-    ArgsPreview { content: String, editing: bool, cursor_line: usize },
+    ArgsEdit { textarea: tui_textarea::TextArea<'static>, original: String },
     Confirm { message: String, action: ConfirmAction },
 }
 
@@ -312,6 +318,10 @@ impl App {
 
     /// Get config summary string.
     pub fn config_summary(&self) -> String {
+        if self.args_override.is_some() {
+            return "manually overridden, check .args".to_string();
+        }
+
         let defaults = llamafile_core::args::default_config_values(&self.config.config_schema);
         let mut parts = Vec::new();
 

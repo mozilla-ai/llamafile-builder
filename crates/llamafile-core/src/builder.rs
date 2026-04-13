@@ -450,13 +450,12 @@ impl Builder {
     ///
     /// All progress is observable via `tracing` spans and events.
     /// Use a `tracing` subscriber in the calling code to display or log them.
-    #[tracing::instrument(skip(self), fields(output = %self.state.output_path))]
     pub async fn build(&self) -> crate::Result<PathBuf> {
+        tracing::info!(output = %self.state.output_path, "build started");
         self.cancel_flag.store(false, Ordering::Relaxed);
 
         // Phase 1: Ensure zipalign (prerequisite for everything)
         let zipalign_path = {
-            let _span = tracing::info_span!("ensure_zipalign").entered();
             tracing::info!("preparing zipalign");
             self.ensure_zipalign().await?
         };
@@ -464,7 +463,6 @@ impl Builder {
 
         // Phase 2: Ensure runtime
         let runtime_path = {
-            let _span = tracing::info_span!("ensure_runtime").entered();
             tracing::info!("preparing runtime binary");
             self.ensure_runtime().await?
         };
@@ -472,7 +470,6 @@ impl Builder {
 
         // Phase 3: Ensure model files
         let (weights_path, mmproj_path) = {
-            let _span = tracing::info_span!("ensure_model").entered();
             tracing::info!("preparing model files");
             self.ensure_model_files().await?
         };
@@ -480,7 +477,6 @@ impl Builder {
 
         // Phase 4: Write .args
         let args_path = {
-            let _span = tracing::info_span!("write_config").entered();
             let args_content = self.resolved_args();
             tracing::info!(content_length = args_content.len(), "writing .args configuration");
             tracing::debug!(content = %args_content, ".args content");
@@ -492,14 +488,12 @@ impl Builder {
 
         // Phase 5: Ensure GPU libraries
         let gpu_lib_paths = {
-            let _span = tracing::info_span!("ensure_gpu_libs").entered();
             self.ensure_gpu_libs().await
         };
         self.check_cancelled()?;
 
         // Phase 6: Create executable
         let output_path = {
-            let _span = tracing::info_span!("create_executable").entered();
             self.create_executable(
                 &zipalign_path,
                 &runtime_path,
@@ -537,7 +531,6 @@ impl Builder {
         }
     }
 
-    #[tracing::instrument(skip(self))]
     async fn ensure_zipalign(&self) -> crate::Result<PathBuf> {
         // If user provided a custom zipalign, use it
         if let Some(ref custom) = self.custom_zipalign {
@@ -597,7 +590,6 @@ impl Builder {
         Ok(found)
     }
 
-    #[tracing::instrument(skip(self))]
     async fn ensure_runtime(&self) -> crate::Result<PathBuf> {
         let path = self.state.resolved_llamafile_path.as_ref().ok_or_else(|| {
             crate::Error::Build("No llamafile version selected".to_string())
@@ -640,7 +632,6 @@ impl Builder {
             .map_err(crate::Error::Download)
     }
 
-    #[tracing::instrument(skip(self))]
     async fn ensure_model_files(&self) -> crate::Result<(PathBuf, Option<PathBuf>)> {
         // Weights
         let weights_path = match &self.state.resolved_weights_path {
@@ -953,10 +944,11 @@ mod tests {
         // Model path
         assert!(lines.contains(&"-m"));
         assert!(lines.iter().any(|l| l.contains("/zip/Qwen3-0.6B-Q8_0.gguf")));
-        // Defaults from schema
-        assert!(lines.contains(&"--ctx-size"));
-        assert!(lines.contains(&"4096"));
-        assert!(lines.contains(&"--server"));
+        // Model path always present
+        assert!(lines.contains(&"-m"));
+        // Default values NOT emitted
+        assert!(!lines.contains(&"--host"));
+        // Always ends with ...
         assert!(lines.ends_with(&["..."]));
     }
 

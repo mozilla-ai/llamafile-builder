@@ -57,6 +57,8 @@ fn process_schema_items(items: &[ConfigSchemaItem], ctx: &ArgsContext, lines: &m
                 flag,
                 default,
                 conditional,
+                hidden,
+                required,
                 ..
             } => {
                 if let Some(cond) = conditional {
@@ -84,6 +86,11 @@ fn process_schema_items(items: &[ConfigSchemaItem], ctx: &ArgsContext, lines: &m
                 if value_str.is_empty() {
                     continue;
                 }
+                // Skip non-hidden, non-required values that equal their default
+                // (they're already the llamafile binary's built-in defaults)
+                if !hidden && !required && value == *default {
+                    continue;
+                }
                 let resolved = value_str
                     .replace("${MODEL_FILENAME}", ctx.model_filename)
                     .replace(
@@ -98,6 +105,7 @@ fn process_schema_items(items: &[ConfigSchemaItem], ctx: &ArgsContext, lines: &m
                 flag,
                 default,
                 conditional,
+                hidden,
                 ..
             } => {
                 if let Some(cond) = conditional {
@@ -114,6 +122,10 @@ fn process_schema_items(items: &[ConfigSchemaItem], ctx: &ArgsContext, lines: &m
                     .get(key)
                     .cloned()
                     .unwrap_or_else(|| default.clone());
+                // Skip if value equals default for non-hidden items
+                if !hidden && value == *default {
+                    continue;
+                }
                 let value_str = match &value {
                     serde_json::Value::String(s) => s.clone(),
                     serde_json::Value::Number(n) => n.to_string(),
@@ -152,6 +164,7 @@ fn process_schema_items(items: &[ConfigSchemaItem], ctx: &ArgsContext, lines: &m
                 flag,
                 default,
                 conditional,
+                hidden,
                 ..
             } => {
                 if let Some(cond) = conditional {
@@ -168,6 +181,10 @@ fn process_schema_items(items: &[ConfigSchemaItem], ctx: &ArgsContext, lines: &m
                     .get(key)
                     .and_then(|v| v.as_f64())
                     .unwrap_or(*default);
+                // Skip if value equals default for non-hidden items
+                if !hidden && value == *default {
+                    continue;
+                }
                 let value_str = if value.fract() == 0.0 {
                     format!("{}", value as i64)
                 } else {
@@ -279,24 +296,20 @@ mod tests {
         let args = generate_args_from_schema(&schema, &values, "weights.gguf", None);
         let lines: Vec<&str> = args.lines().collect();
 
+        // Model path (hidden, required -- always emitted)
         assert!(lines.contains(&"-m"));
         assert!(lines.contains(&"/zip/weights.gguf"));
-        assert!(lines.contains(&"--no-mmap"));
 
+        // mmproj not present without mmproj filename
         assert!(!lines.contains(&"--mmproj"));
 
-        assert!(lines.contains(&"--ctx-size"));
-        assert!(lines.contains(&"4096"));
-        assert!(lines.contains(&"--temp"));
-        assert!(lines.contains(&"0.7"));
+        // Default values should NOT be emitted (they're llamafile built-in defaults)
+        assert!(!lines.contains(&"--host"), "default host should not be emitted");
+        assert!(!lines.contains(&"--port"), "default port should not be emitted");
+        assert!(!lines.contains(&"--ctx-size"), "default ctx-size should not be emitted");
+        assert!(!lines.contains(&"--temp"), "default temp should not be emitted");
 
-        assert!(lines.contains(&"--server"));
-        assert!(lines.contains(&"--host"));
-        assert!(lines.contains(&"127.0.0.1"));
-        assert!(lines.contains(&"--port"));
-        assert!(lines.contains(&"8080"));
-        assert!(lines.contains(&"--webui"));
-
+        // Always ends with ...
         assert_eq!(lines.last().copied(), Some("..."));
     }
 
@@ -331,28 +344,32 @@ mod tests {
     }
 
     #[test]
-    fn server_mode_off_skips_server_and_nested_flags() {
+    fn server_standalone_flag_controlled_by_bool() {
         let schema = load_schema();
-        let mut values = default_config_values(&schema);
-        values.insert("server_enabled".to_string(), json!(false));
+
+        // Default: server_enabled=false, so --server should NOT appear
+        let values = default_config_values(&schema);
         let args = generate_args_from_schema(&schema, &values, "w.gguf", None);
         let lines: Vec<&str> = args.lines().collect();
-
         assert!(!lines.contains(&"--server"));
-        assert!(!lines.contains(&"--host"));
-        assert!(!lines.contains(&"--port"));
-        assert!(!lines.contains(&"--webui"));
+
+        // Set server_enabled=true, --server should appear
+        let mut values = default_config_values(&schema);
+        values.insert("server_enabled".to_string(), json!(true));
+        let args = generate_args_from_schema(&schema, &values, "w.gguf", None);
+        let lines: Vec<&str> = args.lines().collect();
+        assert!(lines.contains(&"--server"));
     }
 
     #[test]
     fn custom_context_length_is_respected() {
         let schema = load_schema();
         let mut values = default_config_values(&schema);
-        values.insert("context_length".to_string(), json!(16384));
+        values.insert("context_length".to_string(), json!(8192));
         let args = generate_args_from_schema(&schema, &values, "w.gguf", None);
         let lines: Vec<&str> = args.lines().collect();
         let ctx_idx = lines.iter().position(|l| *l == "--ctx-size").unwrap();
-        assert_eq!(lines[ctx_idx + 1], "16384");
+        assert_eq!(lines[ctx_idx + 1], "8192");
     }
 
     #[test]
