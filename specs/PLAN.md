@@ -144,7 +144,7 @@ Cargo workspace with `llamafile-core` (library) and `llamafile-cli` (binary) cra
 
 ---
 
-## Phase 5e: JSON-RPC interactive mode
+## Phase 5e: JSON-RPC interactive mode -- DONE
 
 **Goal**: `--interactive` mode exposes the Builder API over JSON-RPC 2.0 on stdin/stdout (NFR-3). This is the universal protocol that all frontends can use to drive the builder.
 

@@ -386,10 +386,11 @@ Progress is reported to stderr via `tracing` at INFO level. Structured output (J
 
 **Progressive complexity** (NFR-5): `llamafile-builder build --model llama3-8b-instruct` is sufficient for a basic build. The CLI fills in defaults (latest stable version, default config, CPU-only, auto-generated output path).
 
-**Two modes of operation:**
+**Three modes of operation:**
 
-1. **One-shot mode** (current): all options specified on the command line, build runs immediately. Good for scripts and CI.
-2. **Interactive mode** (future): the CLI connects to the builder via JSON-RPC over stdio, allowing multi-step configuration (select version, then model, then configure, then build). This also enables progress bars via streaming JSON-RPC notifications. This makes the CLI a thin client of the same backend that the web UI and other frontends use, ensuring consistent behavior.
+1. **One-shot mode**: all options specified on the command line, build runs immediately. Good for scripts and CI.
+2. **Multi-step mode**: `config set-*` commands persist state between invocations. `build` (no `--model`) uses saved state. Defaults applied for anything not configured.
+3. **JSON-RPC mode** (`--interactive`): stateful session over stdin/stdout. Same methods as the `config` subcommands but as a protocol. See [JSON-RPC.md](../specs/JSON-RPC.md). This is the universal interface that the HTTP server and future GUIs will also use.
 
 ### Server mode (`llamafile-builder --serve`)
 
@@ -529,12 +530,14 @@ Note: `data/` at workspace root is the single source of truth for config files. 
 Each interface layer serves as an integration test for the layer below it. This maximizes automated test coverage before moving to manual UI testing.
 
 ```
-Unit tests          -> core library functions (105+ tests)
-CLI (direct calls)  -> integration test for Builder API, downloads, assembly
-JSON-RPC (piped)    -> integration test for the protocol and state management
-HTTP server (curl)  -> integration test for the REST API before adding a browser UI
-Web UI (browser)    -> the only layer requiring manual testing
+Unit tests (103)         -> core library functions + CLI state management
+CLI (one-shot + config)  -> integration test for Builder API, downloads, assembly
+JSON-RPC (piped stdin)   -> integration test for protocol and stateful sessions
+HTTP server (curl)       -> integration test for REST API before adding a browser UI
+Web UI (browser)         -> the only layer requiring manual testing
 ```
+
+Implemented layers: unit tests, CLI (one-shot + multi-step), JSON-RPC. Remaining: HTTP server, Web UI.
 
 The order of implementation follows this layering: each phase adds a new test surface on top of the previous one.
 

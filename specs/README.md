@@ -124,7 +124,7 @@ The builder must allow users to select each component of a llamafile: binaries (
 The builder must provide access to a curated model registry and support scanning of local model sources (Ollama cache, LM Studio cache, arbitrary GGUF files on disk).
 
 **FR-3: Download management**
-The builder must download components over HTTP with: progress reporting, resumption of interrupted downloads, SHA256 integrity verification, and cancellation. HuggingFace model downloads must use the standard HuggingFace Hub API (via the `hf-hub` Rust crate) so that downloaded files are cached in the shared HuggingFace cache at `~/.cache/huggingface/hub/` and are immediately available to other tools (llama.cpp, Python's `huggingface_hub`, etc.). Authentication for gated repositories is resolved from environment variables only (few GGUF repositories are gated, so a simple resolution strategy is sufficient).
+The builder must download components over HTTP with: progress reporting, resumption of interrupted downloads, SHA256 integrity verification, and cancellation. HuggingFace model downloads must use the standard HuggingFace Hub API so that downloaded files are cached in the shared HuggingFace cache at `~/.cache/huggingface/hub/` and are immediately available to other tools (llama.cpp, Python's `huggingface_hub`, etc.). Authentication for gated repositories is resolved from environment variables only (few GGUF repositories are gated, so a simple resolution strategy is sufficient).
 
 **FR-4: Configuration generation**
 The builder must generate valid `.args` files. Arguments change frequently (depending on new or changed llama.cpp / llamafile features), so we need a flexible configuration schema that describes more the parameter types and how they are presented in the UI (correctly handling sections, conditionals, toggleable groups, and placeholder substitution) rather than the parameter themselves. Users should also be able to customize the `.args` file before it is bundled with the llamafile.
@@ -141,7 +141,7 @@ The builder must support optional agent mode: setting a system prompt, selecting
 ### Non-functional requirements
 
 **NFR-1: Platform independence of core logic**
-The core logic (everything listed in FR-1 through FR-7) must not depend on any UI toolkit, display server, GPU renderer, or platform-specific windowing library. It must be usable as a library from any Rust program.
+The core logic (everything listed in FR-1 through FR-7) must not depend on any UI toolkit, display server, GPU renderer, or platform-specific windowing library. It must be usable as a library, independent of any particular interface layer.
 
 **NFR-2: Headless operation**
 It must be possible to perform a complete build (from component selection through final assembly) without a display server, in environments like CI runners, containers, and SSH sessions.
