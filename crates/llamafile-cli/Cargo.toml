@@ -18,6 +18,12 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 directories = { workspace = true }
+axum = "0.8"
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+open = "5"
 
 [dev-dependencies]
 tempfile = "3"
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }

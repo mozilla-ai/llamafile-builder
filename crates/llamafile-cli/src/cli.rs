@@ -15,6 +15,22 @@ pub struct Cli {
     #[arg(long)]
     pub interactive: bool,
 
+    /// Start HTTP server mode
+    #[arg(long)]
+    pub serve: bool,
+
+    /// Port for HTTP server (default: 8765)
+    #[arg(long, default_value = "8765")]
+    pub port: u16,
+
+    /// Directory to serve web UI static files from
+    #[arg(long)]
+    pub web_dir: Option<std::path::PathBuf>,
+
+    /// Don't auto-open browser when starting server
+    #[arg(long)]
+    pub no_open: bool,
+
     /// Override config URL for fetching updates
     #[arg(long, env = "LLAMAFILE_CONFIG_URL")]
     pub config_url: Option<String>,

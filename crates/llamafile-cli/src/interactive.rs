@@ -225,6 +225,9 @@ impl Session {
                     .collect();
                 Ok(Value::Array(json))
             }
+            "config_schema" => {
+                Ok(serde_json::to_value(&self.config.config_schema).unwrap())
+            }
             "reset" => {
                 self.saved = SavedState::default();
                 Ok(Value::String("ok".to_string()))

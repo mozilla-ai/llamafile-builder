@@ -120,14 +120,71 @@ Audit and update all spec documents to match the implementation. Document the TU
 
 **Goal**: `--serve` mode exposes REST API + SSE for the web UI.
 
-### Changes:
-- **`server.rs`** (new): Axum router with `/api/...` endpoints from ARCHITECTURE.md. Static file serving from configurable web dir. Binds to `127.0.0.1`.
-- **`sse.rs`** (new): Bridge tracing events -> SSE stream for build progress.
+### Dependencies to add:
+`axum = "0.8"`, `tower-http = { version = "0.6", features = ["fs", "cors"] }`, `tokio-stream = "0.1"` in `llamafile-cli/Cargo.toml`.
+
+### Files:
+- **`server.rs`** (new, ~300 lines): Single Axum module with all endpoints, shared state, SSE, and static file serving.
+- **`cli.rs`** (modify): Add `--serve`, `--port`, `--web-dir`, `--no-open` flags.
+- **`main.rs`** (modify): Add dispatch for `--serve` mode.
+
+No `sse.rs` needed — SSE is handled inline in `server.rs` via a `tokio::sync::broadcast` channel connected to a custom `tracing::Layer`, same pattern as the TUI's log bridge.
+
+### Endpoints:
+
+**Read-only (GET):**
+- `/api/versions` — version groups and releases
+- `/api/models?search=&tag=` — filtered model list
+- `/api/models/:id` — single model detail
+- `/api/config-schema` — config schema for UI rendering
+- `/api/system-info` — host capabilities
+- `/api/ollama/models` — scan local Ollama models
+- `/api/lmstudio/models` — scan local LM Studio models
+
+**State (GET/POST), operate on shared `Arc<Mutex<SavedState>>`:**
+- `GET /api/state` — current session state
+- `POST /api/state/version` `{ group, version }`
+- `POST /api/state/model` `{ id }`
+- `POST /api/state/model-file` `{ path }`
+- `POST /api/state/quantization` `{ role, name }`
+- `POST /api/state/config` `{ key, value }`
+- `POST /api/state/output` `{ path }`
+- `POST /api/state/args-file` `{ path }`
+- `POST /api/state/gpu` `{ action: "add"|"remove", spec }`
+- `POST /api/state/runtime` `{ path }`
+- `POST /api/state/zipalign` `{ path }`
+- `POST /api/state/reset`
+- `GET /api/state/args` — preview .args content
+- `GET /api/state/validate` — validation messages
+- `GET /api/state/components` — resolved components
+
+**Build (SSE):**
+- `POST /api/build` → SSE stream (`event: progress`, `event: complete`, `event: error`)
+- `POST /api/cancel` → sets cancel flag
+
+**Static files:**
+- Served from `--web-dir` (default: `./web/` next to binary)
+- Fallback to `index.html` for SPA routing
+
+### Design decisions:
+- **Single-user server**: one `SavedState` behind `Arc<Mutex<>>`, no concurrent sessions (localhost tool).
+- **SSE via broadcast**: `tokio::sync::broadcast` connects build tracing events to SSE subscribers.
+- **No core library changes**: server is purely a protocol adapter in `llamafile-cli`.
+- **CORS enabled**: allows web UI development from a different port.
+- **Reuses**: `build_from_state()`, `parse_gpu_spec()`, `get_cache_dir()` from existing CLI code.
 
 ### Verify:
-- `curl localhost:8765/api/versions` returns JSON
-- `curl -N -X POST localhost:8765/api/build` returns SSE stream
-- This is testable entirely via curl before building any web UI (NFR-12).
+```bash
+llamafile-builder --serve --port 8765
+# In another terminal:
+curl http://localhost:8765/api/versions
+curl http://localhost:8765/api/models
+curl http://localhost:8765/api/system-info
+curl -X POST http://localhost:8765/api/state/model -H 'Content-Type: application/json' -d '{"id":"Qwen/Qwen3-0.6B-GGUF"}'
+curl -N -X POST http://localhost:8765/api/build    # SSE stream
+cargo test --workspace
+```
+This is testable entirely via curl before building any web UI (NFR-12).
 
 ---
 
@@ -149,12 +206,9 @@ Audit and update all spec documents to match the implementation. Document the TU
 
 ## Future work
 
-### Ollama and LM Studio integration in TUI + JSON-RPC
+### Ollama and LM Studio integration in JSON-RPC
 
-The core library already has `ollama.rs` and `lmstudio.rs` for scanning local models. The CLI exposes them via `ollama list` and `lm-studio list`. These need to be added to:
-- **TUI**: A model source selector (registry / Ollama / LM Studio / custom file) in the Model popup.
-- **JSON-RPC**: `list_ollama_models` and `list_lmstudio_models` methods.
-- **HTTP server**: `/api/ollama/models` and `/api/lmstudio/models` endpoints.
+The TUI and HTTP server already support Ollama/LM Studio model selection. The JSON-RPC interactive mode is missing `list_ollama_models` and `list_lmstudio_models` methods.
 
 ### JSON-RPC cancellation
 

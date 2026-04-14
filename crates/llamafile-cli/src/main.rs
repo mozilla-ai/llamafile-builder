@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod interactive;
+mod server;
 mod state_file;
 
 use clap::Parser;
@@ -151,6 +152,16 @@ async fn main() -> ExitCode {
             }
         }
         llamafile_core::UpdateMode::Never => {}
+    }
+
+    if cli.serve {
+        match server::run(config, cli.port, cli.web_dir, cli.no_open).await {
+            Ok(()) => return ExitCode::SUCCESS,
+            Err(e) => {
+                tracing::error!("{e}");
+                return ExitCode::from(1);
+            }
+        }
     }
 
     if cli.interactive {

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 /// Persisted build configuration for multi-step CLI usage.
 /// Saved to ~/.llamafile-builder/build-state.json between invocations.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SavedState {
     // Version
     #[serde(skip_serializing_if = "Option::is_none")]
