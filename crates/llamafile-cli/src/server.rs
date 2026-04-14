@@ -13,11 +13,33 @@ use serde_json::{json, Value};
 use tokio::sync::{broadcast, Mutex};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
+use utoipa::OpenApi;
 
 use llamafile_core::cache::Cache;
 use llamafile_core::config_manager::BuilderConfig;
 
 use crate::state_file::{self, SavedState};
+
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "llamafile-builder API",
+        version = "0.1.0",
+        description = "REST API for building custom llamafiles"
+    ),
+    paths(
+        get_versions, get_models, get_model, get_config_schema,
+        get_system_info, get_ollama_models, get_lmstudio_models,
+        get_state, set_version, set_model, set_model_file,
+        set_quantization, set_config, set_output, set_args_file,
+        modify_gpu, set_runtime, set_zipalign, reset_state,
+        get_args, get_validate, get_components,
+        start_build, cancel_build,
+    ),
+)]
+struct ApiDoc;
+
+const DOCS_PATH: &str = "/docs";
 
 // ============================================================================
 // Shared state
@@ -72,7 +94,17 @@ fn build_router(config: BuilderConfig) -> (Router, Arc<AppState>) {
         .route("/api/build", post(start_build))
         .route("/api/cancel", post(cancel_build))
         .with_state(state.clone())
-        .layer(tower_http::cors::CorsLayer::permissive());
+        .layer(tower_http::cors::CorsLayer::permissive())
+        .merge(
+            utoipa_swagger_ui::SwaggerUi::new(DOCS_PATH)
+                .url("/api-docs/openapi.json", ApiDoc::openapi())
+                .config(
+                    utoipa_swagger_ui::Config::default()
+                        .use_base_layout()
+                        .display_request_duration(true)
+                        .try_it_out_enabled(true)
+                ),
+        );
 
     (router, state)
 }
@@ -106,7 +138,7 @@ pub async fn run(
     tracing::info!("server listening on http://{addr}");
 
     if !no_open {
-        let url = format!("http://{addr}");
+        let url = format!("http://{addr}{DOCS_PATH}");
         if open::that(&url).is_err() {
             tracing::warn!("could not open browser, visit {url} manually");
         }
@@ -131,6 +163,8 @@ fn api_err(status: StatusCode, msg: impl Into<String>) -> (StatusCode, Json<Valu
 // Read-only endpoints
 // ============================================================================
 
+#[utoipa::path(get, path = "/api/versions", tag = "Data",
+    summary = "List available llamafile versions")]
 async fn get_versions(State(st): State<Arc<AppState>>) -> Json<Value> {
     Json(serde_json::to_value(&st.config.versions).unwrap())
 }
@@ -141,6 +175,10 @@ struct ModelQuery {
     tag: Option<String>,
 }
 
+#[utoipa::path(get, path = "/api/models", tag = "Data",
+    summary = "Search and list models",
+    params(("search" = Option<String>, Query, description = "Filter by name/org"),
+           ("tag" = Option<String>, Query, description = "Filter by tag")))]
 async fn get_models(State(st): State<Arc<AppState>>, Query(q): Query<ModelQuery>) -> Json<Value> {
     let models = llamafile_core::search_models(
         &st.config.models,
@@ -150,24 +188,35 @@ async fn get_models(State(st): State<Arc<AppState>>, Query(q): Query<ModelQuery>
     Json(serde_json::to_value(&models).unwrap())
 }
 
+#[utoipa::path(get, path = "/api/models/{id}", tag = "Data",
+    summary = "Get model details by ID",
+    params(("id" = String, Path, description = "Model ID (HuggingFace repo ID, URL-encoded)")))]
 async fn get_model(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> ApiResult {
     let model = st.config.models.iter().find(|m| m.id == id)
         .ok_or_else(|| api_err(StatusCode::NOT_FOUND, format!("model not found: {id}")))?;
     Ok(Json(serde_json::to_value(model).unwrap()))
 }
 
+#[utoipa::path(get, path = "/api/config-schema", tag = "Data",
+    summary = "Get configuration schema for UI rendering")]
 async fn get_config_schema(State(st): State<Arc<AppState>>) -> Json<Value> {
     Json(serde_json::to_value(&st.config.config_schema).unwrap())
 }
 
+#[utoipa::path(get, path = "/api/system-info", tag = "Data",
+    summary = "Get host system information (OS, CPU, GPU, memory)")]
 async fn get_system_info() -> Json<Value> {
     Json(serde_json::to_value(&llamafile_core::system_info()).unwrap())
 }
 
+#[utoipa::path(get, path = "/api/ollama/models", tag = "Data",
+    summary = "Scan local Ollama models")]
 async fn get_ollama_models() -> Json<Value> {
     Json(serde_json::to_value(&llamafile_core::ollama::get_ollama_models(None)).unwrap())
 }
 
+#[utoipa::path(get, path = "/api/lmstudio/models", tag = "Data",
+    summary = "Scan local LM Studio models")]
 async fn get_lmstudio_models() -> Json<Value> {
     Json(serde_json::to_value(&llamafile_core::lmstudio::get_lmstudio_models(None)).unwrap())
 }
@@ -176,11 +225,16 @@ async fn get_lmstudio_models() -> Json<Value> {
 // State endpoints
 // ============================================================================
 
+#[utoipa::path(get, path = "/api/state", tag = "State",
+    summary = "Get current build session state")]
 async fn get_state(State(st): State<Arc<AppState>>) -> Json<Value> {
     let saved = st.saved.lock().await;
     Json(serde_json::to_value(&*saved).unwrap())
 }
 
+#[utoipa::path(post, path = "/api/state/version", tag = "State",
+    summary = "Set llamafile version",
+    request_body = Value)]
 async fn set_version(State(st): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult {
     let group = body.get("group").and_then(|v| v.as_str())
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'group'"))?;
@@ -193,6 +247,9 @@ async fn set_version(State(st): State<Arc<AppState>>, Json(body): Json<Value>) -
     Ok(Json(json!("ok")))
 }
 
+#[utoipa::path(post, path = "/api/state/model", tag = "State",
+    summary = "Select a model from the registry",
+    request_body = Value)]
 async fn set_model(State(st): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult {
     let id = body.get("id").and_then(|v| v.as_str())
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'id'"))?;
@@ -206,6 +263,9 @@ async fn set_model(State(st): State<Arc<AppState>>, Json(body): Json<Value>) -> 
     Ok(Json(json!("ok")))
 }
 
+#[utoipa::path(post, path = "/api/state/model-file", tag = "State",
+    summary = "Use a custom local .gguf model file",
+    request_body = Value)]
 async fn set_model_file(State(st): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult {
     let path = body.get("path").and_then(|v| v.as_str())
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'path'"))?;
@@ -216,6 +276,9 @@ async fn set_model_file(State(st): State<Arc<AppState>>, Json(body): Json<Value>
     Ok(Json(json!("ok")))
 }
 
+#[utoipa::path(post, path = "/api/state/quantization", tag = "State",
+    summary = "Set quantization for a file role (weights/mmproj)",
+    request_body = Value)]
 async fn set_quantization(State(st): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult {
     let role = body.get("role").and_then(|v| v.as_str())
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'role'"))?;
@@ -226,6 +289,9 @@ async fn set_quantization(State(st): State<Arc<AppState>>, Json(body): Json<Valu
     Ok(Json(json!("ok")))
 }
 
+#[utoipa::path(post, path = "/api/state/config", tag = "State",
+    summary = "Set a configuration value",
+    request_body = Value)]
 async fn set_config(State(st): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult {
     let key = body.get("key").and_then(|v| v.as_str())
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'key'"))?;
@@ -236,6 +302,9 @@ async fn set_config(State(st): State<Arc<AppState>>, Json(body): Json<Value>) ->
     Ok(Json(json!("ok")))
 }
 
+#[utoipa::path(post, path = "/api/state/output", tag = "State",
+    summary = "Set output file path",
+    request_body = Value)]
 async fn set_output(State(st): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult {
     let path = body.get("path").and_then(|v| v.as_str())
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'path'"))?;
@@ -244,6 +313,9 @@ async fn set_output(State(st): State<Arc<AppState>>, Json(body): Json<Value>) ->
     Ok(Json(json!("ok")))
 }
 
+#[utoipa::path(post, path = "/api/state/args-file", tag = "State",
+    summary = "Set custom .args file path",
+    request_body = Value)]
 async fn set_args_file(State(st): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult {
     let path = body.get("path").and_then(|v| v.as_str())
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'path'"))?;
@@ -252,6 +324,9 @@ async fn set_args_file(State(st): State<Arc<AppState>>, Json(body): Json<Value>)
     Ok(Json(json!("ok")))
 }
 
+#[utoipa::path(post, path = "/api/state/gpu", tag = "State",
+    summary = "Add or remove a GPU library",
+    request_body = Value)]
 async fn modify_gpu(State(st): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult {
     let action = body.get("action").and_then(|v| v.as_str())
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'action' (add|remove)"))?;
@@ -273,6 +348,9 @@ async fn modify_gpu(State(st): State<Arc<AppState>>, Json(body): Json<Value>) ->
     Ok(Json(json!("ok")))
 }
 
+#[utoipa::path(post, path = "/api/state/runtime", tag = "State",
+    summary = "Use a custom llamafile runtime binary",
+    request_body = Value)]
 async fn set_runtime(State(st): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult {
     let path = body.get("path").and_then(|v| v.as_str())
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'path'"))?;
@@ -283,6 +361,9 @@ async fn set_runtime(State(st): State<Arc<AppState>>, Json(body): Json<Value>) -
     Ok(Json(json!("ok")))
 }
 
+#[utoipa::path(post, path = "/api/state/zipalign", tag = "State",
+    summary = "Use a custom zipalign binary",
+    request_body = Value)]
 async fn set_zipalign(State(st): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult {
     let path = body.get("path").and_then(|v| v.as_str())
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'path'"))?;
@@ -291,6 +372,8 @@ async fn set_zipalign(State(st): State<Arc<AppState>>, Json(body): Json<Value>) 
     Ok(Json(json!("ok")))
 }
 
+#[utoipa::path(post, path = "/api/state/reset", tag = "State",
+    summary = "Reset all session state")]
 async fn reset_state(State(st): State<Arc<AppState>>) -> Json<Value> {
     let mut saved = st.saved.lock().await;
     *saved = SavedState::default();
@@ -306,6 +389,8 @@ fn make_builder(config: &BuilderConfig, saved: &SavedState) -> Result<llamafile_
     state_file::build_from_state(saved, config.clone(), cache)
 }
 
+#[utoipa::path(get, path = "/api/state/args", tag = "State",
+    summary = "Preview the .args file that would be generated")]
 async fn get_args(State(st): State<Arc<AppState>>) -> ApiResult {
     let saved = st.saved.lock().await;
     let builder = make_builder(&st.config, &saved)
@@ -313,6 +398,8 @@ async fn get_args(State(st): State<Arc<AppState>>) -> ApiResult {
     Ok(Json(Value::String(builder.resolved_args())))
 }
 
+#[utoipa::path(get, path = "/api/state/validate", tag = "State",
+    summary = "Validate current state (returns warnings and errors)")]
 async fn get_validate(State(st): State<Arc<AppState>>) -> ApiResult {
     let saved = st.saved.lock().await;
     let builder = make_builder(&st.config, &saved)
@@ -324,6 +411,8 @@ async fn get_validate(State(st): State<Arc<AppState>>) -> ApiResult {
     Ok(Json(Value::Array(msgs)))
 }
 
+#[utoipa::path(get, path = "/api/state/components", tag = "State",
+    summary = "List resolved components that build would assemble")]
 async fn get_components(State(st): State<Arc<AppState>>) -> ApiResult {
     let saved = st.saved.lock().await;
     let builder = make_builder(&st.config, &saved)
@@ -342,6 +431,8 @@ async fn get_components(State(st): State<Arc<AppState>>) -> ApiResult {
 // Build (SSE)
 // ============================================================================
 
+#[utoipa::path(post, path = "/api/build", tag = "Build",
+    summary = "Start a build (returns SSE stream with progress events)")]
 async fn start_build(
     State(st): State<Arc<AppState>>,
 ) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>>, (StatusCode, Json<Value>)> {
@@ -396,6 +487,8 @@ async fn start_build(
     Ok(Sse::new(stream))
 }
 
+#[utoipa::path(post, path = "/api/cancel", tag = "Build",
+    summary = "Cancel a running build")]
 async fn cancel_build(State(st): State<Arc<AppState>>) -> Json<Value> {
     st.cancel_flag.store(true, Ordering::Relaxed);
     tracing::info!("build cancellation requested");
