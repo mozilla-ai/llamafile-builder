@@ -19,3 +19,8 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["registry"] }
 directories = { workspace = true }
 tui-textarea = "0.7"
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

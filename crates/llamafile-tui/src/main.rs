@@ -21,6 +21,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 use llamafile_core::config_manager::ConfigManager;
+use llamafile_core::config_store::ConfigStore;
 
 use app::{App, BuildStatus, LogEntry, LogLevel};
 
@@ -70,7 +71,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(config, get_cache_dir());
+    let store = ConfigStore::new(get_config_dir().join("configs"));
+    let mut app = App::new(config, get_cache_dir(), store);
     app.add_log(LogLevel::Info, "llamafile-builder TUI started".to_string());
 
     let result = run_app(&mut terminal, &mut app, log_rx).await;

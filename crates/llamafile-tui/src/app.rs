@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use llamafile_core::config_manager::BuilderConfig;
+use llamafile_core::config_store::{BuildRecipe, ConfigStore, SavedState};
 use llamafile_core::models::*;
 use llamafile_core::cache::Cache;
 use llamafile_core::Builder;
@@ -179,6 +180,8 @@ pub enum Popup {
     },
     GpuSelect { available: Vec<GpuLibOption>, selected: Vec<bool>, cursor: usize },
     ArgsEdit { textarea: tui_textarea::TextArea<'static>, original: String },
+    SaveRecipe { input: String },
+    LoadRecipe { recipes: Vec<BuildRecipe>, selected: usize },
     Confirm { message: String, action: ConfirmAction },
 }
 
@@ -254,6 +257,8 @@ pub struct LogEntry {
 pub struct App {
     pub config: BuilderConfig,
     pub cache_dir: PathBuf,
+    pub store: ConfigStore,
+    pub recipe_id: Option<uuid::Uuid>,
 
     // Current selections (mirrors SavedState)
     pub version_group: Option<String>,
@@ -287,10 +292,12 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(config: BuilderConfig, cache_dir: PathBuf) -> Self {
+    pub fn new(config: BuilderConfig, cache_dir: PathBuf, store: ConfigStore) -> Self {
         let mut app = Self {
             config,
             cache_dir,
+            store,
+            recipe_id: None,
             version_group: None,
             version: None,
             custom_runtime: None,
@@ -595,6 +602,114 @@ impl App {
     pub fn can_build(&self) -> bool {
         self.validation_errors().is_empty()
     }
+
+    /// Convert current App fields to a SavedState for persistence.
+    pub fn to_saved_state(&self) -> SavedState {
+        // Convert typed gpu_libs back to string specs
+        let gpu_libs: Vec<String> = self.gpu_libs.iter().map(|(accel, os)| {
+            let a = match accel {
+                GpuAccel::Cuda => "cuda",
+                GpuAccel::Rocm => "rocm",
+                GpuAccel::Vulkan => "vulkan",
+            };
+            let o = match os {
+                Os::Linux => "linux",
+                Os::Windows => "windows",
+            };
+            format!("{}:{}", a, o)
+        }).collect();
+
+        SavedState {
+            version_group: self.version_group.clone(),
+            version: self.version.clone(),
+            custom_runtime: self.custom_runtime.clone(),
+            model_id: self.model_id.clone(),
+            custom_model_file: self.custom_model_file.clone(),
+            ollama_model: self.ollama_model.clone(),
+            lmstudio_model: self.lmstudio_model.clone(),
+            quantizations: self.quantizations.clone(),
+            config_values: self.config_values.clone(),
+            args_file: self.args_file.clone(),
+            output_path: self.output_path.clone(),
+            gpu_libs,
+            custom_zipalign: self.custom_zipalign.clone(),
+        }
+    }
+
+    /// Load App fields from a BuildRecipe.
+    pub fn load_from_recipe(&mut self, recipe: &BuildRecipe) {
+        let s = &recipe.state;
+        self.version_group = s.version_group.clone();
+        self.version = s.version.clone();
+        self.custom_runtime = s.custom_runtime.clone();
+        self.model_id = s.model_id.clone();
+        self.custom_model_file = s.custom_model_file.clone();
+        self.ollama_model = s.ollama_model.clone();
+        self.lmstudio_model = s.lmstudio_model.clone();
+        self.quantizations = s.quantizations.clone();
+        self.config_values = s.config_values.clone();
+        self.args_file = s.args_file.clone();
+        self.output_path = s.output_path.clone();
+        self.custom_zipalign = s.custom_zipalign.clone();
+        self.args_override = None;
+        self.mmproj_disabled = false;
+
+        // Convert string gpu specs to typed tuples
+        self.gpu_libs = s.gpu_libs.iter().filter_map(|spec| {
+            let parts: Vec<&str> = spec.split(':').collect();
+            let accel = match parts[0] {
+                "cuda" => Some(GpuAccel::Cuda),
+                "rocm" => Some(GpuAccel::Rocm),
+                "vulkan" => Some(GpuAccel::Vulkan),
+                _ => None,
+            }?;
+            let os = if parts.len() > 1 {
+                match parts[1] {
+                    "linux" => Os::Linux,
+                    "windows" => Os::Windows,
+                    _ => return None,
+                }
+            } else {
+                Os::Linux
+            };
+            Some((accel, os))
+        }).collect();
+
+        // Set model source tab
+        if self.ollama_model.is_some() {
+            self.model_source = ModelTab::Ollama;
+        } else if self.lmstudio_model.is_some() {
+            self.model_source = ModelTab::LmStudio;
+        } else {
+            self.model_source = ModelTab::Registry;
+        }
+
+        self.recipe_id = Some(recipe.id);
+    }
+
+    /// Save current state to a named recipe.
+    pub fn save_recipe(&mut self, name: &str) -> Result<(), String> {
+        let id = match self.recipe_id {
+            Some(id) => id,
+            None => {
+                let recipe = self.store.create().map_err(|e| format!("{e}"))?;
+                self.recipe_id = Some(recipe.id);
+                recipe.id
+            }
+        };
+        let mut recipe = self.store.get(id).map_err(|e| format!("{e}"))?;
+        recipe.state = self.to_saved_state();
+        recipe.state.resolve_defaults(&self.config);
+        recipe.name = Some(name.to_string());
+        recipe.updated_at = chrono::Utc::now();
+        self.store.save(&recipe).map_err(|e| format!("{e}"))?;
+        Ok(())
+    }
+
+    /// List all saved recipes.
+    pub fn list_recipes(&self) -> Vec<BuildRecipe> {
+        self.store.list().unwrap_or_default()
+    }
 }
 
 #[cfg(test)]
@@ -619,7 +734,8 @@ mod tests {
     }
 
     fn test_app() -> App {
-        App::new(test_config(), PathBuf::from("/tmp/test-cache"))
+        let tmp = tempfile::TempDir::new().unwrap();
+        App::new(test_config(), PathBuf::from("/tmp/test-cache"), ConfigStore::new(tmp.into_path()))
     }
 
     // ── Defaults ──

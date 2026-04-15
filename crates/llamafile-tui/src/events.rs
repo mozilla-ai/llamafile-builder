@@ -53,6 +53,8 @@ pub fn handle_key(app: &mut App, key: event::KeyEvent) -> bool {
         Popup::ConfigEdit { .. } => handle_config_popup(app, key),
         Popup::GpuSelect { .. } => handle_gpu_popup(app, key),
         Popup::ArgsEdit { .. } => handle_args_edit(app, key),
+        Popup::SaveRecipe { .. } => handle_save_recipe(app, key),
+        Popup::LoadRecipe { .. } => handle_load_recipe(app, key),
         Popup::Confirm { .. } => handle_confirm_popup(app, key),
     }
 }
@@ -79,6 +81,19 @@ fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
             } else {
                 app.should_quit = true;
             }
+            true
+        }
+        KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let default_name = app.recipe_id
+                .and_then(|id| app.store.get(id).ok())
+                .and_then(|r| r.name)
+                .unwrap_or_default();
+            app.popup = Popup::SaveRecipe { input: default_name };
+            true
+        }
+        KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let recipes = app.list_recipes();
+            app.popup = Popup::LoadRecipe { recipes, selected: 0 };
             true
         }
         KeyCode::Char(' ') if app.focus == Focus::Mmproj => {
@@ -687,6 +702,54 @@ fn current_quant_index(app: &App, role: &str, options: &[String]) -> usize {
     app.quantizations.get(role)
         .and_then(|name| options.iter().position(|o| o.eq_ignore_ascii_case(name)))
         .unwrap_or(0)
+}
+
+fn handle_save_recipe(app: &mut App, key: event::KeyEvent) -> bool {
+    if let Popup::SaveRecipe { ref mut input } = app.popup {
+        match key.code {
+            KeyCode::Enter => {
+                if !input.is_empty() {
+                    let name = input.clone();
+                    match app.save_recipe(&name) {
+                        Ok(()) => {
+                            app.add_log(LogLevel::Info, format!("Recipe saved as '{}'", name));
+                        }
+                        Err(e) => {
+                            app.add_log(LogLevel::Error, format!("Failed to save recipe: {}", e));
+                        }
+                    }
+                }
+                app.popup = Popup::None;
+            }
+            KeyCode::Esc => app.popup = Popup::None,
+            KeyCode::Backspace => { input.pop(); }
+            KeyCode::Char(c) => input.push(c),
+            _ => {}
+        }
+    }
+    true
+}
+
+fn handle_load_recipe(app: &mut App, key: event::KeyEvent) -> bool {
+    if let Popup::LoadRecipe { ref recipes, ref mut selected } = app.popup {
+        let count = recipes.len();
+        match key.code {
+            KeyCode::Up => *selected = selected.saturating_sub(1),
+            KeyCode::Down => if count > 0 { *selected = (*selected + 1).min(count - 1); },
+            KeyCode::Enter => {
+                if let Some(recipe) = recipes.get(*selected) {
+                    let recipe = recipe.clone();
+                    let name = recipe.name.clone().unwrap_or_else(|| recipe.id.to_string());
+                    app.load_from_recipe(&recipe);
+                    app.add_log(LogLevel::Info, format!("Loaded recipe '{}'", name));
+                }
+                app.popup = Popup::None;
+            }
+            KeyCode::Esc => app.popup = Popup::None,
+            _ => {}
+        }
+    }
+    true
 }
 
 fn handle_confirm_popup(app: &mut App, key: event::KeyEvent) -> bool {

@@ -131,8 +131,9 @@ Audit and update all spec documents to match the implementation. Document the TU
 
 - **JSON-RPC**: added `create_config`, `list_configs`, `load_config`, `save_config`, `delete_config`, `list_ollama_models`, `list_lmstudio_models`. Session tracks current recipe ID; all mutations auto-persist via ConfigStore.
 
-### Remaining:
-- TUI: load/create recipe on startup, save/load UI.
+- **TUI**: integrated ConfigStore. Ctrl+S saves recipe (with name prompt, resolves defaults). Ctrl+L loads from saved recipes. `to_saved_state()` / `load_from_recipe()` sync between App fields and SavedState. Status bar shows ^S/^L hints.
+
+### Phase 6a: COMPLETE
 
 ---
 

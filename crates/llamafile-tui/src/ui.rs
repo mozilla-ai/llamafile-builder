@@ -53,6 +53,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
             frame.render_widget(Clear, area);
             frame.render_widget(&*textarea, area);
         }
+        Popup::SaveRecipe { input } => draw_save_recipe_popup(frame, input),
+        Popup::LoadRecipe { recipes, selected } => draw_load_recipe_popup(frame, recipes, *selected),
         Popup::Confirm { message, .. } => draw_confirm_popup(frame, message),
     }
 }
@@ -341,7 +343,8 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     spans.extend(keys);
     spans.extend(vec![
         Span::styled("  │  ", text_style),
-        Span::styled("l", key_style), Span::styled("=logs  ", text_style),
+        Span::styled("^S", key_style), Span::styled("=save  ", text_style),
+        Span::styled("^L", key_style), Span::styled("=load  ", text_style),
         Span::styled("q", key_style), Span::styled("=quit", text_style),
     ]);
 
@@ -791,6 +794,62 @@ fn draw_gpu_popup(
     }
 }
 
+
+fn draw_save_recipe_popup(frame: &mut Frame, input: &str) {
+    let area = centered_rect(55, 5, frame.area());
+    frame.render_widget(Clear, area);
+    let block = Block::bordered()
+        .title(" Save Recipe ")
+        .title_bottom(" Enter=save  Esc=cancel ");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    frame.render_widget(
+        Paragraph::new(format!(" Name: {}_", input)).style(Style::default().fg(Color::Cyan)),
+        inner,
+    );
+}
+
+fn draw_load_recipe_popup(
+    frame: &mut Frame,
+    recipes: &[llamafile_core::config_store::BuildRecipe],
+    selected: usize,
+) {
+    let height = (recipes.len() + 4).max(5).min(14) as u16;
+    let area = centered_rect(65, height, frame.area());
+    frame.render_widget(Clear, area);
+    let block = Block::bordered()
+        .title(" Load Recipe ")
+        .title_bottom(" ↑↓=navigate  Enter=load  Esc=cancel ");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if recipes.is_empty() {
+        frame.render_widget(
+            Paragraph::new("  No saved recipes").style(Style::default().fg(Color::DarkGray)),
+            inner,
+        );
+    } else {
+        let items: Vec<ListItem> = recipes
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                let name = r.name.as_deref().unwrap_or("(unnamed)");
+                let model = r.state.model_id.as_deref()
+                    .or(r.state.ollama_model.as_ref().map(|m| m.display_name.as_str()))
+                    .or(r.state.lmstudio_model.as_ref().map(|m| m.display_name.as_str()))
+                    .unwrap_or("(no model)");
+                let label = format!("  {} — {}", name, model);
+                let style = if i == selected {
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+                ListItem::new(label).style(style)
+            })
+            .collect();
+        frame.render_widget(List::new(items), inner);
+    }
+}
 
 fn draw_confirm_popup(frame: &mut Frame, message: &str) {
     let area = centered_rect(50, 5, frame.area());

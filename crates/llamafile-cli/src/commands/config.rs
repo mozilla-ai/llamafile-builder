@@ -258,6 +258,10 @@ fn show_recipe(
     // Model
     if let Some(ref path) = saved.custom_model_file {
         println!("Model:         custom ({})", path);
+    } else if let Some(ref m) = saved.ollama_model {
+        println!("Model:         [Ollama] {} ({})", m.display_name, llamafile_core::models::format_size(m.size_bytes));
+    } else if let Some(ref m) = saved.lmstudio_model {
+        println!("Model:         [LM Studio] {} ({})", m.display_name, llamafile_core::models::format_size(m.total_size_bytes));
     } else {
         let model_id = saved.model_id.as_deref()
             .or(builder.state().selected_model_id.as_deref());

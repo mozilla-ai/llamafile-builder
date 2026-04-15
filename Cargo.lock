@@ -1248,15 +1248,18 @@ dependencies = [
 name = "llamafile-tui"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "crossterm",
  "directories",
  "llamafile-core",
  "ratatui",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "tui-textarea",
+ "uuid",
 ]
 
 [[package]]

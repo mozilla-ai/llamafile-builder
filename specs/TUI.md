@@ -41,6 +41,8 @@ The status bar at the very bottom shows the description of the focused row and k
 | `Space` | Toggle mmproj on/off (when Mmproj row is focused) |
 | `<` / `>` | Lower / raise log level filter (DEBUG → INFO → WARN → ERROR) |
 | `[` / `]` | Scroll log pane up / down |
+| `Ctrl+S` | Save current configuration as a named recipe |
+| `Ctrl+L` | Load a previously saved recipe |
 | `Ctrl+C` / `Q` | Quit (with confirmation if a build is running) |
 
 ## Popups
