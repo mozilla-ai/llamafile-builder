@@ -78,10 +78,10 @@ pub enum Commands {
     /// Show system information
     SystemInfo,
 
-    /// Configure build parameters incrementally
-    Config {
+    /// Manage build recipes (set parameters, list, save, load)
+    Recipe {
         #[command(subcommand)]
-        cmd: ConfigCmd,
+        cmd: RecipeCmd,
     },
 
     /// Build a llamafile
@@ -89,7 +89,7 @@ pub enum Commands {
 }
 
 #[derive(Subcommand)]
-pub enum ConfigCmd {
+pub enum RecipeCmd {
     /// Select llamafile version
     SetVersion {
         /// Version group name (e.g. "llamafile 0.10")
@@ -220,7 +220,7 @@ pub enum LmStudioCmd {
 #[derive(Args)]
 pub struct BuildArgs {
     /// Model ID from registry, or path to a local .gguf file.
-    /// If omitted, builds from saved config (see 'config' subcommand).
+    /// If omitted, builds from the current recipe (see 'recipe' subcommand).
     #[arg(long)]
     pub model: Option<String>,
 

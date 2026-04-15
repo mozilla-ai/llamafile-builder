@@ -217,7 +217,7 @@ impl ConfigStore {
         }))
     }
 
-    /// Find by name or UUID string.
+    /// Find by name or UUID string (full or 8-char prefix as shown in `list` output).
     pub fn find_by_name_or_id(&self, query: &str) -> Result<Option<BuildRecipe>, Error> {
         if let Ok(id) = Uuid::parse_str(query) {
             return match self.get(id) {
@@ -225,6 +225,16 @@ impl ConfigStore {
                 Err(Error::NotFound(_)) => Ok(None),
                 Err(e) => Err(e),
             };
+        }
+        // Try 8-char hex prefix match (matches what `list` displays)
+        if query.len() >= 8 && query.chars().all(|c| c.is_ascii_hexdigit()) {
+            let recipes = self.list()?;
+            let matches: Vec<_> = recipes.into_iter()
+                .filter(|r| r.id.to_string().starts_with(query))
+                .collect();
+            if matches.len() == 1 {
+                return Ok(Some(matches.into_iter().next().unwrap()));
+            }
         }
         self.find_by_name(query)
     }

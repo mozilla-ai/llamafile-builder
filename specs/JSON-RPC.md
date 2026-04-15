@@ -89,40 +89,40 @@ Returns array of local LM Studio models.
 
 Recipes are named, UUID-identified build configurations that persist across sessions. All state mutations operate on the "current" recipe.
 
-#### create_config
+#### create_recipe
 ```json
-{"jsonrpc":"2.0","id":1,"method":"create_config"}
+{"jsonrpc":"2.0","id":1,"method":"create_recipe"}
 ```
 Creates a new empty recipe, sets it as current. Returns `{ id }`.
 
-#### list_configs
+#### list_recipes
 ```json
-{"jsonrpc":"2.0","id":1,"method":"list_configs"}
+{"jsonrpc":"2.0","id":1,"method":"list_recipes"}
 ```
 Returns array of `{ id, name, model, updated_at, current }`.
 
-#### load_config
+#### load_recipe
 ```json
-{"jsonrpc":"2.0","id":1,"method":"load_config","params":{"id":"name-or-uuid"}}
+{"jsonrpc":"2.0","id":1,"method":"load_recipe","params":{"id":"name-or-uuid"}}
 ```
 Loads a recipe as the current session config. Returns `{ id, name }`.
 
-#### save_config
+#### save_recipe
 ```json
-{"jsonrpc":"2.0","id":1,"method":"save_config","params":{"name":"my-recipe"}}
+{"jsonrpc":"2.0","id":1,"method":"save_recipe","params":{"name":"my-recipe"}}
 ```
 Names the current recipe and resolves all defaults for a full snapshot. Returns `{ ok, id, name }`.
 
-#### delete_config
+#### delete_recipe
 ```json
-{"jsonrpc":"2.0","id":1,"method":"delete_config","params":{"id":"name-or-uuid"}}
+{"jsonrpc":"2.0","id":1,"method":"delete_recipe","params":{"id":"name-or-uuid"}}
 ```
 Deletes a recipe by name or UUID.
 
 
 ### State mutations
 
-Each mutation operates on the current recipe (created via `create_config` or loaded via `load_config`). A recipe is auto-created if none exists. Every mutation auto-persists via ConfigStore and returns `{ ok, recipe_id }`.
+Each mutation operates on the current recipe (created via `create_recipe` or loaded via `load_recipe`). A recipe is auto-created if none exists. Every mutation auto-persists via ConfigStore and returns `{ ok, recipe_id }`.
 
 #### set_version
 ```json

@@ -80,25 +80,25 @@ lb build --model Qwen/Qwen3-0.6B-GGUF --runtime /path/to/llamafile  # custom run
 
 ## Multi-step builds
 
-Configure incrementally, then build. State persists between invocations at `~/.llamafile-builder/build-state.json`.
+Configure incrementally, then build. The current recipe persists between invocations at `~/.llamafile-builder/recipes/{uuid}.json`.
 
 ### View default configuration
 
 ```bash
-lb config show          # shows what would be built with all defaults
-lb config show-args     # preview the .args file content
+lb recipe show          # shows what would be built with all defaults
+lb recipe show-args     # preview the .args file content
 ```
 
 ### Configure step by step
 
 ```bash
-lb config set-model Qwen/Qwen3-0.6B-GGUF
-lb config set server_enabled false
-lb config set context_length 8192
-lb config show           # verify
-lb config show-args      # verify .args content
+lb recipe set-model Qwen/Qwen3-0.6B-GGUF
+lb recipe set server_enabled false
+lb recipe set context_length 8192
+lb recipe show           # verify
+lb recipe show-args      # verify .args content
 lb build                 # build from saved state
-lb config save my-qwen   # name it for later reuse
+lb recipe save my-qwen   # name it for later reuse
 ```
 
 ### Recipe management
@@ -106,57 +106,57 @@ lb config save my-qwen   # name it for later reuse
 Build configurations are stored as **recipes** — named, UUID-identified configurations that persist across sessions and are shared by all interfaces.
 
 ```bash
-lb config new                    # create a new empty recipe, set as current
-lb config list                   # list all saved recipes (* = current)
-lb config load my-qwen           # load a saved recipe by name or UUID
-lb config save my-qwen           # name/save the current recipe (resolves all defaults)
-lb config delete my-qwen         # delete a recipe by name or UUID
-lb config reset                  # clear current recipe state (but keep the recipe)
+lb recipe new                    # create a new empty recipe, set as current
+lb recipe list                   # list all saved recipes (* = current)
+lb recipe load my-qwen           # load a saved recipe by name or UUID
+lb recipe save my-qwen           # name/save the current recipe (resolves all defaults)
+lb recipe delete my-qwen         # delete a recipe by name or UUID
+lb recipe reset                  # clear current recipe state (but keep the recipe)
 ```
 
-Every `config set-*` mutation auto-persists to the current recipe. The `[recipe: ...]` indicator shows which recipe was updated.
+Every `recipe set-*` mutation auto-persists to the current recipe. The `[recipe: ...]` indicator shows which recipe was updated.
 
-When you `config save`, all defaults are frozen into a full snapshot — rebuilding from a saved recipe produces the same result regardless of future config file changes.
+When you `recipe save`, all defaults are frozen into a full snapshot — rebuilding from a saved recipe produces the same result regardless of future config file changes.
 
-### All config set commands
+### All recipe set commands
 
 ```bash
 # Version
-lb config set-version "llamafile 0.10" "0.10.0"
-lb config set-runtime /path/to/llamafile    # custom binary
+lb recipe set-version "llamafile 0.10" "0.10.0"
+lb recipe set-runtime /path/to/llamafile    # custom binary
 
 # Model
-lb config set-model Qwen/Qwen3-0.6B-GGUF   # registry model (HF repo ID)
-lb config set-model-file /path/to/model.gguf  # local file
-lb config set-ollama-model "qwen3:0.6b"     # local Ollama model
-lb config set-lmstudio-model "Qwen3.5-0.8B-GGUF"  # local LM Studio model
-lb config set-quantization weights Q8_0     # per-role quantization
-lb config set-quantization mmproj Q8_0      # mmproj quantization
+lb recipe set-model Qwen/Qwen3-0.6B-GGUF   # registry model (HF repo ID)
+lb recipe set-model-file /path/to/model.gguf  # local file
+lb recipe set-ollama-model "qwen3:0.6b"     # local Ollama model
+lb recipe set-lmstudio-model "Qwen3.5-0.8B-GGUF"  # local LM Studio model
+lb recipe set-quantization weights Q8_0     # per-role quantization
+lb recipe set-quantization mmproj Q8_0      # mmproj quantization
 
 # Configuration
-lb config set server_enabled false          # any config key
-lb config set context_length 16384          # values are auto-parsed as JSON
-lb config set-args-file /path/to/custom.args  # override entire .args
+lb recipe set server_enabled false          # any config key
+lb recipe set context_length 16384          # values are auto-parsed as JSON
+lb recipe set-args-file /path/to/custom.args  # override entire .args
 
 # Output
-lb config set-output /tmp/my.llamafile
+lb recipe set-output /tmp/my.llamafile
 
 # GPU
-lb config add-gpu cuda                      # add GPU library
-lb config add-gpu cuda:linux                # specific OS
-lb config remove-gpu cuda                   # remove
+lb recipe add-gpu cuda                      # add GPU library
+lb recipe add-gpu cuda:linux                # specific OS
+lb recipe remove-gpu cuda                   # remove
 
 # Build tools
-lb config set-zipalign /path/to/zipalign    # custom zipalign
+lb recipe set-zipalign /path/to/zipalign    # custom zipalign
 
 # View
-lb config show                              # full state with all config values
-lb config show-args                         # preview .args content
+lb recipe show                              # full state with all config values
+lb recipe show-args                         # preview .args content
 ```
 
 ### Defaults
 
-On a fresh state (or after `config reset`), `config show` displays what would be built with all defaults:
+On a fresh state (or after `recipe reset`), `recipe show` displays what would be built with all defaults:
 
 ```
 Version:       llamafile 0.10 / 0.10.0 (default)
@@ -187,7 +187,7 @@ Overrides show the previous value:
 CLI args override saved state:
 
 ```bash
-lb config set-model Qwen/Qwen3-0.6B-GGUF
+lb recipe set-model Qwen/Qwen3-0.6B-GGUF
 lb build -o /tmp/override.llamafile         # uses saved model, overrides output
 lb build --model unsloth/gpt-oss-20b-GGUF   # one-shot ignores saved state entirely
 ```

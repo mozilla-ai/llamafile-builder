@@ -120,12 +120,12 @@ impl Session {
             }
 
             // ── Recipe management ──
-            "create_config" => {
+            "create_recipe" => {
                 let recipe = self.store.create().map_err(|e| (-32000, format!("{e}")))?;
                 self.current_recipe_id = Some(recipe.id);
                 Ok(serde_json::json!({"id": recipe.id.to_string()}))
             }
-            "list_configs" => {
+            "list_recipes" => {
                 let recipes = self.store.list().map_err(|e| (-32000, format!("{e}")))?;
                 let items: Vec<Value> = recipes.iter().map(|r| serde_json::json!({
                     "id": r.id.to_string(),
@@ -136,18 +136,18 @@ impl Session {
                 })).collect();
                 Ok(Value::Array(items))
             }
-            "load_config" => {
+            "load_recipe" => {
                 let query = str_param(params, "id")?;
                 let recipe = self.store.find_by_name_or_id(&query)
                     .map_err(|e| (-32000, format!("{e}")))?
-                    .ok_or((-32000, format!("config not found: {query}")))?;
+                    .ok_or((-32000, format!("recipe not found: {query}")))?;
                 self.current_recipe_id = Some(recipe.id);
                 Ok(serde_json::json!({"id": recipe.id.to_string(), "name": recipe.name}))
             }
-            "save_config" => {
+            "save_recipe" => {
                 let name = str_param(params, "name")?;
                 let id = self.current_recipe_id
-                    .ok_or((-32000, "no active config to save".to_string()))?;
+                    .ok_or((-32000, "no active recipe to save".to_string()))?;
                 let mut recipe = self.store.get(id).map_err(|e| (-32000, format!("{e}")))?;
                 recipe.name = Some(name.clone());
                 recipe.state.resolve_defaults(&self.config);
@@ -155,11 +155,11 @@ impl Session {
                 self.store.save(&recipe).map_err(|e| (-32000, format!("{e}")))?;
                 Ok(serde_json::json!({"ok": true, "id": id.to_string(), "name": name}))
             }
-            "delete_config" => {
+            "delete_recipe" => {
                 let query = str_param(params, "id")?;
                 let recipe = self.store.find_by_name_or_id(&query)
                     .map_err(|e| (-32000, format!("{e}")))?
-                    .ok_or((-32000, format!("config not found: {query}")))?;
+                    .ok_or((-32000, format!("recipe not found: {query}")))?;
                 if Some(recipe.id) == self.current_recipe_id {
                     self.current_recipe_id = None;
                 }

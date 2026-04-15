@@ -84,7 +84,7 @@ zipalign is downloaded and cached automatically from `zipalign_url` in each rele
 
 ## Phase 5d: Multi-step CLI -- DONE
 
-State is persisted to `~/.llamafile-builder/build-state.json` between invocations. `SavedState` is the universal intermediate representation: both one-shot mode and multi-step mode go through `build_from_state()` to create a configured Builder. Subcommands: `config set-*`, `config show`, `config show-args`, `config reset`.
+State is persisted to `~/.llamafile-builder/build-state.json` between invocations. `SavedState` is the universal intermediate representation: both one-shot mode and multi-step mode go through `build_from_state()` to create a configured Builder. Subcommands: `recipe set-*`, `recipe show`, `recipe show-args`, `recipe reset`.
 
 ---
 
@@ -122,14 +122,14 @@ Audit and update all spec documents to match the implementation. Document the TU
 
 ### Done:
 - **Core**: `config_store.rs` with `BuildRecipe`, `ConfigStore`, `SavedState` (moved from CLI). `resolve_defaults()` for full snapshots at save time. 14 unit tests.
-- **CLI**: migrated from single `build-state.json` to `ConfigStore`. Added `config new/list/load/save/delete`. Current recipe tracked via pointer file. Every mutation auto-persists and shows `[recipe: ...]`. `config save` resolves defaults for reproducibility.
+- **CLI**: migrated from single `build-state.json` to `ConfigStore`. Added `recipe new/list/load/save/delete`. Current recipe tracked via pointer file. Every mutation auto-persists and shows `[recipe: ...]`. `recipe save` resolves defaults for reproducibility.
 
 ### Done:
 - **Core**: `config_store.rs` with `BuildRecipe`, `ConfigStore`, `SavedState` (moved from CLI). `resolve_defaults()` for full snapshots at save time. 14 unit tests.
-- **CLI**: migrated from single `build-state.json` to `ConfigStore`. Added `config new/list/load/save/delete`. Current recipe tracked via pointer file. Every mutation auto-persists and shows `[recipe: ...]`. `config save` resolves defaults for reproducibility.
-- **HTTP server**: all state endpoints scoped under `/api/configs/:id/...`. Recipe CRUD (`POST/GET/DELETE /api/configs`, `PUT .../name`). `mutate_recipe` helper for DRY load-modify-save. Multi-client verified with independent recipes. 17 server tests.
+- **CLI**: migrated from single `build-state.json` to `ConfigStore`. Added `recipe new/list/load/save/delete`. Current recipe tracked via pointer file. Every mutation auto-persists and shows `[recipe: ...]`. `recipe save` resolves defaults for reproducibility.
+- **HTTP server**: all state endpoints scoped under `/api/recipes/:id/...`. Recipe CRUD (`POST/GET/DELETE /api/recipes`, `PUT .../name`). `mutate_recipe` helper for DRY load-modify-save. Multi-client verified with independent recipes. 17 server tests.
 
-- **JSON-RPC**: added `create_config`, `list_configs`, `load_config`, `save_config`, `delete_config`, `list_ollama_models`, `list_lmstudio_models`. Session tracks current recipe ID; all mutations auto-persist via ConfigStore.
+- **JSON-RPC**: added `create_recipe`, `list_recipes`, `load_recipe`, `save_recipe`, `delete_recipe`, `list_ollama_models`, `list_lmstudio_models`. Session tracks current recipe ID; all mutations auto-persist via ConfigStore.
 
 - **TUI**: integrated ConfigStore. Ctrl+S saves recipe (with name prompt, resolves defaults). Ctrl+L loads from saved recipes. `to_saved_state()` / `load_from_recipe()` sync between App fields and SavedState. Status bar shows ^S/^L hints.
 
@@ -163,31 +163,31 @@ No `sse.rs` needed — SSE is handled inline in `server.rs` via a `tokio::sync::
 - `/api/lmstudio/models` — scan local LM Studio models
 
 **Recipe CRUD:**
-- `POST /api/configs` → create new recipe, returns `{ id }`
-- `GET /api/configs` → list all recipes
-- `GET /api/configs/:id` → get a recipe
-- `DELETE /api/configs/:id` → delete a recipe
-- `PUT /api/configs/:id/name` `{ name }` → name/rename a recipe
+- `POST /api/recipes` → create new recipe, returns `{ id }`
+- `GET /api/recipes` → list all recipes
+- `GET /api/recipes/:id` → get a recipe
+- `DELETE /api/recipes/:id` → delete a recipe
+- `PUT /api/recipes/:id/name` `{ name }` → name/rename a recipe
 
 **Recipe state (scoped by recipe ID):**
-- `GET /api/configs/:id/state` — current state
-- `POST /api/configs/:id/state/version` `{ group, version }`
-- `POST /api/configs/:id/state/model` `{ id }`
-- `POST /api/configs/:id/state/model-file` `{ path }`
-- `POST /api/configs/:id/state/quantization` `{ role, name }`
-- `POST /api/configs/:id/state/config` `{ key, value }`
-- `POST /api/configs/:id/state/output` `{ path }`
-- `POST /api/configs/:id/state/args-file` `{ path }`
-- `POST /api/configs/:id/state/gpu` `{ action: "add"|"remove", spec }`
-- `POST /api/configs/:id/state/runtime` `{ path }`
-- `POST /api/configs/:id/state/zipalign` `{ path }`
-- `POST /api/configs/:id/state/reset`
-- `GET /api/configs/:id/state/args` — preview .args content
-- `GET /api/configs/:id/state/validate` — validation messages
-- `GET /api/configs/:id/state/components` — resolved components
+- `GET /api/recipes/:id/state` — current state
+- `POST /api/recipes/:id/state/version` `{ group, version }`
+- `POST /api/recipes/:id/state/model` `{ id }`
+- `POST /api/recipes/:id/state/model-file` `{ path }`
+- `POST /api/recipes/:id/state/quantization` `{ role, name }`
+- `POST /api/recipes/:id/state/config` `{ key, value }`
+- `POST /api/recipes/:id/state/output` `{ path }`
+- `POST /api/recipes/:id/state/args-file` `{ path }`
+- `POST /api/recipes/:id/state/gpu` `{ action: "add"|"remove", spec }`
+- `POST /api/recipes/:id/state/runtime` `{ path }`
+- `POST /api/recipes/:id/state/zipalign` `{ path }`
+- `POST /api/recipes/:id/state/reset`
+- `GET /api/recipes/:id/state/args` — preview .args content
+- `GET /api/recipes/:id/state/validate` — validation messages
+- `GET /api/recipes/:id/state/components` — resolved components
 
 **Build (SSE, scoped by recipe ID):**
-- `POST /api/configs/:id/build` → SSE stream (`event: progress`, `event: complete`, `event: error`)
+- `POST /api/recipes/:id/build` → SSE stream (`event: progress`, `event: complete`, `event: error`)
 - `POST /api/cancel` → sets cancel flag for the running build
 
 **Static files:**
@@ -205,9 +205,9 @@ No `sse.rs` needed — SSE is handled inline in `server.rs` via a `tokio::sync::
 llamafile-builder --serve --port 8765
 # In another terminal:
 curl http://localhost:8765/api/versions
-curl -X POST http://localhost:8765/api/configs                                    # create recipe
-curl -X POST http://localhost:8765/api/configs/<id>/state/model -d '{"id":"Qwen/Qwen3-0.6B-GGUF"}'
-curl -N -X POST http://localhost:8765/api/configs/<id>/build                      # SSE stream
+curl -X POST http://localhost:8765/api/recipes                                    # create recipe
+curl -X POST http://localhost:8765/api/recipes/<id>/state/model -d '{"id":"Qwen/Qwen3-0.6B-GGUF"}'
+curl -N -X POST http://localhost:8765/api/recipes/<id>/build                      # SSE stream
 cargo test --workspace
 ```
 This is testable entirely via curl before building any web UI (NFR-12).

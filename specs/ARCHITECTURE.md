@@ -437,8 +437,8 @@ Progress is reported to stderr via `tracing` at INFO level. Structured output (J
 **Three modes of operation:**
 
 1. **One-shot mode**: all options specified on the command line, build runs immediately. Good for scripts and CI.
-2. **Multi-step mode**: `config set-*` commands persist state between invocations. `build` (no `--model`) uses saved state. Defaults applied for anything not configured.
-3. **JSON-RPC mode** (`--interactive`): stateful session over stdin/stdout. Same methods as the `config` subcommands but as a protocol. See [JSON-RPC.md](../specs/JSON-RPC.md). This is the universal interface that the HTTP server and future GUIs will also use.
+2. **Multi-step mode**: `recipe set-*` commands persist state between invocations. `build` (no `--model`) uses saved state. Defaults applied for anything not configured.
+3. **JSON-RPC mode** (`--interactive`): stateful session over stdin/stdout. Same methods as the `recipe` subcommands but as a protocol. See [JSON-RPC.md](../specs/JSON-RPC.md). This is the universal interface that the HTTP server and future GUIs will also use.
 
 ### Server mode (`llamafile-builder --serve`)
 
@@ -458,33 +458,33 @@ GET  /api/ollama/models
 GET  /api/lmstudio/models
 
 # Recipe management
-POST /api/configs                              -> create, returns { id }
-GET  /api/configs                              -> list all recipes
-GET  /api/configs/:id                          -> get recipe
-DELETE /api/configs/:id                        -> delete recipe
-PUT  /api/configs/:id/name         { name }    -> name/rename (resolves defaults)
+POST /api/recipes                              -> create, returns { id }
+GET  /api/recipes                              -> list all recipes
+GET  /api/recipes/:id                          -> get recipe
+DELETE /api/recipes/:id                        -> delete recipe
+PUT  /api/recipes/:id/name         { name }    -> name/rename (resolves defaults)
 
 # Recipe state (scoped by recipe UUID)
-GET  /api/configs/:id/state
-POST /api/configs/:id/state/version        { group, version }
-POST /api/configs/:id/state/model          { id }
-POST /api/configs/:id/state/model-file     { path }
-POST /api/configs/:id/state/ollama-model   { name }
-POST /api/configs/:id/state/lmstudio-model { name }
-POST /api/configs/:id/state/quantization   { role, name }
-POST /api/configs/:id/state/config         { key, value }
-POST /api/configs/:id/state/output         { path }
-POST /api/configs/:id/state/args-file      { path }
-POST /api/configs/:id/state/gpu            { action, spec }
-POST /api/configs/:id/state/runtime        { path }
-POST /api/configs/:id/state/zipalign       { path }
-POST /api/configs/:id/state/reset
-GET  /api/configs/:id/state/args           -> preview .args
-GET  /api/configs/:id/state/validate       -> validation messages
-GET  /api/configs/:id/state/components     -> resolved components
+GET  /api/recipes/:id/state
+POST /api/recipes/:id/state/version        { group, version }
+POST /api/recipes/:id/state/model          { id }
+POST /api/recipes/:id/state/model-file     { path }
+POST /api/recipes/:id/state/ollama-model   { name }
+POST /api/recipes/:id/state/lmstudio-model { name }
+POST /api/recipes/:id/state/quantization   { role, name }
+POST /api/recipes/:id/state/config         { key, value }
+POST /api/recipes/:id/state/output         { path }
+POST /api/recipes/:id/state/args-file      { path }
+POST /api/recipes/:id/state/gpu            { action, spec }
+POST /api/recipes/:id/state/runtime        { path }
+POST /api/recipes/:id/state/zipalign       { path }
+POST /api/recipes/:id/state/reset
+GET  /api/recipes/:id/state/args           -> preview .args
+GET  /api/recipes/:id/state/validate       -> validation messages
+GET  /api/recipes/:id/state/components     -> resolved components
 
 # Build execution (scoped by recipe UUID)
-POST /api/configs/:id/build                -> SSE stream
+POST /api/recipes/:id/build                -> SSE stream
 POST /api/cancel                           -> cancel running build
 ```
 

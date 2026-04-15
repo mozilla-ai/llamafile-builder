@@ -236,10 +236,10 @@ async fn main() -> ExitCode {
             }
             ExitCode::SUCCESS
         }
-        Some(Commands::Config { ref cmd }) => {
+        Some(Commands::Recipe { ref cmd }) => {
             let store = llamafile_core::ConfigStore::new(get_recipes_dir());
             let config_dir = get_config_dir();
-            match commands::config::run(cmd, &config, &store, &config_dir, cli.json) {
+            match commands::recipe::run(cmd, &config, &store, &config_dir, cli.json) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     tracing::error!("{e}");

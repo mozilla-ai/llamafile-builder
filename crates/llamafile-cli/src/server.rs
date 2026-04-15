@@ -80,31 +80,31 @@ fn build_router(config: BuilderConfig, store: ConfigStore) -> (Router, Arc<AppSt
         .route("/api/ollama/models", get(get_ollama_models))
         .route("/api/lmstudio/models", get(get_lmstudio_models))
         // Recipe CRUD
-        .route("/api/configs", post(create_recipe))
-        .route("/api/configs", get(list_recipes))
-        .route("/api/configs/{id}", get(get_recipe))
-        .route("/api/configs/{id}", delete_route(delete_recipe))
-        .route("/api/configs/{id}/name", put(name_recipe))
+        .route("/api/recipes", post(create_recipe))
+        .route("/api/recipes", get(list_recipes))
+        .route("/api/recipes/{id}", get(get_recipe))
+        .route("/api/recipes/{id}", delete_route(delete_recipe))
+        .route("/api/recipes/{id}/name", put(name_recipe))
         // Recipe state
-        .route("/api/configs/{id}/state", get(get_recipe_state))
-        .route("/api/configs/{id}/state/version", post(set_version))
-        .route("/api/configs/{id}/state/model", post(set_model))
-        .route("/api/configs/{id}/state/model-file", post(set_model_file))
-        .route("/api/configs/{id}/state/ollama-model", post(set_ollama_model))
-        .route("/api/configs/{id}/state/lmstudio-model", post(set_lmstudio_model))
-        .route("/api/configs/{id}/state/quantization", post(set_quantization))
-        .route("/api/configs/{id}/state/config", post(set_config))
-        .route("/api/configs/{id}/state/output", post(set_output))
-        .route("/api/configs/{id}/state/args-file", post(set_args_file))
-        .route("/api/configs/{id}/state/gpu", post(modify_gpu))
-        .route("/api/configs/{id}/state/runtime", post(set_runtime))
-        .route("/api/configs/{id}/state/zipalign", post(set_zipalign))
-        .route("/api/configs/{id}/state/reset", post(reset_state))
-        .route("/api/configs/{id}/state/args", get(get_args))
-        .route("/api/configs/{id}/state/validate", get(get_validate))
-        .route("/api/configs/{id}/state/components", get(get_components))
+        .route("/api/recipes/{id}/state", get(get_recipe_state))
+        .route("/api/recipes/{id}/state/version", post(set_version))
+        .route("/api/recipes/{id}/state/model", post(set_model))
+        .route("/api/recipes/{id}/state/model-file", post(set_model_file))
+        .route("/api/recipes/{id}/state/ollama-model", post(set_ollama_model))
+        .route("/api/recipes/{id}/state/lmstudio-model", post(set_lmstudio_model))
+        .route("/api/recipes/{id}/state/quantization", post(set_quantization))
+        .route("/api/recipes/{id}/state/config", post(set_config))
+        .route("/api/recipes/{id}/state/output", post(set_output))
+        .route("/api/recipes/{id}/state/args-file", post(set_args_file))
+        .route("/api/recipes/{id}/state/gpu", post(modify_gpu))
+        .route("/api/recipes/{id}/state/runtime", post(set_runtime))
+        .route("/api/recipes/{id}/state/zipalign", post(set_zipalign))
+        .route("/api/recipes/{id}/state/reset", post(reset_state))
+        .route("/api/recipes/{id}/state/args", get(get_args))
+        .route("/api/recipes/{id}/state/validate", get(get_validate))
+        .route("/api/recipes/{id}/state/components", get(get_components))
         // Build
-        .route("/api/configs/{id}/build", post(start_build))
+        .route("/api/recipes/{id}/build", post(start_build))
         .route("/api/cancel", post(cancel_build))
         .with_state(state.clone())
         .layer(tower_http::cors::CorsLayer::permissive())
@@ -259,14 +259,14 @@ async fn get_lmstudio_models() -> Json<Value> {
 // Recipe CRUD
 // ============================================================================
 
-#[utoipa::path(post, path = "/api/configs", tag = "Recipes",
+#[utoipa::path(post, path = "/api/recipes", tag = "Recipes",
     summary = "Create a new build recipe")]
 async fn create_recipe(State(st): State<Arc<AppState>>) -> ApiResult {
     let recipe = st.store.create().map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?;
     Ok(Json(json!({"id": recipe.id.to_string()})))
 }
 
-#[utoipa::path(get, path = "/api/configs", tag = "Recipes",
+#[utoipa::path(get, path = "/api/recipes", tag = "Recipes",
     summary = "List all saved recipes")]
 async fn list_recipes(State(st): State<Arc<AppState>>) -> ApiResult {
     let recipes = st.store.list().map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?;
@@ -279,7 +279,7 @@ async fn list_recipes(State(st): State<Arc<AppState>>) -> ApiResult {
     Ok(Json(Value::Array(items)))
 }
 
-#[utoipa::path(get, path = "/api/configs/{id}", tag = "Recipes",
+#[utoipa::path(get, path = "/api/recipes/{id}", tag = "Recipes",
     summary = "Get a recipe by UUID",
     params(("id" = String, Path, description = "Recipe UUID")))]
 async fn get_recipe(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> ApiResult {
@@ -288,7 +288,7 @@ async fn get_recipe(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> 
     Ok(Json(serde_json::to_value(&recipe).unwrap()))
 }
 
-#[utoipa::path(delete, path = "/api/configs/{id}", tag = "Recipes",
+#[utoipa::path(delete, path = "/api/recipes/{id}", tag = "Recipes",
     summary = "Delete a recipe",
     params(("id" = String, Path, description = "Recipe UUID")))]
 async fn delete_recipe(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> ApiResult {
@@ -297,7 +297,7 @@ async fn delete_recipe(State(st): State<Arc<AppState>>, Path(id): Path<String>) 
     Ok(Json(json!("ok")))
 }
 
-#[utoipa::path(put, path = "/api/configs/{id}/name", tag = "Recipes",
+#[utoipa::path(put, path = "/api/recipes/{id}/name", tag = "Recipes",
     summary = "Name or rename a recipe (resolves defaults for full snapshot)",
     params(("id" = String, Path, description = "Recipe UUID")),
     request_body = Value)]
@@ -317,7 +317,7 @@ async fn name_recipe(State(st): State<Arc<AppState>>, Path(id): Path<String>, Js
 // Recipe state endpoints
 // ============================================================================
 
-#[utoipa::path(get, path = "/api/configs/{id}/state", tag = "State",
+#[utoipa::path(get, path = "/api/recipes/{id}/state", tag = "State",
     summary = "Get recipe state",
     params(("id" = String, Path, description = "Recipe UUID")))]
 async fn get_recipe_state(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> ApiResult {
@@ -326,7 +326,7 @@ async fn get_recipe_state(State(st): State<Arc<AppState>>, Path(id): Path<String
     Ok(Json(serde_json::to_value(&recipe.state).unwrap()))
 }
 
-#[utoipa::path(post, path = "/api/configs/{id}/state/version", tag = "State",
+#[utoipa::path(post, path = "/api/recipes/{id}/state/version", tag = "State",
     summary = "Set version", params(("id" = String, Path)), request_body = Value)]
 async fn set_version(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
     let group = body.get("group").and_then(|v| v.as_str())
@@ -338,7 +338,7 @@ async fn set_version(State(st): State<Arc<AppState>>, Path(id): Path<String>, Js
     }).await
 }
 
-#[utoipa::path(post, path = "/api/configs/{id}/state/model", tag = "State",
+#[utoipa::path(post, path = "/api/recipes/{id}/state/model", tag = "State",
     summary = "Select a model", params(("id" = String, Path)), request_body = Value)]
 async fn set_model(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
     let mid = body.get("id").and_then(|v| v.as_str())
@@ -352,7 +352,7 @@ async fn set_model(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json
     }).await
 }
 
-#[utoipa::path(post, path = "/api/configs/{id}/state/model-file", tag = "State",
+#[utoipa::path(post, path = "/api/recipes/{id}/state/model-file", tag = "State",
     summary = "Use custom model file", params(("id" = String, Path)), request_body = Value)]
 async fn set_model_file(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
     let path = body.get("path").and_then(|v| v.as_str())
@@ -363,7 +363,7 @@ async fn set_model_file(State(st): State<Arc<AppState>>, Path(id): Path<String>,
     }).await
 }
 
-#[utoipa::path(post, path = "/api/configs/{id}/state/ollama-model", tag = "State",
+#[utoipa::path(post, path = "/api/recipes/{id}/state/ollama-model", tag = "State",
     summary = "Select a local Ollama model", params(("id" = String, Path)), request_body = Value)]
 async fn set_ollama_model(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
     let name = body.get("name").and_then(|v| v.as_str())
@@ -377,7 +377,7 @@ async fn set_ollama_model(State(st): State<Arc<AppState>>, Path(id): Path<String
     }).await
 }
 
-#[utoipa::path(post, path = "/api/configs/{id}/state/lmstudio-model", tag = "State",
+#[utoipa::path(post, path = "/api/recipes/{id}/state/lmstudio-model", tag = "State",
     summary = "Select a local LM Studio model", params(("id" = String, Path)), request_body = Value)]
 async fn set_lmstudio_model(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
     let name = body.get("name").and_then(|v| v.as_str())
@@ -391,7 +391,7 @@ async fn set_lmstudio_model(State(st): State<Arc<AppState>>, Path(id): Path<Stri
     }).await
 }
 
-#[utoipa::path(post, path = "/api/configs/{id}/state/quantization", tag = "State",
+#[utoipa::path(post, path = "/api/recipes/{id}/state/quantization", tag = "State",
     summary = "Set quantization", params(("id" = String, Path)), request_body = Value)]
 async fn set_quantization(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
     let role = body.get("role").and_then(|v| v.as_str())
@@ -401,7 +401,7 @@ async fn set_quantization(State(st): State<Arc<AppState>>, Path(id): Path<String
     mutate_recipe(&st, &id, |s| { s.quantizations.insert(role, name); Ok(()) }).await
 }
 
-#[utoipa::path(post, path = "/api/configs/{id}/state/config", tag = "State",
+#[utoipa::path(post, path = "/api/recipes/{id}/state/config", tag = "State",
     summary = "Set config value", params(("id" = String, Path)), request_body = Value)]
 async fn set_config(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
     let key = body.get("key").and_then(|v| v.as_str())
@@ -411,7 +411,7 @@ async fn set_config(State(st): State<Arc<AppState>>, Path(id): Path<String>, Jso
     mutate_recipe(&st, &id, |s| { s.config_values.insert(key, value); Ok(()) }).await
 }
 
-#[utoipa::path(post, path = "/api/configs/{id}/state/output", tag = "State",
+#[utoipa::path(post, path = "/api/recipes/{id}/state/output", tag = "State",
     summary = "Set output path", params(("id" = String, Path)), request_body = Value)]
 async fn set_output(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
     let path = body.get("path").and_then(|v| v.as_str())
@@ -419,7 +419,7 @@ async fn set_output(State(st): State<Arc<AppState>>, Path(id): Path<String>, Jso
     mutate_recipe(&st, &id, |s| { s.output_path = Some(path); Ok(()) }).await
 }
 
-#[utoipa::path(post, path = "/api/configs/{id}/state/args-file", tag = "State",
+#[utoipa::path(post, path = "/api/recipes/{id}/state/args-file", tag = "State",
     summary = "Set custom .args file", params(("id" = String, Path)), request_body = Value)]
 async fn set_args_file(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
     let path = body.get("path").and_then(|v| v.as_str())
@@ -427,7 +427,7 @@ async fn set_args_file(State(st): State<Arc<AppState>>, Path(id): Path<String>, 
     mutate_recipe(&st, &id, |s| { s.args_file = Some(path); Ok(()) }).await
 }
 
-#[utoipa::path(post, path = "/api/configs/{id}/state/gpu", tag = "State",
+#[utoipa::path(post, path = "/api/recipes/{id}/state/gpu", tag = "State",
     summary = "Add or remove GPU library", params(("id" = String, Path)), request_body = Value)]
 async fn modify_gpu(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
     let action = body.get("action").and_then(|v| v.as_str())
@@ -446,7 +446,7 @@ async fn modify_gpu(State(st): State<Arc<AppState>>, Path(id): Path<String>, Jso
     }).await
 }
 
-#[utoipa::path(post, path = "/api/configs/{id}/state/runtime", tag = "State",
+#[utoipa::path(post, path = "/api/recipes/{id}/state/runtime", tag = "State",
     summary = "Set custom runtime", params(("id" = String, Path)), request_body = Value)]
 async fn set_runtime(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
     let path = body.get("path").and_then(|v| v.as_str())
@@ -456,7 +456,7 @@ async fn set_runtime(State(st): State<Arc<AppState>>, Path(id): Path<String>, Js
     }).await
 }
 
-#[utoipa::path(post, path = "/api/configs/{id}/state/zipalign", tag = "State",
+#[utoipa::path(post, path = "/api/recipes/{id}/state/zipalign", tag = "State",
     summary = "Set custom zipalign", params(("id" = String, Path)), request_body = Value)]
 async fn set_zipalign(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
     let path = body.get("path").and_then(|v| v.as_str())
@@ -464,7 +464,7 @@ async fn set_zipalign(State(st): State<Arc<AppState>>, Path(id): Path<String>, J
     mutate_recipe(&st, &id, |s| { s.custom_zipalign = Some(path); Ok(()) }).await
 }
 
-#[utoipa::path(post, path = "/api/configs/{id}/state/reset", tag = "State",
+#[utoipa::path(post, path = "/api/recipes/{id}/state/reset", tag = "State",
     summary = "Reset recipe state", params(("id" = String, Path)))]
 async fn reset_state(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> ApiResult {
     mutate_recipe(&st, &id, |s| { *s = SavedState::default(); Ok(()) }).await
@@ -474,7 +474,7 @@ async fn reset_state(State(st): State<Arc<AppState>>, Path(id): Path<String>) ->
 // Derived state queries
 // ============================================================================
 
-#[utoipa::path(get, path = "/api/configs/{id}/state/args", tag = "State",
+#[utoipa::path(get, path = "/api/recipes/{id}/state/args", tag = "State",
     summary = "Preview .args content", params(("id" = String, Path)))]
 async fn get_args(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> ApiResult {
     let uuid = parse_uuid(&id)?;
@@ -484,7 +484,7 @@ async fn get_args(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> Ap
     Ok(Json(Value::String(builder.resolved_args())))
 }
 
-#[utoipa::path(get, path = "/api/configs/{id}/state/validate", tag = "State",
+#[utoipa::path(get, path = "/api/recipes/{id}/state/validate", tag = "State",
     summary = "Validate recipe state", params(("id" = String, Path)))]
 async fn get_validate(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> ApiResult {
     let uuid = parse_uuid(&id)?;
@@ -498,7 +498,7 @@ async fn get_validate(State(st): State<Arc<AppState>>, Path(id): Path<String>) -
     Ok(Json(Value::Array(msgs)))
 }
 
-#[utoipa::path(get, path = "/api/configs/{id}/state/components", tag = "State",
+#[utoipa::path(get, path = "/api/recipes/{id}/state/components", tag = "State",
     summary = "List resolved components", params(("id" = String, Path)))]
 async fn get_components(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> ApiResult {
     let uuid = parse_uuid(&id)?;
@@ -515,7 +515,7 @@ async fn get_components(State(st): State<Arc<AppState>>, Path(id): Path<String>)
 // Build (SSE)
 // ============================================================================
 
-#[utoipa::path(post, path = "/api/configs/{id}/build", tag = "Build",
+#[utoipa::path(post, path = "/api/recipes/{id}/build", tag = "Build",
     summary = "Start a build (SSE stream)", params(("id" = String, Path)))]
 async fn start_build(
     State(st): State<Arc<AppState>>,
@@ -641,7 +641,7 @@ mod tests {
 
     // Helper: create a recipe and return its UUID string
     async fn create(router: &Router) -> String {
-        let (status, json) = post_json(router, "/api/configs", json!({})).await;
+        let (status, json) = post_json(router, "/api/recipes", json!({})).await;
         assert_eq!(status, StatusCode::OK);
         json["id"].as_str().unwrap().to_string()
     }
@@ -684,21 +684,21 @@ mod tests {
         assert!(!id.is_empty());
 
         // List
-        let (_, list) = get_json(&router, "/api/configs").await;
+        let (_, list) = get_json(&router, "/api/recipes").await;
         assert_eq!(list.as_array().unwrap().len(), 1);
         assert_eq!(list[0]["id"].as_str().unwrap(), id);
 
         // Get
-        let (s, recipe) = get_json(&router, &format!("/api/configs/{id}")).await;
+        let (s, recipe) = get_json(&router, &format!("/api/recipes/{id}")).await;
         assert_eq!(s, StatusCode::OK);
         assert_eq!(recipe["id"].as_str().unwrap(), id);
 
         // Delete
-        let s = delete_req(&router, &format!("/api/configs/{id}")).await;
+        let s = delete_req(&router, &format!("/api/recipes/{id}")).await;
         assert_eq!(s, StatusCode::OK);
 
         // Gone
-        let (_, list) = get_json(&router, "/api/configs").await;
+        let (_, list) = get_json(&router, "/api/recipes").await;
         assert!(list.as_array().unwrap().is_empty());
     }
 
@@ -707,10 +707,10 @@ mod tests {
         let (router, _) = app();
         let id = create(&router).await;
 
-        let (s, _) = put_json(&router, &format!("/api/configs/{id}/name"), json!({"name": "test"})).await;
+        let (s, _) = put_json(&router, &format!("/api/recipes/{id}/name"), json!({"name": "test"})).await;
         assert_eq!(s, StatusCode::OK);
 
-        let (_, recipe) = get_json(&router, &format!("/api/configs/{id}")).await;
+        let (_, recipe) = get_json(&router, &format!("/api/recipes/{id}")).await;
         assert_eq!(recipe["name"].as_str(), Some("test"));
         // After naming, defaults should be resolved
         assert!(recipe["state"]["version_group"].is_string());
@@ -724,12 +724,12 @@ mod tests {
         let (router, _) = app();
         let id = create(&router).await;
 
-        let (s, resp) = post_json(&router, &format!("/api/configs/{id}/state/model"),
+        let (s, resp) = post_json(&router, &format!("/api/recipes/{id}/state/model"),
             json!({"id": "Qwen/Qwen3-0.6B-GGUF"})).await;
         assert_eq!(s, StatusCode::OK);
         assert_eq!(resp["id"].as_str().unwrap(), id);
 
-        let (_, state) = get_json(&router, &format!("/api/configs/{id}/state")).await;
+        let (_, state) = get_json(&router, &format!("/api/recipes/{id}/state")).await;
         assert_eq!(state["model_id"].as_str(), Some("Qwen/Qwen3-0.6B-GGUF"));
     }
 
@@ -737,7 +737,7 @@ mod tests {
     async fn set_model_invalid_returns_404() {
         let (router, _) = app();
         let id = create(&router).await;
-        let (s, _) = post_json(&router, &format!("/api/configs/{id}/state/model"),
+        let (s, _) = post_json(&router, &format!("/api/recipes/{id}/state/model"),
             json!({"id": "nonexistent"})).await;
         assert_eq!(s, StatusCode::NOT_FOUND);
     }
@@ -746,9 +746,9 @@ mod tests {
     async fn set_config_value() {
         let (router, _) = app();
         let id = create(&router).await;
-        post_json(&router, &format!("/api/configs/{id}/state/config"),
+        post_json(&router, &format!("/api/recipes/{id}/state/config"),
             json!({"key": "context_length", "value": 8192})).await;
-        let (_, state) = get_json(&router, &format!("/api/configs/{id}/state")).await;
+        let (_, state) = get_json(&router, &format!("/api/recipes/{id}/state")).await;
         assert_eq!(state["config_values"]["context_length"], 8192);
     }
 
@@ -757,14 +757,14 @@ mod tests {
         let (router, _) = app();
         let id = create(&router).await;
 
-        post_json(&router, &format!("/api/configs/{id}/state/gpu"),
+        post_json(&router, &format!("/api/recipes/{id}/state/gpu"),
             json!({"action": "add", "spec": "cuda"})).await;
-        let (_, state) = get_json(&router, &format!("/api/configs/{id}/state")).await;
+        let (_, state) = get_json(&router, &format!("/api/recipes/{id}/state")).await;
         assert_eq!(state["gpu_libs"], json!(["cuda"]));
 
-        post_json(&router, &format!("/api/configs/{id}/state/gpu"),
+        post_json(&router, &format!("/api/recipes/{id}/state/gpu"),
             json!({"action": "remove", "spec": "cuda"})).await;
-        let (_, state) = get_json(&router, &format!("/api/configs/{id}/state")).await;
+        let (_, state) = get_json(&router, &format!("/api/recipes/{id}/state")).await;
         let gpu = state.get("gpu_libs").and_then(|v| v.as_array());
         assert!(gpu.is_none() || gpu.unwrap().is_empty());
     }
@@ -773,10 +773,10 @@ mod tests {
     async fn reset_clears_state() {
         let (router, _) = app();
         let id = create(&router).await;
-        post_json(&router, &format!("/api/configs/{id}/state/model"),
+        post_json(&router, &format!("/api/recipes/{id}/state/model"),
             json!({"id": "Qwen/Qwen3-0.6B-GGUF"})).await;
-        post_json(&router, &format!("/api/configs/{id}/state/reset"), json!({})).await;
-        let (_, state) = get_json(&router, &format!("/api/configs/{id}/state")).await;
+        post_json(&router, &format!("/api/recipes/{id}/state/reset"), json!({})).await;
+        let (_, state) = get_json(&router, &format!("/api/recipes/{id}/state")).await;
         assert!(state["model_id"].is_null());
     }
 
@@ -786,14 +786,14 @@ mod tests {
     async fn args_and_components() {
         let (router, _) = app();
         let id = create(&router).await;
-        post_json(&router, &format!("/api/configs/{id}/state/model"),
+        post_json(&router, &format!("/api/recipes/{id}/state/model"),
             json!({"id": "Qwen/Qwen3-0.6B-GGUF"})).await;
 
-        let (s, args) = get_json(&router, &format!("/api/configs/{id}/state/args")).await;
+        let (s, args) = get_json(&router, &format!("/api/recipes/{id}/state/args")).await;
         assert_eq!(s, StatusCode::OK);
         assert!(args.as_str().unwrap().contains("Qwen3"));
 
-        let (s, comps) = get_json(&router, &format!("/api/configs/{id}/state/components")).await;
+        let (s, comps) = get_json(&router, &format!("/api/recipes/{id}/state/components")).await;
         assert_eq!(s, StatusCode::OK);
         let roles: Vec<&str> = comps.as_array().unwrap().iter()
             .filter_map(|c| c["role"].as_str()).collect();
@@ -804,7 +804,7 @@ mod tests {
     async fn validate_empty_recipe() {
         let (router, _) = app();
         let id = create(&router).await;
-        let (s, msgs) = get_json(&router, &format!("/api/configs/{id}/state/validate")).await;
+        let (s, msgs) = get_json(&router, &format!("/api/recipes/{id}/state/validate")).await;
         assert_eq!(s, StatusCode::OK);
         assert!(msgs.as_array().unwrap().is_empty(), "defaults should validate clean");
     }
@@ -815,7 +815,7 @@ mod tests {
     async fn operations_on_missing_recipe_return_404() {
         let (router, _) = app();
         let fake = uuid::Uuid::new_v4();
-        let (s, _) = get_json(&router, &format!("/api/configs/{fake}/state")).await;
+        let (s, _) = get_json(&router, &format!("/api/recipes/{fake}/state")).await;
         assert_eq!(s, StatusCode::NOT_FOUND);
     }
 

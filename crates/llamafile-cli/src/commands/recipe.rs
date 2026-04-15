@@ -5,11 +5,11 @@ use llamafile_core::config_manager::BuilderConfig;
 use llamafile_core::config_store::{ConfigStore, SavedState};
 use llamafile_core::Builder;
 
-use crate::cli::ConfigCmd;
+use crate::cli::RecipeCmd;
 use crate::state_file;
 
 pub fn run(
-    cmd: &ConfigCmd,
+    cmd: &RecipeCmd,
     config: &BuilderConfig,
     store: &ConfigStore,
     config_dir: &Path,
@@ -17,7 +17,7 @@ pub fn run(
 ) -> Result<(), String> {
     // Recipe management commands (don't need a current recipe)
     match cmd {
-        ConfigCmd::New => {
+        RecipeCmd::New => {
             let recipe = store.create().map_err(|e| format!("{e}"))?;
             state_file::save_current_recipe_id(config_dir, recipe.id)?;
             if json {
@@ -27,7 +27,7 @@ pub fn run(
             }
             return Ok(());
         }
-        ConfigCmd::List => {
+        RecipeCmd::List => {
             let recipes = store.list().map_err(|e| format!("{e}"))?;
             let current_id = state_file::load_current_recipe_id(config_dir);
             if json {
@@ -53,7 +53,7 @@ pub fn run(
             }
             return Ok(());
         }
-        ConfigCmd::Load { name_or_id } => {
+        RecipeCmd::Load { name_or_id } => {
             let recipe = store.find_by_name_or_id(name_or_id)
                 .map_err(|e| format!("{e}"))?
                 .ok_or_else(|| format!("Recipe not found: {name_or_id}"))?;
@@ -62,7 +62,7 @@ pub fn run(
             println!("Loaded recipe: {} ({})", name, &recipe.id.to_string()[..8]);
             return Ok(());
         }
-        ConfigCmd::Delete { name_or_id } => {
+        RecipeCmd::Delete { name_or_id } => {
             let recipe = store.find_by_name_or_id(name_or_id)
                 .map_err(|e| format!("{e}"))?
                 .ok_or_else(|| format!("Recipe not found: {name_or_id}"))?;
@@ -82,13 +82,13 @@ pub fn run(
         .map_err(|e| format!("{e}"))?;
 
     match cmd {
-        ConfigCmd::SetVersion { group, version } => {
+        RecipeCmd::SetVersion { group, version } => {
             recipe.state.version_group = Some(group.clone());
             recipe.state.version = Some(version.clone());
             recipe.state.custom_runtime = None;
             tracing::info!("version set to {} / {}", group, version);
         }
-        ConfigCmd::SetModel { id } => {
+        RecipeCmd::SetModel { id } => {
             if !config.models.iter().any(|m| m.id == *id) {
                 return Err(format!("Model '{}' not found in registry", id));
             }
@@ -99,7 +99,7 @@ pub fn run(
             recipe.state.quantizations.clear();
             tracing::info!("model set to {}", id);
         }
-        ConfigCmd::SetModelFile { path } => {
+        RecipeCmd::SetModelFile { path } => {
             if !path.exists() {
                 return Err(format!("File not found: {}", path.display()));
             }
@@ -110,7 +110,7 @@ pub fn run(
             recipe.state.quantizations.clear();
             tracing::info!("custom model file set to {}", path.display());
         }
-        ConfigCmd::SetOllamaModel { name } => {
+        RecipeCmd::SetOllamaModel { name } => {
             let models = llamafile_core::ollama::get_ollama_models(None);
             let model = models.into_iter().find(|m| m.display_name == *name)
                 .ok_or_else(|| format!("Ollama model '{}' not found locally. Use 'ollama list' to see available models.", name))?;
@@ -121,7 +121,7 @@ pub fn run(
             recipe.state.quantizations.clear();
             tracing::info!("Ollama model set to {}", name);
         }
-        ConfigCmd::SetLmstudioModel { name } => {
+        RecipeCmd::SetLmstudioModel { name } => {
             let models = llamafile_core::lmstudio::get_lmstudio_models(None);
             let model = models.into_iter().find(|m| m.dir_name == *name || m.display_name == *name)
                 .ok_or_else(|| format!("LM Studio model '{}' not found locally. Use 'lm-studio list' to see available models.", name))?;
@@ -132,38 +132,38 @@ pub fn run(
             recipe.state.quantizations.clear();
             tracing::info!("LM Studio model set to {}", name);
         }
-        ConfigCmd::SetQuantization { role, name } => {
+        RecipeCmd::SetQuantization { role, name } => {
             recipe.state.quantizations.insert(role.clone(), name.clone());
             tracing::info!("quantization for '{}' set to '{}'", role, name);
         }
-        ConfigCmd::SetOutput { path } => {
+        RecipeCmd::SetOutput { path } => {
             recipe.state.output_path = Some(path.to_string_lossy().to_string());
             tracing::info!("output path set to {}", path.display());
         }
-        ConfigCmd::Set { key, value } => {
+        RecipeCmd::Set { key, value } => {
             let parsed: serde_json::Value = serde_json::from_str(value)
                 .unwrap_or_else(|_| serde_json::Value::String(value.clone()));
             recipe.state.config_values.insert(key.clone(), parsed);
             tracing::info!("config '{}' set", key);
         }
-        ConfigCmd::SetArgsFile { path } => {
+        RecipeCmd::SetArgsFile { path } => {
             if !path.exists() {
                 return Err(format!("File not found: {}", path.display()));
             }
             recipe.state.args_file = Some(path.to_string_lossy().to_string());
             tracing::info!("args file set to {}", path.display());
         }
-        ConfigCmd::AddGpu { spec } => {
+        RecipeCmd::AddGpu { spec } => {
             if !recipe.state.gpu_libs.contains(spec) {
                 recipe.state.gpu_libs.push(spec.clone());
             }
             tracing::info!("GPU library added: {}", spec);
         }
-        ConfigCmd::RemoveGpu { spec } => {
+        RecipeCmd::RemoveGpu { spec } => {
             recipe.state.gpu_libs.retain(|s| s != spec);
             tracing::info!("GPU library removed: {}", spec);
         }
-        ConfigCmd::SetRuntime { path } => {
+        RecipeCmd::SetRuntime { path } => {
             if !path.exists() {
                 return Err(format!("File not found: {}", path.display()));
             }
@@ -172,14 +172,14 @@ pub fn run(
             recipe.state.version = None;
             tracing::info!("custom runtime set to {}", path.display());
         }
-        ConfigCmd::SetZipalign { path } => {
+        RecipeCmd::SetZipalign { path } => {
             if !path.exists() {
                 return Err(format!("File not found: {}", path.display()));
             }
             recipe.state.custom_zipalign = Some(path.to_string_lossy().to_string());
             tracing::info!("custom zipalign set to {}", path.display());
         }
-        ConfigCmd::Save { name } => {
+        RecipeCmd::Save { name } => {
             recipe.name = Some(name.clone());
             recipe.state.resolve_defaults(config);
             recipe.updated_at = chrono::Utc::now();
@@ -187,22 +187,22 @@ pub fn run(
             println!("Saved recipe '{}' ({})", name, &recipe.id.to_string()[..8]);
             return Ok(());
         }
-        ConfigCmd::Show => {
+        RecipeCmd::Show => {
             show_recipe(&recipe, config, json)?;
             return Ok(());
         }
-        ConfigCmd::ShowArgs => {
+        RecipeCmd::ShowArgs => {
             let cache = Cache::new(crate::get_cache_dir());
             let builder = state_file::build_from_state(&recipe.state, config.clone(), cache)?;
             println!("{}", builder.resolved_args());
             return Ok(());
         }
-        ConfigCmd::Reset => {
+        RecipeCmd::Reset => {
             recipe.state = SavedState::default();
             tracing::info!("recipe state reset");
         }
         // Already handled above
-        ConfigCmd::New | ConfigCmd::List | ConfigCmd::Load { .. } | ConfigCmd::Delete { .. } => {
+        RecipeCmd::New | RecipeCmd::List | RecipeCmd::Load { .. } | RecipeCmd::Delete { .. } => {
             unreachable!()
         }
     }
