@@ -150,7 +150,7 @@ User build selections are stored as **build recipes** — named, UUID-identified
 
 Note the distinction: `ConfigManager` manages **global** application data (versions, models, config schema files). `ConfigStore` manages **user** build selections (recipes).
 
-Each recipe wraps a `SavedState` (the sparse set of user overrides) with identity and metadata:
+Each recipe wraps a `SavedState` with identity and metadata. During interactive use, `SavedState` is sparse (only user overrides). When the user saves/names a recipe, `resolve_defaults()` is called to freeze a full snapshot — all defaults captured at that moment for exact reproducibility.
 
 ```rust
 struct BuildRecipe {

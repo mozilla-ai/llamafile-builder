@@ -158,47 +158,52 @@ No `sse.rs` needed — SSE is handled inline in `server.rs` via a `tokio::sync::
 - `/api/ollama/models` — scan local Ollama models
 - `/api/lmstudio/models` — scan local LM Studio models
 
-**State (GET/POST), operate on shared `Arc<Mutex<SavedState>>`:**
-- `GET /api/state` — current session state
-- `POST /api/state/version` `{ group, version }`
-- `POST /api/state/model` `{ id }`
-- `POST /api/state/model-file` `{ path }`
-- `POST /api/state/quantization` `{ role, name }`
-- `POST /api/state/config` `{ key, value }`
-- `POST /api/state/output` `{ path }`
-- `POST /api/state/args-file` `{ path }`
-- `POST /api/state/gpu` `{ action: "add"|"remove", spec }`
-- `POST /api/state/runtime` `{ path }`
-- `POST /api/state/zipalign` `{ path }`
-- `POST /api/state/reset`
-- `GET /api/state/args` — preview .args content
-- `GET /api/state/validate` — validation messages
-- `GET /api/state/components` — resolved components
+**Recipe CRUD:**
+- `POST /api/configs` → create new recipe, returns `{ id }`
+- `GET /api/configs` → list all recipes
+- `GET /api/configs/:id` → get a recipe
+- `DELETE /api/configs/:id` → delete a recipe
+- `PUT /api/configs/:id/name` `{ name }` → name/rename a recipe
 
-**Build (SSE):**
-- `POST /api/build` → SSE stream (`event: progress`, `event: complete`, `event: error`)
-- `POST /api/cancel` → sets cancel flag
+**Recipe state (scoped by recipe ID):**
+- `GET /api/configs/:id/state` — current state
+- `POST /api/configs/:id/state/version` `{ group, version }`
+- `POST /api/configs/:id/state/model` `{ id }`
+- `POST /api/configs/:id/state/model-file` `{ path }`
+- `POST /api/configs/:id/state/quantization` `{ role, name }`
+- `POST /api/configs/:id/state/config` `{ key, value }`
+- `POST /api/configs/:id/state/output` `{ path }`
+- `POST /api/configs/:id/state/args-file` `{ path }`
+- `POST /api/configs/:id/state/gpu` `{ action: "add"|"remove", spec }`
+- `POST /api/configs/:id/state/runtime` `{ path }`
+- `POST /api/configs/:id/state/zipalign` `{ path }`
+- `POST /api/configs/:id/state/reset`
+- `GET /api/configs/:id/state/args` — preview .args content
+- `GET /api/configs/:id/state/validate` — validation messages
+- `GET /api/configs/:id/state/components` — resolved components
+
+**Build (SSE, scoped by recipe ID):**
+- `POST /api/configs/:id/build` → SSE stream (`event: progress`, `event: complete`, `event: error`)
+- `POST /api/cancel` → sets cancel flag for the running build
 
 **Static files:**
 - Served from `--web-dir` (default: `./web/` next to binary)
 - Fallback to `index.html` for SPA routing
 
 ### Design decisions:
-- **Single-user server**: one `SavedState` behind `Arc<Mutex<>>`, no concurrent sessions (localhost tool).
+- **Multi-client via recipes**: each client creates a recipe by UUID. No shared mutable state — `ConfigStore` handles persistence.
 - **SSE via broadcast**: `tokio::sync::broadcast` connects build tracing events to SSE subscribers.
-- **No core library changes**: server is purely a protocol adapter in `llamafile-cli`.
 - **CORS enabled**: allows web UI development from a different port.
-- **Reuses**: `build_from_state()`, `parse_gpu_spec()`, `get_cache_dir()` from existing CLI code.
+- **Reuses**: `ConfigStore`, `build_from_state()`, `parse_gpu_spec()` from existing code.
 
 ### Verify:
 ```bash
 llamafile-builder --serve --port 8765
 # In another terminal:
 curl http://localhost:8765/api/versions
-curl http://localhost:8765/api/models
-curl http://localhost:8765/api/system-info
-curl -X POST http://localhost:8765/api/state/model -H 'Content-Type: application/json' -d '{"id":"Qwen/Qwen3-0.6B-GGUF"}'
-curl -N -X POST http://localhost:8765/api/build    # SSE stream
+curl -X POST http://localhost:8765/api/configs                                    # create recipe
+curl -X POST http://localhost:8765/api/configs/<id>/state/model -d '{"id":"Qwen/Qwen3-0.6B-GGUF"}'
+curl -N -X POST http://localhost:8765/api/configs/<id>/build                      # SSE stream
 cargo test --workspace
 ```
 This is testable entirely via curl before building any web UI (NFR-12).

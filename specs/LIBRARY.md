@@ -119,7 +119,7 @@ struct BuildRecipe {
 
 ### SavedState
 
-The build selections (sparse — only user overrides, defaults applied at build time):
+Build selections. **Sparse** during interactive use (only user overrides; defaults applied at build time). **Full snapshot** when saved in a `BuildRecipe` (all defaults resolved via `resolve_defaults()` so the recipe is self-contained and reproducible).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -138,8 +138,9 @@ The build selections (sparse — only user overrides, defaults applied at build 
 ### Lifecycle
 
 - **Creation**: `ConfigStore::create()` assigns a UUID and persists an empty recipe
-- **Mutations**: every state change auto-persists via `ConfigStore::save()`
-- **After build**: unnamed recipes are deleted. User is prompted to name/keep
+- **Working state**: during interactive use, the state stays sparse (only user overrides). Mutations are persisted via `ConfigStore::save()` so the draft survives across HTTP requests
+- **Saving**: when the user names a recipe (or at the end of a successful build), `state.resolve_defaults(config)` is called to capture a full snapshot — all defaults frozen at that moment
+- **After build**: unnamed recipes (working drafts) are deleted. User is prompted to name/keep
 - **Named recipes**: persist until explicitly deleted
 
 
@@ -466,7 +467,7 @@ enum DownloadError {
 
 ## Test coverage
 
-103 tests across core library (100) and CLI (3):
+151 tests across core library (114), CLI (24), and TUI (18):
 
 | Module | Tests | What's covered |
 |--------|-------|----------------|
@@ -474,9 +475,12 @@ enum DownloadError {
 | `args` | 16 | Schema-driven .args generation, system prompt, size estimation, defaults |
 | `download` | 15 | HF URL detection, token resolution, file info, checksums |
 | `builder` | 17 | resolved_components (simple, multimodal, GPU, agent, custom, quantization), HF source, zipalign, defaults, validation |
+| `config_store` | 14 | CRUD, list sorting, find by name/UUID, cleanup unnamed, resolve_defaults (structural checks), round-trip |
 | `cache` | 5 | Cache status: local existing/missing, generated, URL partial/complete/missing |
 | `config_manager` | 6 | Load, fallback, invalid JSON, bare array rejection, apply update, version comparison |
 | `validation` | 5 | Required components, context length, custom binary, large context |
 | `ollama` | 6 | Availability, scanning, missing blobs, empty dirs |
 | `lmstudio` | 7 | Availability, scanning, role inference, non-gguf filtering |
 | CLI `state_file` | 3 | SavedState round-trip, build_from_state with explicit config, build_from_state with defaults |
+| CLI `server` | 21 | All HTTP endpoints: versions, models, search, model detail, config schema, system info, state mutations, GPU validation, derived queries, cancel |
+| TUI `app` | 18 | Defaults, focus navigation (wrap, skip, local model), model source switching, output filenames, GPU libs, log filtering |
