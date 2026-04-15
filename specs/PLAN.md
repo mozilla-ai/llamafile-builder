@@ -110,107 +110,33 @@ Key design decisions:
 
 ---
 
-## Phase 5g: Spec alignment -- IN PROGRESS
+## Phase 5g: Spec alignment -- DONE
 
-Audit and update all spec documents to match the implementation. Document the TUI, HF download strategy, tracing-only observability, config envelope format, and zip_path semantics. Add plan items for missing features (Ollama/LM Studio in TUI + JSON-RPC).
+Audit and update all spec documents to match the implementation. Document the TUI, HF download strategy, tracing-only observability, config envelope format, and zip_path semantics. Add plan items for missing features (Ollama/LM Studio in TUI + JSON-RPC). Also includes the `config` → `recipe` rename across all interfaces (CLI subcommand, JSON-RPC methods, HTTP endpoints, filesystem storage dir, specs).
 
 ---
 
-## Phase 6a: Named build recipes (ConfigStore) -- IN PROGRESS
+## Phase 6a: Named build recipes (ConfigStore) -- DONE
 
 **Goal**: Build configurations are named, UUID-identified, and shared across all interfaces. Multiple clients can work on different recipes simultaneously.
 
-### Done:
-- **Core**: `config_store.rs` with `BuildRecipe`, `ConfigStore`, `SavedState` (moved from CLI). `resolve_defaults()` for full snapshots at save time. 14 unit tests.
-- **CLI**: migrated from single `build-state.json` to `ConfigStore`. Added `recipe new/list/load/save/delete`. Current recipe tracked via pointer file. Every mutation auto-persists and shows `[recipe: ...]`. `recipe save` resolves defaults for reproducibility.
-
-### Done:
-- **Core**: `config_store.rs` with `BuildRecipe`, `ConfigStore`, `SavedState` (moved from CLI). `resolve_defaults()` for full snapshots at save time. 14 unit tests.
-- **CLI**: migrated from single `build-state.json` to `ConfigStore`. Added `recipe new/list/load/save/delete`. Current recipe tracked via pointer file. Every mutation auto-persists and shows `[recipe: ...]`. `recipe save` resolves defaults for reproducibility.
+- **Core**: `config_store.rs` with `BuildRecipe`, `ConfigStore`, `SavedState` (moved from CLI). `resolve_defaults()` for full snapshots at save time. Short UUID prefix matching in `find_by_name_or_id`. 14 unit tests.
+- **CLI**: migrated from single `build-state.json` to `ConfigStore`. Subcommand `recipe new/list/load/save/delete`. Current recipe tracked via pointer file. Every mutation auto-persists and shows `[recipe: ...]`. `recipe save` resolves defaults for reproducibility.
 - **HTTP server**: all state endpoints scoped under `/api/recipes/:id/...`. Recipe CRUD (`POST/GET/DELETE /api/recipes`, `PUT .../name`). `mutate_recipe` helper for DRY load-modify-save. Multi-client verified with independent recipes. 17 server tests.
-
 - **JSON-RPC**: added `create_recipe`, `list_recipes`, `load_recipe`, `save_recipe`, `delete_recipe`, `list_ollama_models`, `list_lmstudio_models`. Session tracks current recipe ID; all mutations auto-persist via ConfigStore.
-
 - **TUI**: integrated ConfigStore. Ctrl+S saves recipe (with name prompt, resolves defaults). Ctrl+L loads from saved recipes. `to_saved_state()` / `load_from_recipe()` sync between App fields and SavedState. Status bar shows ^S/^L hints.
-
-### Phase 6a: COMPLETE
 
 ---
 
-## Phase 6b: HTTP server and SSE
+## Phase 6b: HTTP server and SSE -- DONE
 
 **Goal**: `--serve` mode exposes REST API + SSE for the web UI.
 
-### Dependencies to add:
-`axum = "0.8"`, `tower-http = { version = "0.6", features = ["fs", "cors"] }`, `tokio-stream = "0.1"` in `llamafile-cli/Cargo.toml`.
+`server.rs` built with Axum. All planned endpoints implemented. Key design decisions as planned: SSE via `tokio::sync::broadcast`, CORS permissive, static file serving via `tower-http::ServeDir` with SPA fallback to `index.html`, `--serve`/`--port`/`--web-dir`/`--no-open` CLI flags.
 
-### Files:
-- **`server.rs`** (new, ~300 lines): Single Axum module with all endpoints, shared state, SSE, and static file serving.
-- **`cli.rs`** (modify): Add `--serve`, `--port`, `--web-dir`, `--no-open` flags.
-- **`main.rs`** (modify): Add dispatch for `--serve` mode.
+Also added beyond plan: `POST /api/recipes/:id/state/ollama-model` and `POST /api/recipes/:id/state/lmstudio-model` for Ollama/LM Studio model selection via HTTP.
 
-No `sse.rs` needed — SSE is handled inline in `server.rs` via a `tokio::sync::broadcast` channel connected to a custom `tracing::Layer`, same pattern as the TUI's log bridge.
-
-### Endpoints:
-
-**Read-only (GET):**
-- `/api/versions` — version groups and releases
-- `/api/models?search=&tag=` — filtered model list
-- `/api/models/:id` — single model detail
-- `/api/config-schema` — config schema for UI rendering
-- `/api/system-info` — host capabilities
-- `/api/ollama/models` — scan local Ollama models
-- `/api/lmstudio/models` — scan local LM Studio models
-
-**Recipe CRUD:**
-- `POST /api/recipes` → create new recipe, returns `{ id }`
-- `GET /api/recipes` → list all recipes
-- `GET /api/recipes/:id` → get a recipe
-- `DELETE /api/recipes/:id` → delete a recipe
-- `PUT /api/recipes/:id/name` `{ name }` → name/rename a recipe
-
-**Recipe state (scoped by recipe ID):**
-- `GET /api/recipes/:id/state` — current state
-- `POST /api/recipes/:id/state/version` `{ group, version }`
-- `POST /api/recipes/:id/state/model` `{ id }`
-- `POST /api/recipes/:id/state/model-file` `{ path }`
-- `POST /api/recipes/:id/state/quantization` `{ role, name }`
-- `POST /api/recipes/:id/state/config` `{ key, value }`
-- `POST /api/recipes/:id/state/output` `{ path }`
-- `POST /api/recipes/:id/state/args-file` `{ path }`
-- `POST /api/recipes/:id/state/gpu` `{ action: "add"|"remove", spec }`
-- `POST /api/recipes/:id/state/runtime` `{ path }`
-- `POST /api/recipes/:id/state/zipalign` `{ path }`
-- `POST /api/recipes/:id/state/reset`
-- `GET /api/recipes/:id/state/args` — preview .args content
-- `GET /api/recipes/:id/state/validate` — validation messages
-- `GET /api/recipes/:id/state/components` — resolved components
-
-**Build (SSE, scoped by recipe ID):**
-- `POST /api/recipes/:id/build` → SSE stream (`event: progress`, `event: complete`, `event: error`)
-- `POST /api/cancel` → sets cancel flag for the running build
-
-**Static files:**
-- Served from `--web-dir` (default: `./web/` next to binary)
-- Fallback to `index.html` for SPA routing
-
-### Design decisions:
-- **Multi-client via recipes**: each client creates a recipe by UUID. No shared mutable state — `ConfigStore` handles persistence.
-- **SSE via broadcast**: `tokio::sync::broadcast` connects build tracing events to SSE subscribers.
-- **CORS enabled**: allows web UI development from a different port.
-- **Reuses**: `ConfigStore`, `build_from_state()`, `parse_gpu_spec()` from existing code.
-
-### Verify:
-```bash
-llamafile-builder --serve --port 8765
-# In another terminal:
-curl http://localhost:8765/api/versions
-curl -X POST http://localhost:8765/api/recipes                                    # create recipe
-curl -X POST http://localhost:8765/api/recipes/<id>/state/model -d '{"id":"Qwen/Qwen3-0.6B-GGUF"}'
-curl -N -X POST http://localhost:8765/api/recipes/<id>/build                      # SSE stream
-cargo test --workspace
-```
-This is testable entirely via curl before building any web UI (NFR-12).
+17 server unit tests pass. Verified curl-testable per NFR-12.
 
 ---
 
