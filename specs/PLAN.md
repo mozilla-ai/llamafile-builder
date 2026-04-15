@@ -116,7 +116,24 @@ Audit and update all spec documents to match the implementation. Document the TU
 
 ---
 
-## Phase 6: HTTP server and SSE
+## Phase 6a: Named build recipes (ConfigStore) -- IN PROGRESS
+
+**Goal**: Build configurations are named, UUID-identified, and shared across all interfaces. Multiple clients can work on different recipes simultaneously.
+
+### Core library (`llamafile-core`):
+- `config_store.rs`: `BuildRecipe` (UUID, name, timestamps, SavedState) + `ConfigStore` (filesystem CRUD at `~/.llamafile-builder/configs/`) -- DONE
+- `SavedState` moved from CLI to core -- DONE
+- 9 unit tests -- DONE
+
+### Remaining:
+- CLI: migrate from single `build-state.json` to ConfigStore. Add `config new/list/load/save/delete`. `config set-*` operates on current recipe.
+- HTTP server: scope state endpoints under `/api/configs/:id/...`. Add config CRUD endpoints.
+- TUI: load/create recipe on startup, save/load UI.
+- JSON-RPC: add `create_config`, `list_configs`, `load_config`, `save_config` methods.
+
+---
+
+## Phase 6b: HTTP server and SSE
 
 **Goal**: `--serve` mode exposes REST API + SSE for the web UI.
 

@@ -3,6 +3,7 @@ pub mod args;
 pub mod builder;
 pub mod cache;
 pub mod config_manager;
+pub mod config_store;
 pub mod download;
 pub mod error;
 pub mod file_ops;
@@ -18,6 +19,7 @@ pub mod zipalign;
 pub use builder::Builder;
 pub use cache::{Cache, CacheStatus};
 pub use config_manager::{BuilderConfig, ConfigManager, UpdateMode, UpdateStatus};
+pub use config_store::{BuildRecipe, ConfigStore, SavedState};
 pub use error::{DownloadError, Error, Result};
 pub use validation::ValidationMessage;
 

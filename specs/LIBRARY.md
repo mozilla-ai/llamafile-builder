@@ -86,6 +86,63 @@ Cache::new(base_dir: PathBuf) -> Self
 | `CacheStatus` | `Valid(PathBuf)`, `Partial { path, bytes_downloaded }`, `Missing` |
 
 
+## ConfigStore
+
+Manages named build recipes — saved configurations that can be recalled, listed, and shared across all interfaces. Filesystem-backed at `~/.llamafile-builder/configs/`.
+
+Note: `ConfigManager` manages **global** application data (versions, models, config schema). `ConfigStore` manages **user** build selections (recipes).
+
+```rust
+ConfigStore::new(dir: PathBuf) -> Self
+
+    .create() -> Result<BuildRecipe>                  // new recipe with UUID, empty state
+    .get(id: Uuid) -> Result<BuildRecipe>             // load by UUID
+    .save(recipe: &BuildRecipe) -> Result<()>         // persist (create or update)
+    .delete(id: Uuid) -> Result<()>                   // remove
+    .list() -> Result<Vec<BuildRecipe>>               // all recipes, most recent first
+    .find_by_name(name: &str) -> Result<Option<BuildRecipe>>         // case-insensitive
+    .find_by_name_or_id(query: &str) -> Result<Option<BuildRecipe>>  // UUID or name
+    .cleanup_unnamed() -> Result<usize>               // delete all unnamed drafts
+```
+
+### BuildRecipe
+
+```rust
+struct BuildRecipe {
+    id: Uuid,                    // assigned on creation
+    name: Option<String>,        // user-assigned, optional
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    state: SavedState,           // the build selections
+}
+```
+
+### SavedState
+
+The build selections (sparse — only user overrides, defaults applied at build time):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version_group` | `Option<String>` | e.g. "llamafile 0.10" |
+| `version` | `Option<String>` | e.g. "0.10.0" |
+| `custom_runtime` | `Option<String>` | custom binary path |
+| `model_id` | `Option<String>` | HF repo ID |
+| `custom_model_file` | `Option<String>` | custom .gguf path |
+| `quantizations` | `HashMap<String, String>` | role -> quant name |
+| `config_values` | `HashMap<String, Value>` | schema-driven config |
+| `args_file` | `Option<String>` | custom .args path |
+| `output_path` | `Option<String>` | output .llamafile path |
+| `gpu_libs` | `Vec<String>` | GPU specs ("cuda", "rocm:linux") |
+| `custom_zipalign` | `Option<String>` | custom zipalign path |
+
+### Lifecycle
+
+- **Creation**: `ConfigStore::create()` assigns a UUID and persists an empty recipe
+- **Mutations**: every state change auto-persists via `ConfigStore::save()`
+- **After build**: unnamed recipes are deleted. User is prompted to name/keep
+- **Named recipes**: persist until explicitly deleted
+
+
 ## Builder
 
 The main entry point. Stateful: call selection methods to configure, then `build()` to execute.

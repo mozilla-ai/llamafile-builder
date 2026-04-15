@@ -144,6 +144,28 @@ pub enum UpdateStatus {
 
 The interface layers decide how to handle `UpdateStatus::Ask` -- the CLI prompts on stderr, the web UI shows a dialog, JSON-RPC emits a notification.
 
+### Build recipes (`ConfigStore`)
+
+User build selections are stored as **build recipes** — named, UUID-identified configurations that persist across sessions and are shared by all interfaces (CLI, TUI, HTTP server, JSON-RPC).
+
+Note the distinction: `ConfigManager` manages **global** application data (versions, models, config schema files). `ConfigStore` manages **user** build selections (recipes).
+
+Each recipe wraps a `SavedState` (the sparse set of user overrides) with identity and metadata:
+
+```rust
+struct BuildRecipe {
+    id: Uuid,
+    name: Option<String>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    state: SavedState,
+}
+```
+
+Storage: filesystem at `~/.llamafile-builder/configs/{uuid}.json`. Every mutation auto-persists. Unnamed recipes (working drafts) are deleted after their build completes; the user is prompted to name/keep successful builds.
+
+The recipe UUID is passed with every request in multi-client scenarios (HTTP server), so multiple clients can work on different recipes simultaneously without interfering.
+
 ### Component model
 
 A llamafile is built from components. Every selection the user makes -- choosing a version, picking a model, adding GPU libraries -- ultimately resolves to a set of **components** that will be bundled. Each component has a known type, a source (registry URL, HuggingFace ID, or local path), and metadata for validation.
