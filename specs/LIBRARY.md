@@ -88,7 +88,7 @@ Cache::new(base_dir: PathBuf) -> Self
 
 ## ConfigStore
 
-Manages named build recipes — saved configurations that can be recalled, listed, and shared across all interfaces. Filesystem-backed at `~/.llamafile-builder/configs/`.
+Manages named build recipes — saved configurations that can be recalled, listed, and shared across all interfaces. Filesystem-backed at `~/.llamafile-builder/recipes/`.
 
 Note: `ConfigManager` manages **global** application data (versions, models, config schema). `ConfigStore` manages **user** build selections (recipes).
 

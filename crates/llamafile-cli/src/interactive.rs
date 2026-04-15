@@ -306,7 +306,7 @@ fn str_param(params: &Value, key: &str) -> Result<String, (i32, String)> {
 // ============================================================================
 
 pub async fn run(config: BuilderConfig) -> Result<(), String> {
-    let store = ConfigStore::new(crate::get_configs_dir());
+    let store = ConfigStore::new(crate::get_recipes_dir());
     let mut session = Session::new(config, store);
     let stdin = io::stdin();
     let mut stdout = io::stdout();

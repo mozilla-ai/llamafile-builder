@@ -71,7 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let store = ConfigStore::new(get_config_dir().join("configs"));
+    let store = ConfigStore::new(get_config_dir().join("recipes"));
     let mut app = App::new(config, get_cache_dir(), store);
     app.add_log(LogLevel::Info, "llamafile-builder TUI started".to_string());
 

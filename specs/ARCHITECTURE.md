@@ -162,7 +162,7 @@ struct BuildRecipe {
 }
 ```
 
-Storage: filesystem at `~/.llamafile-builder/configs/{uuid}.json`. Every mutation auto-persists. Unnamed recipes (working drafts) are deleted after their build completes; the user is prompted to name/keep successful builds.
+Storage: filesystem at `~/.llamafile-builder/recipes/{uuid}.json`. Every mutation auto-persists. Unnamed recipes (working drafts) are deleted after their build completes; the user is prompted to name/keep successful builds.
 
 The recipe UUID is passed with every request in multi-client scenarios (HTTP server), so multiple clients can work on different recipes simultaneously without interfering.
 

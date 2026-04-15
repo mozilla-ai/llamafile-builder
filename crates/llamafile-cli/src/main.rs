@@ -29,8 +29,8 @@ fn exit_code_for_error(error: &str) -> ExitCode {
     }
 }
 
-pub fn get_configs_dir() -> PathBuf {
-    get_config_dir().join("configs")
+pub fn get_recipes_dir() -> PathBuf {
+    get_config_dir().join("recipes")
 }
 
 pub fn get_config_dir() -> PathBuf {
@@ -237,7 +237,7 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some(Commands::Config { ref cmd }) => {
-            let store = llamafile_core::ConfigStore::new(get_configs_dir());
+            let store = llamafile_core::ConfigStore::new(get_recipes_dir());
             let config_dir = get_config_dir();
             match commands::config::run(cmd, &config, &store, &config_dir, cli.json) {
                 Ok(()) => ExitCode::SUCCESS,

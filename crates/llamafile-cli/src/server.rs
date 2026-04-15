@@ -128,7 +128,7 @@ pub async fn run(
     web_dir: Option<PathBuf>,
     no_open: bool,
 ) -> Result<(), String> {
-    let store = ConfigStore::new(crate::get_configs_dir());
+    let store = ConfigStore::new(crate::get_recipes_dir());
     let (router, _state) = build_router(config, store);
 
     let mut app = router;

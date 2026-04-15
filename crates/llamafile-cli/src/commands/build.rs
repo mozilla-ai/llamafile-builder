@@ -10,7 +10,7 @@ pub async fn run(args: &BuildArgs, config: BuilderConfig, cache: Cache) -> Resul
     let saved = if let Some(ref model) = args.model {
         saved_state_from_args(args, model)?
     } else {
-        let store = llamafile_core::ConfigStore::new(crate::get_configs_dir());
+        let store = llamafile_core::ConfigStore::new(crate::get_recipes_dir());
         let config_dir = crate::get_config_dir();
         let recipe = state_file::get_or_create_current_recipe(&store, &config_dir)?;
         let mut s = recipe.state;
