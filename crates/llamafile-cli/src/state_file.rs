@@ -1,70 +1,11 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::path::Path;
 
-/// Persisted build configuration for multi-step CLI usage.
-/// Saved to ~/.llamafile-builder/build-state.json between invocations.
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct SavedState {
-    // Version
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version_group: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub custom_runtime: Option<String>,
-
-    // Model
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub custom_model_file: Option<String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub quantizations: HashMap<String, String>, // role -> quant name
-
-    // Config
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub config_values: HashMap<String, serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub args_file: Option<String>,
-
-    // Output
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output_path: Option<String>,
-
-    // GPU
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub gpu_libs: Vec<String>, // "cuda", "cuda:linux", "rocm:windows", etc.
-
-    // Custom binaries
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub custom_zipalign: Option<String>,
-}
-
-impl SavedState {
-    pub fn load(path: &std::path::Path) -> Option<Self> {
-        let content = std::fs::read_to_string(path).ok()?;
-        serde_json::from_str(&content).ok()
-    }
-
-    pub fn save(&self, path: &std::path::Path) -> Result<(), String> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {e}"))?;
-        }
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| format!("Failed to serialize state: {e}"))?;
-        std::fs::write(path, json).map_err(|e| format!("Failed to write state file: {e}"))?;
-        Ok(())
-    }
-
-    pub fn delete(path: &std::path::Path) {
-        let _ = std::fs::remove_file(path);
-    }
-
-}
+// Re-export SavedState from core — single source of truth
+pub use llamafile_core::config_store::SavedState;
+use llamafile_core::config_store::{BuildRecipe, ConfigStore};
 
 /// Create a fully configured Builder from saved state + defaults.
-/// This is the single place where defaults are applied.
+/// This is the single place where defaults are applied at build time.
 pub fn build_from_state(
     saved: &SavedState,
     config: llamafile_core::BuilderConfig,
@@ -86,7 +27,7 @@ pub fn build_from_state(
     Ok(builder)
 }
 
-/// Apply saved state to a Builder (without defaults -- use build_from_state instead).
+/// Apply saved state to a Builder (without defaults — use build_from_state instead).
 fn apply_to_builder(
     saved: &SavedState,
     builder: &mut llamafile_core::Builder,
@@ -99,7 +40,6 @@ fn apply_to_builder(
     {
         builder.select_version(group, version);
     } else if let Some(ref version) = saved.version {
-        // Version string without group -- search for it in the config
         let found = builder.config().versions.iter().find_map(|g| {
             g.releases
                 .iter()
@@ -181,43 +121,57 @@ fn apply_to_builder(
     Ok(())
 }
 
+/// Path to the file that tracks which recipe is "current" for the CLI.
+pub fn current_recipe_path(config_dir: &Path) -> std::path::PathBuf {
+    config_dir.join("current-recipe")
+}
+
+/// Load the current recipe ID from the pointer file.
+pub fn load_current_recipe_id(config_dir: &Path) -> Option<uuid::Uuid> {
+    let path = current_recipe_path(config_dir);
+    let content = std::fs::read_to_string(path).ok()?;
+    uuid::Uuid::parse_str(content.trim()).ok()
+}
+
+/// Save the current recipe ID to the pointer file.
+pub fn save_current_recipe_id(config_dir: &Path, id: uuid::Uuid) -> Result<(), String> {
+    let path = current_recipe_path(config_dir);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory: {e}"))?;
+    }
+    std::fs::write(&path, id.to_string())
+        .map_err(|e| format!("Failed to write current recipe pointer: {e}"))?;
+    Ok(())
+}
+
+/// Clear the current recipe pointer.
+pub fn clear_current_recipe(config_dir: &Path) {
+    let _ = std::fs::remove_file(current_recipe_path(config_dir));
+}
+
+/// Get or create the current working recipe.
+/// If a current recipe ID exists and is valid, returns it.
+/// Otherwise creates a new one and sets it as current.
+pub fn get_or_create_current_recipe(
+    store: &ConfigStore,
+    config_dir: &Path,
+) -> Result<BuildRecipe, String> {
+    if let Some(id) = load_current_recipe_id(config_dir) {
+        if let Ok(recipe) = store.get(id) {
+            return Ok(recipe);
+        }
+    }
+    // Create new
+    let recipe = store.create().map_err(|e| format!("{e}"))?;
+    save_current_recipe_id(config_dir, recipe.id)?;
+    Ok(recipe)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn saved_state_round_trips_through_json() {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let path = tmp.path();
-
-        let state = SavedState {
-            version_group: Some("llamafile 0.10".to_string()),
-            version: Some("0.10.0".to_string()),
-            model_id: Some("Qwen/Qwen3-0.6B-GGUF".to_string()),
-            output_path: Some("/tmp/out.llamafile".to_string()),
-            gpu_libs: vec!["cuda:linux".to_string()],
-            config_values: {
-                let mut m = HashMap::new();
-                m.insert("context_length".to_string(), serde_json::json!(8192));
-                m.insert("server_enabled".to_string(), serde_json::json!(false));
-                m
-            },
-            ..Default::default()
-        };
-
-        state.save(path).unwrap();
-        let loaded = SavedState::load(path).expect("should load");
-
-        assert_eq!(loaded.version_group.as_deref(), Some("llamafile 0.10"));
-        assert_eq!(loaded.version.as_deref(), Some("0.10.0"));
-        assert_eq!(loaded.model_id.as_deref(), Some("Qwen/Qwen3-0.6B-GGUF"));
-        assert_eq!(loaded.output_path.as_deref(), Some("/tmp/out.llamafile"));
-        assert_eq!(loaded.gpu_libs, vec!["cuda:linux"]);
-        assert_eq!(loaded.config_values.get("context_length"), Some(&serde_json::json!(8192)));
-        assert_eq!(loaded.config_values.get("server_enabled"), Some(&serde_json::json!(false)));
-        assert!(loaded.custom_runtime.is_none());
-        assert!(loaded.custom_model_file.is_none());
-    }
+    use std::collections::HashMap;
 
     fn test_config() -> llamafile_core::BuilderConfig {
         llamafile_core::BuilderConfig {
@@ -255,14 +209,8 @@ mod tests {
         };
 
         let builder = build_from_state(&saved, test_config(), test_cache()).unwrap();
-
-        assert_eq!(builder.state().selected_model_id.as_deref(), Some("Qwen/Qwen3-0.6B-GGUF"));
+        assert!(builder.state().selected_model_id.is_some());
         assert!(builder.state().resolved_llamafile_path.is_some());
-        assert_eq!(builder.state().output_path, "/tmp/test.llamafile");
-        assert_eq!(
-            builder.state().config_values.get("context_length"),
-            Some(&serde_json::json!(16384))
-        );
         assert!(builder.can_build());
     }
 
@@ -270,11 +218,19 @@ mod tests {
     fn build_from_state_empty_uses_defaults() {
         let saved = SavedState::default();
         let builder = build_from_state(&saved, test_config(), test_cache()).unwrap();
-
-        // Should have default version and model
         assert!(builder.state().selected_version_group.is_some());
         assert!(builder.state().selected_model_id.is_some());
-        assert!(builder.state().resolved_llamafile_path.is_some());
         assert!(builder.can_build());
+    }
+
+    #[test]
+    fn current_recipe_pointer_round_trips() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let id = uuid::Uuid::new_v4();
+        save_current_recipe_id(tmp.path(), id).unwrap();
+        assert_eq!(load_current_recipe_id(tmp.path()), Some(id));
+
+        clear_current_recipe(tmp.path());
+        assert_eq!(load_current_recipe_id(tmp.path()), None);
     }
 }

@@ -155,8 +155,27 @@ pub enum ConfigCmd {
     Show,
     /// Preview the .args file content
     ShowArgs,
-    /// Reset all build configuration
+    /// Reset current recipe state
     Reset,
+    /// Create a new build recipe
+    New,
+    /// List all saved recipes
+    List,
+    /// Load a saved recipe as current (by name or UUID)
+    Load {
+        /// Recipe name or UUID
+        name_or_id: String,
+    },
+    /// Name/save the current recipe for later use
+    Save {
+        /// Name to assign
+        name: String,
+    },
+    /// Delete a saved recipe (by name or UUID)
+    Delete {
+        /// Recipe name or UUID
+        name_or_id: String,
+    },
 }
 
 #[derive(Subcommand)]

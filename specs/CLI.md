@@ -98,9 +98,27 @@ lb config set context_length 8192
 lb config show           # verify
 lb config show-args      # verify .args content
 lb build                 # build from saved state
+lb config save my-qwen   # name it for later reuse
 ```
 
-### All config commands
+### Recipe management
+
+Build configurations are stored as **recipes** — named, UUID-identified configurations that persist across sessions and are shared by all interfaces.
+
+```bash
+lb config new                    # create a new empty recipe, set as current
+lb config list                   # list all saved recipes (* = current)
+lb config load my-qwen           # load a saved recipe by name or UUID
+lb config save my-qwen           # name/save the current recipe (resolves all defaults)
+lb config delete my-qwen         # delete a recipe by name or UUID
+lb config reset                  # clear current recipe state (but keep the recipe)
+```
+
+Every `config set-*` mutation auto-persists to the current recipe. The `[recipe: ...]` indicator shows which recipe was updated.
+
+When you `config save`, all defaults are frozen into a full snapshot — rebuilding from a saved recipe produces the same result regardless of future config file changes.
+
+### All config set commands
 
 ```bash
 # Version
@@ -129,10 +147,9 @@ lb config remove-gpu cuda                   # remove
 # Build tools
 lb config set-zipalign /path/to/zipalign    # custom zipalign
 
-# View and reset
+# View
 lb config show                              # full state with all config values
 lb config show-args                         # preview .args content
-lb config reset                             # clear all saved state
 ```
 
 ### Defaults

@@ -120,13 +120,11 @@ Audit and update all spec documents to match the implementation. Document the TU
 
 **Goal**: Build configurations are named, UUID-identified, and shared across all interfaces. Multiple clients can work on different recipes simultaneously.
 
-### Core library (`llamafile-core`):
-- `config_store.rs`: `BuildRecipe` (UUID, name, timestamps, SavedState) + `ConfigStore` (filesystem CRUD at `~/.llamafile-builder/configs/`) -- DONE
-- `SavedState` moved from CLI to core -- DONE
-- 9 unit tests -- DONE
+### Done:
+- **Core**: `config_store.rs` with `BuildRecipe`, `ConfigStore`, `SavedState` (moved from CLI). `resolve_defaults()` for full snapshots at save time. 14 unit tests.
+- **CLI**: migrated from single `build-state.json` to `ConfigStore`. Added `config new/list/load/save/delete`. Current recipe tracked via pointer file. Every mutation auto-persists and shows `[recipe: ...]`. `config save` resolves defaults for reproducibility.
 
 ### Remaining:
-- CLI: migrate from single `build-state.json` to ConfigStore. Add `config new/list/load/save/delete`. `config set-*` operates on current recipe.
 - HTTP server: scope state endpoints under `/api/configs/:id/...`. Add config CRUD endpoints.
 - TUI: load/create recipe on startup, save/load UI.
 - JSON-RPC: add `create_config`, `list_configs`, `load_config`, `save_config` methods.

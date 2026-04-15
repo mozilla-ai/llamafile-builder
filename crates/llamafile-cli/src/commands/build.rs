@@ -6,13 +6,14 @@ use crate::cli::BuildArgs;
 use crate::state_file::{self, SavedState};
 
 pub async fn run(args: &BuildArgs, config: BuilderConfig, cache: Cache) -> Result<(), String> {
-    // Build saved state: either from file (multi-step) or from CLI args (one-shot)
+    // Build saved state: either from CLI args (one-shot) or from current recipe (multi-step)
     let saved = if let Some(ref model) = args.model {
         saved_state_from_args(args, model)?
     } else {
-        let state_path = crate::get_state_path();
-        let mut s = SavedState::load(&state_path).unwrap_or_default();
-        // Merge CLI overrides into saved state
+        let store = llamafile_core::ConfigStore::new(crate::get_configs_dir());
+        let config_dir = crate::get_config_dir();
+        let recipe = state_file::get_or_create_current_recipe(&store, &config_dir)?;
+        let mut s = recipe.state;
         merge_cli_overrides(&mut s, args)?;
         s
     };
