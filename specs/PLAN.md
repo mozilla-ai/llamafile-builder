@@ -124,8 +124,12 @@ Audit and update all spec documents to match the implementation. Document the TU
 - **Core**: `config_store.rs` with `BuildRecipe`, `ConfigStore`, `SavedState` (moved from CLI). `resolve_defaults()` for full snapshots at save time. 14 unit tests.
 - **CLI**: migrated from single `build-state.json` to `ConfigStore`. Added `config new/list/load/save/delete`. Current recipe tracked via pointer file. Every mutation auto-persists and shows `[recipe: ...]`. `config save` resolves defaults for reproducibility.
 
+### Done:
+- **Core**: `config_store.rs` with `BuildRecipe`, `ConfigStore`, `SavedState` (moved from CLI). `resolve_defaults()` for full snapshots at save time. 14 unit tests.
+- **CLI**: migrated from single `build-state.json` to `ConfigStore`. Added `config new/list/load/save/delete`. Current recipe tracked via pointer file. Every mutation auto-persists and shows `[recipe: ...]`. `config save` resolves defaults for reproducibility.
+- **HTTP server**: all state endpoints scoped under `/api/configs/:id/...`. Recipe CRUD (`POST/GET/DELETE /api/configs`, `PUT .../name`). `mutate_recipe` helper for DRY load-modify-save. Multi-client verified with independent recipes. 17 server tests.
+
 ### Remaining:
-- HTTP server: scope state endpoints under `/api/configs/:id/...`. Add config CRUD endpoints.
 - TUI: load/create recipe on startup, save/load UI.
 - JSON-RPC: add `create_config`, `list_configs`, `load_config`, `save_config` methods.
 

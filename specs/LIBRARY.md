@@ -467,7 +467,7 @@ enum DownloadError {
 
 ## Test coverage
 
-151 tests across core library (114), CLI (24), and TUI (18):
+149 tests across core library (114), CLI (17), and TUI (18):
 
 | Module | Tests | What's covered |
 |--------|-------|----------------|
@@ -481,6 +481,6 @@ enum DownloadError {
 | `validation` | 5 | Required components, context length, custom binary, large context |
 | `ollama` | 6 | Availability, scanning, missing blobs, empty dirs |
 | `lmstudio` | 7 | Availability, scanning, role inference, non-gguf filtering |
-| CLI `state_file` | 3 | SavedState round-trip, build_from_state with explicit config, build_from_state with defaults |
-| CLI `server` | 21 | All HTTP endpoints: versions, models, search, model detail, config schema, system info, state mutations, GPU validation, derived queries, cancel |
+| CLI `state_file` | 3 | build_from_state with explicit config, build_from_state with defaults, current recipe pointer round-trip |
+| CLI `server` | 14 | Data endpoints, recipe CRUD (create/list/get/delete/name), state mutations (model, config, GPU), derived queries (args, components, validate), cancel, missing recipe 404 |
 | TUI `app` | 18 | Defaults, focus navigation (wrap, skip, local model), model source switching, output filenames, GPU libs, log filtering |

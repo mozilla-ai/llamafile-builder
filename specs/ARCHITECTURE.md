@@ -454,28 +454,36 @@ GET  /api/models[?search=X&tag=Y]
 GET  /api/models/:id
 GET  /api/config-schema
 GET  /api/system-info
-GET  /api/ollama/models[?dir=PATH]
-GET  /api/lmstudio/models[?dir=PATH]
+GET  /api/ollama/models
+GET  /api/lmstudio/models
 
-# Build state
-GET  /api/state
-POST /api/state/version          { group, version }
-POST /api/state/model            { id }
-POST /api/state/model-file       { path }
-POST /api/state/config           { key, value }
-POST /api/state/args-override    { content }
-POST /api/state/compute          { target, custom_libs? }
-POST /api/state/agent            { enabled, system_prompt, tools }
-POST /api/state/output           { path }
-POST /api/state/reset
-GET  /api/state/validate
+# Recipe management
+POST /api/configs                              -> create, returns { id }
+GET  /api/configs                              -> list all recipes
+GET  /api/configs/:id                          -> get recipe
+DELETE /api/configs/:id                        -> delete recipe
+PUT  /api/configs/:id/name         { name }    -> name/rename (resolves defaults)
 
-# Build execution
-POST /api/build                  -> SSE stream
-POST /api/cancel
+# Recipe state (scoped by recipe UUID)
+GET  /api/configs/:id/state
+POST /api/configs/:id/state/version        { group, version }
+POST /api/configs/:id/state/model          { id }
+POST /api/configs/:id/state/model-file     { path }
+POST /api/configs/:id/state/quantization   { role, name }
+POST /api/configs/:id/state/config         { key, value }
+POST /api/configs/:id/state/output         { path }
+POST /api/configs/:id/state/args-file      { path }
+POST /api/configs/:id/state/gpu            { action, spec }
+POST /api/configs/:id/state/runtime        { path }
+POST /api/configs/:id/state/zipalign       { path }
+POST /api/configs/:id/state/reset
+GET  /api/configs/:id/state/args           -> preview .args
+GET  /api/configs/:id/state/validate       -> validation messages
+GET  /api/configs/:id/state/components     -> resolved components
 
-# Cache status
-GET  /api/cache/status           -> what's already downloaded
+# Build execution (scoped by recipe UUID)
+POST /api/configs/:id/build                -> SSE stream
+POST /api/cancel                           -> cancel running build
 ```
 
 **Web UI location**: The server looks for static files in a configurable directory, defaulting to `$INSTALL_PREFIX/share/llamafile-builder/web/` or a `web/` directory next to the binary. The web UI is a set of HTML/CSS/JS files (ported from the current Tauri frontend) that uses `fetch()` for API calls and `EventSource` for build progress.
