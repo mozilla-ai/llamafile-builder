@@ -92,7 +92,7 @@ State is persisted to `~/.llamafile-builder/build-state.json` between invocation
 
 `--interactive` mode exposes the Builder API over JSON-RPC 2.0 on stdin/stdout. 20 methods mirroring the Builder API. Stateful session with in-memory SavedState. Progress notifications pushed during builds.
 
-Missing (deferred): `cancel`, `list_ollama_models`, `list_lmstudio_models` methods.
+Missing (deferred): `cancel` method.
 
 ---
 
@@ -129,9 +129,10 @@ Audit and update all spec documents to match the implementation. Document the TU
 - **CLI**: migrated from single `build-state.json` to `ConfigStore`. Added `config new/list/load/save/delete`. Current recipe tracked via pointer file. Every mutation auto-persists and shows `[recipe: ...]`. `config save` resolves defaults for reproducibility.
 - **HTTP server**: all state endpoints scoped under `/api/configs/:id/...`. Recipe CRUD (`POST/GET/DELETE /api/configs`, `PUT .../name`). `mutate_recipe` helper for DRY load-modify-save. Multi-client verified with independent recipes. 17 server tests.
 
+- **JSON-RPC**: added `create_config`, `list_configs`, `load_config`, `save_config`, `delete_config`, `list_ollama_models`, `list_lmstudio_models`. Session tracks current recipe ID; all mutations auto-persist via ConfigStore.
+
 ### Remaining:
 - TUI: load/create recipe on startup, save/load UI.
-- JSON-RPC: add `create_config`, `list_configs`, `load_config`, `save_config` methods.
 
 ---
 
@@ -230,9 +231,9 @@ This is testable entirely via curl before building any web UI (NFR-12).
 
 ## Future work
 
-### Ollama and LM Studio integration in JSON-RPC
+### Ollama and LM Studio model selection in TUI
 
-The TUI and HTTP server already support Ollama/LM Studio model selection. The JSON-RPC interactive mode is missing `list_ollama_models` and `list_lmstudio_models` methods.
+The TUI model popup has Registry/Ollama/LM Studio tabs for browsing, but selecting an Ollama or LM Studio model and building from it needs end-to-end testing and polish.
 
 ### JSON-RPC cancellation
 

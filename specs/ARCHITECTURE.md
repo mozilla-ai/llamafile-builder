@@ -469,6 +469,8 @@ GET  /api/configs/:id/state
 POST /api/configs/:id/state/version        { group, version }
 POST /api/configs/:id/state/model          { id }
 POST /api/configs/:id/state/model-file     { path }
+POST /api/configs/:id/state/ollama-model   { name }
+POST /api/configs/:id/state/lmstudio-model { name }
 POST /api/configs/:id/state/quantization   { role, name }
 POST /api/configs/:id/state/config         { key, value }
 POST /api/configs/:id/state/output         { path }
@@ -510,7 +512,7 @@ JSON-RPC 2.0 over stdin/stdout. For scripting scenarios where multiple operation
 
 Methods mirror the core library API one-to-one. This mode is useful for integration with editors, external GUIs, or complex automation that the CLI's one-shot model doesn't suit.
 
-Note: the current implementation is missing `cancel`, `list_ollama_models`, and `list_lmstudio_models` methods. These are planned for a future phase.
+Note: the `cancel` method is not yet implemented in JSON-RPC mode (planned for a future phase).
 
 ### TUI (`llamafile-tui`)
 

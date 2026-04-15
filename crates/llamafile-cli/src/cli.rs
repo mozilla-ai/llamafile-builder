@@ -107,6 +107,16 @@ pub enum ConfigCmd {
         /// Path to .gguf file
         path: PathBuf,
     },
+    /// Select a local Ollama model (e.g. "llama3:8b" or "qwen3:0.6b")
+    SetOllamaModel {
+        /// Ollama model name with tag (e.g. "llama3:8b")
+        name: String,
+    },
+    /// Select a local LM Studio model (e.g. "Qwen3.5-0.8B-GGUF")
+    SetLmstudioModel {
+        /// LM Studio model directory name
+        name: String,
+    },
     /// Select quantization for a file role
     SetQuantization {
         /// File role (e.g. "weights", "mmproj")

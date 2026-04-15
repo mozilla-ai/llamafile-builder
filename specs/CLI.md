@@ -128,6 +128,8 @@ lb config set-runtime /path/to/llamafile    # custom binary
 # Model
 lb config set-model Qwen/Qwen3-0.6B-GGUF   # registry model (HF repo ID)
 lb config set-model-file /path/to/model.gguf  # local file
+lb config set-ollama-model "qwen3:0.6b"     # local Ollama model
+lb config set-lmstudio-model "Qwen3.5-0.8B-GGUF"  # local LM Studio model
 lb config set-quantization weights Q8_0     # per-role quantization
 lb config set-quantization mmproj Q8_0      # mmproj quantization
 

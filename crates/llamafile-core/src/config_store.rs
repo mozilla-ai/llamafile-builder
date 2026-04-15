@@ -23,6 +23,10 @@ pub struct SavedState {
     pub model_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom_model_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ollama_model: Option<crate::models::OllamaModel>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lmstudio_model: Option<crate::models::LMStudioModel>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub quantizations: HashMap<String, String>,
 
@@ -58,8 +62,9 @@ impl SavedState {
             }
         }
 
-        // Model
-        if self.model_id.is_none() && self.custom_model_file.is_none() {
+        // Model (only default if no model source at all)
+        if self.model_id.is_none() && self.custom_model_file.is_none()
+            && self.ollama_model.is_none() && self.lmstudio_model.is_none() {
             let model = config.models.iter().find(|m| m.default)
                 .or_else(|| config.models.first());
             if let Some(model) = model {

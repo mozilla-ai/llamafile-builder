@@ -94,6 +94,8 @@ pub fn run(
             }
             recipe.state.model_id = Some(id.clone());
             recipe.state.custom_model_file = None;
+            recipe.state.ollama_model = None;
+            recipe.state.lmstudio_model = None;
             recipe.state.quantizations.clear();
             tracing::info!("model set to {}", id);
         }
@@ -103,8 +105,32 @@ pub fn run(
             }
             recipe.state.custom_model_file = Some(path.to_string_lossy().to_string());
             recipe.state.model_id = None;
+            recipe.state.ollama_model = None;
+            recipe.state.lmstudio_model = None;
             recipe.state.quantizations.clear();
             tracing::info!("custom model file set to {}", path.display());
+        }
+        ConfigCmd::SetOllamaModel { name } => {
+            let models = llamafile_core::ollama::get_ollama_models(None);
+            let model = models.into_iter().find(|m| m.display_name == *name)
+                .ok_or_else(|| format!("Ollama model '{}' not found locally. Use 'ollama list' to see available models.", name))?;
+            recipe.state.ollama_model = Some(model);
+            recipe.state.model_id = None;
+            recipe.state.custom_model_file = None;
+            recipe.state.lmstudio_model = None;
+            recipe.state.quantizations.clear();
+            tracing::info!("Ollama model set to {}", name);
+        }
+        ConfigCmd::SetLmstudioModel { name } => {
+            let models = llamafile_core::lmstudio::get_lmstudio_models(None);
+            let model = models.into_iter().find(|m| m.dir_name == *name || m.display_name == *name)
+                .ok_or_else(|| format!("LM Studio model '{}' not found locally. Use 'lm-studio list' to see available models.", name))?;
+            recipe.state.lmstudio_model = Some(model);
+            recipe.state.model_id = None;
+            recipe.state.custom_model_file = None;
+            recipe.state.ollama_model = None;
+            recipe.state.quantizations.clear();
+            tracing::info!("LM Studio model set to {}", name);
         }
         ConfigCmd::SetQuantization { role, name } => {
             recipe.state.quantizations.insert(role.clone(), name.clone());

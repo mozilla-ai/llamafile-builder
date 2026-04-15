@@ -17,7 +17,11 @@ pub fn build_from_state(
     if saved.version_group.is_none() && saved.version.is_none() && saved.custom_runtime.is_none() {
         builder.select_default_version();
     }
-    if saved.model_id.is_none() && saved.custom_model_file.is_none() {
+    let has_model = saved.model_id.is_some()
+        || saved.custom_model_file.is_some()
+        || saved.ollama_model.is_some()
+        || saved.lmstudio_model.is_some();
+    if !has_model {
         builder.select_default_model();
     }
 
@@ -59,6 +63,10 @@ fn apply_to_builder(
     // Model
     if let Some(ref path) = saved.custom_model_file {
         builder.select_custom_model(std::path::Path::new(path));
+    } else if let Some(ref model) = saved.ollama_model {
+        builder.select_ollama_model(model.clone());
+    } else if let Some(ref model) = saved.lmstudio_model {
+        builder.select_lmstudio_model(model.clone());
     } else if let Some(ref id) = saved.model_id {
         builder.select_registry_model(id);
         if builder.state().selected_model_id.is_none() {

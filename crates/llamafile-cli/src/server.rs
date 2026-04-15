@@ -35,6 +35,7 @@ use crate::state_file;
         get_system_info, get_ollama_models, get_lmstudio_models,
         create_recipe, list_recipes, get_recipe, delete_recipe, name_recipe,
         get_recipe_state, set_version, set_model, set_model_file,
+        set_ollama_model, set_lmstudio_model,
         set_quantization, set_config, set_output, set_args_file,
         modify_gpu, set_runtime, set_zipalign, reset_state,
         get_args, get_validate, get_components,
@@ -89,6 +90,8 @@ fn build_router(config: BuilderConfig, store: ConfigStore) -> (Router, Arc<AppSt
         .route("/api/configs/{id}/state/version", post(set_version))
         .route("/api/configs/{id}/state/model", post(set_model))
         .route("/api/configs/{id}/state/model-file", post(set_model_file))
+        .route("/api/configs/{id}/state/ollama-model", post(set_ollama_model))
+        .route("/api/configs/{id}/state/lmstudio-model", post(set_lmstudio_model))
         .route("/api/configs/{id}/state/quantization", post(set_quantization))
         .route("/api/configs/{id}/state/config", post(set_config))
         .route("/api/configs/{id}/state/output", post(set_output))
@@ -344,7 +347,8 @@ async fn set_model(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json
         return Err(api_err(StatusCode::NOT_FOUND, format!("model not found: {mid}")));
     }
     mutate_recipe(&st, &id, |s| {
-        s.model_id = Some(mid); s.custom_model_file = None; s.quantizations.clear(); Ok(())
+        s.model_id = Some(mid); s.custom_model_file = None;
+        s.ollama_model = None; s.lmstudio_model = None; s.quantizations.clear(); Ok(())
     }).await
 }
 
@@ -354,7 +358,36 @@ async fn set_model_file(State(st): State<Arc<AppState>>, Path(id): Path<String>,
     let path = body.get("path").and_then(|v| v.as_str())
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'path'"))?.to_string();
     mutate_recipe(&st, &id, |s| {
-        s.custom_model_file = Some(path); s.model_id = None; s.quantizations.clear(); Ok(())
+        s.custom_model_file = Some(path); s.model_id = None;
+        s.ollama_model = None; s.lmstudio_model = None; s.quantizations.clear(); Ok(())
+    }).await
+}
+
+#[utoipa::path(post, path = "/api/configs/{id}/state/ollama-model", tag = "State",
+    summary = "Select a local Ollama model", params(("id" = String, Path)), request_body = Value)]
+async fn set_ollama_model(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
+    let name = body.get("name").and_then(|v| v.as_str())
+        .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'name'"))?.to_string();
+    let models = llamafile_core::ollama::get_ollama_models(None);
+    let model = models.into_iter().find(|m| m.display_name == name)
+        .ok_or_else(|| api_err(StatusCode::NOT_FOUND, format!("Ollama model not found: {name}")))?;
+    mutate_recipe(&st, &id, |s| {
+        s.ollama_model = Some(model); s.model_id = None;
+        s.custom_model_file = None; s.lmstudio_model = None; s.quantizations.clear(); Ok(())
+    }).await
+}
+
+#[utoipa::path(post, path = "/api/configs/{id}/state/lmstudio-model", tag = "State",
+    summary = "Select a local LM Studio model", params(("id" = String, Path)), request_body = Value)]
+async fn set_lmstudio_model(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
+    let name = body.get("name").and_then(|v| v.as_str())
+        .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'name'"))?.to_string();
+    let models = llamafile_core::lmstudio::get_lmstudio_models(None);
+    let model = models.into_iter().find(|m| m.dir_name == name || m.display_name == name)
+        .ok_or_else(|| api_err(StatusCode::NOT_FOUND, format!("LM Studio model not found: {name}")))?;
+    mutate_recipe(&st, &id, |s| {
+        s.lmstudio_model = Some(model); s.model_id = None;
+        s.custom_model_file = None; s.ollama_model = None; s.quantizations.clear(); Ok(())
     }).await
 }
 

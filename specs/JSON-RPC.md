@@ -72,10 +72,57 @@ Returns full model detail including files and quantizations.
 ```
 Returns `{ os, arch, cpu_cores, memory_gb, has_nvidia_gpu, has_amd_gpu, has_metal }`.
 
+#### list_ollama_models
+```json
+{"jsonrpc":"2.0","id":1,"method":"list_ollama_models"}
+```
+Returns array of local Ollama models.
+
+#### list_lmstudio_models
+```json
+{"jsonrpc":"2.0","id":1,"method":"list_lmstudio_models"}
+```
+Returns array of local LM Studio models.
+
+
+### Recipe management
+
+Recipes are named, UUID-identified build configurations that persist across sessions. All state mutations operate on the "current" recipe.
+
+#### create_config
+```json
+{"jsonrpc":"2.0","id":1,"method":"create_config"}
+```
+Creates a new empty recipe, sets it as current. Returns `{ id }`.
+
+#### list_configs
+```json
+{"jsonrpc":"2.0","id":1,"method":"list_configs"}
+```
+Returns array of `{ id, name, model, updated_at, current }`.
+
+#### load_config
+```json
+{"jsonrpc":"2.0","id":1,"method":"load_config","params":{"id":"name-or-uuid"}}
+```
+Loads a recipe as the current session config. Returns `{ id, name }`.
+
+#### save_config
+```json
+{"jsonrpc":"2.0","id":1,"method":"save_config","params":{"name":"my-recipe"}}
+```
+Names the current recipe and resolves all defaults for a full snapshot. Returns `{ ok, id, name }`.
+
+#### delete_config
+```json
+{"jsonrpc":"2.0","id":1,"method":"delete_config","params":{"id":"name-or-uuid"}}
+```
+Deletes a recipe by name or UUID.
+
 
 ### State mutations
 
-Each mutation updates the in-memory session state. State is not persisted to disk (unlike `config set-*` in the CLI).
+Each mutation operates on the current recipe (created via `create_config` or loaded via `load_config`). A recipe is auto-created if none exists. Every mutation auto-persists via ConfigStore and returns `{ ok, recipe_id }`.
 
 #### set_version
 ```json
@@ -86,12 +133,24 @@ Each mutation updates the in-memory session state. State is not persisted to dis
 ```json
 {"jsonrpc":"2.0","id":1,"method":"set_model","params":{"id":"Qwen/Qwen3-0.6B-GGUF"}}
 ```
-Returns error if model ID not found in registry.
+Returns error if model ID not found in registry. Clears other model sources.
 
 #### set_model_file
 ```json
 {"jsonrpc":"2.0","id":1,"method":"set_model_file","params":{"path":"/path/to/model.gguf"}}
 ```
+
+#### set_ollama_model
+```json
+{"jsonrpc":"2.0","id":1,"method":"set_ollama_model","params":{"name":"qwen3:0.6b"}}
+```
+Scans local Ollama models, selects by display name. Returns error if not found locally.
+
+#### set_lmstudio_model
+```json
+{"jsonrpc":"2.0","id":1,"method":"set_lmstudio_model","params":{"name":"Qwen3.5-0.8B-GGUF"}}
+```
+Scans local LM Studio models, selects by directory name or display name. Returns error if not found locally.
 
 #### set_quantization
 ```json
