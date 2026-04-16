@@ -140,19 +140,30 @@ Also added beyond plan: `POST /api/recipes/:id/state/ollama-model` and `POST /ap
 
 ---
 
-## Phase 7: Web UI port and cleanup
+## Phase 7: Web UI -- DONE (first pass)
 
-**Goal**: Browser-based wizard works. Old code removed.
+**Goal**: Browser-based dashboard UI served by `llamafile-builder --serve`.
 
-### Changes:
-- Copy `src/` (current Tauri frontend) to `web/`
-- Replace `invoke()` -> `fetch()`, `listen()` -> `EventSource`
-- Remove `src-tauri/`, `src/`
-- Update `CLAUDE.md`, `README.md`
+### Implemented:
+- `web/index.html` — two-column shell: accordion sections left, build panel right
+- `web/styles.css` — same design language (dark theme, JetBrains Mono, orange accent); no sidebar/step-wizard layout
+- `web/app.js` — complete plain-JS implementation; no framework, no build step
 
-### Verify:
-- `llamafile-builder --serve` opens browser, wizard completes a build
-- All `cargo test --workspace` passes
+### Design (TUI-derived dashboard, not step wizard):
+- Accordion sections matching TUI Focus rows: Version, Model, Weights, Mmproj, Output, Config, GPU, Advanced
+- Model section: Registry/Ollama/LM Studio/Local File tabs, searchable
+- Config section: schema-driven (dropdown, slider, text, bool toggle)
+- GPU section: checkboxes driven by selected version's `gpu_libs`
+- Build panel: Validate, Preview .args, Reset, Build button
+- SSE build progress via `fetch()` + `ReadableStream` (POST /api/recipes/:id/build)
+- Recipe ID stored in `sessionStorage`; auto-created on first load, restored on refresh
+
+### Key decisions:
+- No recipe management UI — use CLI or API directly; avoids duplicating backend features
+- `fetch()` streaming (not `EventSource`) since build endpoint is POST
+- Event delegation for all section interactions — only one listener per section body
+
+### All `cargo test --workspace` passes (105+ tests).
 
 ---
 

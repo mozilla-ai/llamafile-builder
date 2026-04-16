@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod interactive;
+mod log_forwarder;
 mod server;
 mod state_file;
 
@@ -64,15 +65,20 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
 
     // Configure tracing subscriber.
-    // Default: WARN level. Use RUST_LOG=info or RUST_LOG=debug for more detail.
-    // The build command will produce INFO-level logs for each phase.
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into()),
+    // Default: INFO level. Use RUST_LOG=debug for more detail.
+    // The BroadcastLogLayer is a no-op until server::run() calls log_forwarder::init().
+    use tracing_subscriber::prelude::*;
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .with_writer(std::io::stderr)
+                .with_filter(
+                    tracing_subscriber::EnvFilter::try_from_default_env()
+                        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                ),
         )
-        .with_target(false)
-        .with_writer(std::io::stderr)
+        .with(log_forwarder::BroadcastLogLayer)
         .init();
 
     // Load configuration

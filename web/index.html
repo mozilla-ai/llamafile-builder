@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>llamafile Builder</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="window" id="app">
+  <div class="titlebar">
+    <div class="titlebar-text">llamafile builder</div>
+    <div class="titlebar-recipe" id="recipe-badge"></div>
+  </div>
+
+  <!-- Main scrollable section area -->
+  <div class="main">
+    <div class="sections" id="sections">
+      <div class="loading-msg">Connecting to server…</div>
+    </div>
+  </div>
+
+  <!-- Persistent bottom action bar -->
+  <div class="build-bar">
+    <button class="btn btn-primary build-btn" id="btn-build" onclick="startBuild()" disabled>
+      ▶&nbsp; Build
+    </button>
+    <div class="build-status" id="build-status"></div>
+    <div class="build-bar-right">
+      <button class="btn btn-secondary btn-small btn-danger-hover" onclick="confirmReset()">Reset</button>
+    </div>
+  </div>
+
+  <!-- Progress panel: overall build phase + per-file download bars -->
+  <div class="progress-section" id="progress-section" style="display:none;">
+    <div class="progress-header">
+      <span class="progress-label">Build progress</span>
+      <span class="progress-phase" id="progress-phase"></span>
+    </div>
+    <div class="progress-bars" id="progress-bars"></div>
+  </div>
+
+  <!-- Full-width log pane with level filter -->
+  <div class="log-section" id="log-section">
+    <div class="log-header">
+      <span class="log-label">Build log</span>
+      <div class="log-level-filter">
+        <button class="log-level-btn" data-level="debug" onclick="setLogLevel('debug')">DEBUG</button>
+        <button class="log-level-btn active" data-level="info"  onclick="setLogLevel('info')">INFO</button>
+        <button class="log-level-btn" data-level="warn"  onclick="setLogLevel('warn')">WARN</button>
+        <button class="log-level-btn" data-level="error" onclick="setLogLevel('error')">ERROR</button>
+      </div>
+      <button class="log-clear" onclick="clearLog()">clear</button>
+    </div>
+    <div class="log-pane" id="log-pane">
+      <div class="log-empty">No build output yet.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay hidden" id="modal-overlay">
+  <div class="modal" id="modal">
+    <div class="modal-title" id="modal-title"></div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="modal-ok">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast notifications -->
+<div id="toasts"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

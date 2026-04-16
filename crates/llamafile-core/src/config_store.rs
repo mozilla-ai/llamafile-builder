@@ -8,6 +8,16 @@ use uuid::Uuid;
 use crate::config_manager::BuilderConfig;
 use crate::error::Error;
 
+/// A GPU library specified by a local file path (for custom/development builds).
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct CustomGpuLib {
+    pub path: String,
+    /// Acceleration type: "cuda" | "rocm" | "vulkan"
+    pub accel: String,
+    /// Target OS: "linux" | "windows"
+    pub os: String,
+}
+
 /// User build selections. Sparse during interactive use (only explicit
 /// overrides). Resolved to a full snapshot when saved as a `BuildRecipe`.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -38,8 +48,18 @@ pub struct SavedState {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_path: Option<String>,
 
+    /// Extra files to bundle alongside a custom model (role → file path).
+    /// Used when the user loads a local weights file and wants to also
+    /// include an mmproj (vision adapter) or other companion file.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub custom_companion_files: HashMap<String, String>,
+
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gpu_libs: Vec<String>,
+
+    /// GPU libraries specified by local file path (not from version's gpu_libs catalog).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_gpu_libs: Vec<CustomGpuLib>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom_zipalign: Option<String>,
@@ -91,9 +111,10 @@ impl SavedState {
             self.config_values.entry(key).or_insert(value);
         }
 
-        // Output path
+        // Output path — derive from registry model or custom file
         if self.output_path.is_none() {
             if let Some(ref model_id) = self.model_id {
+                // Registry model: use quantization filename stem
                 if let Some(model) = config.models.iter().find(|m| &m.id == model_id) {
                     if let Some(file) = model.files.iter().find(|f| f.role == "weights") {
                         let qname = self.quantizations.get("weights")
@@ -106,6 +127,14 @@ impl SavedState {
                         }
                     }
                 }
+            } else if let Some(ref custom_path) = self.custom_model_file {
+                // Local file: use filename stem
+                let stem = std::path::Path::new(custom_path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("model");
+                let dir = crate::models::get_default_output_dir();
+                self.output_path = Some(format!("{}/{}.llamafile", dir, stem));
             }
         }
     }

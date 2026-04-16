@@ -63,6 +63,10 @@ fn apply_to_builder(
     // Model
     if let Some(ref path) = saved.custom_model_file {
         builder.select_custom_model(std::path::Path::new(path));
+        // Companion files (e.g. mmproj for multimodal local models)
+        for (role, companion_path) in &saved.custom_companion_files {
+            builder.add_custom_companion_file(role, std::path::Path::new(companion_path));
+        }
     } else if let Some(ref model) = saved.ollama_model {
         builder.select_ollama_model(model.clone());
     } else if let Some(ref model) = saved.lmstudio_model {
@@ -113,11 +117,22 @@ fn apply_to_builder(
         builder.set_output_path(std::path::Path::new(path));
     }
 
-    // GPU libs
+    // GPU libs (spec-based, from version catalog)
     for spec in &saved.gpu_libs {
         let (accel, os_list) = crate::commands::build::parse_gpu_spec(spec)?;
         for os in os_list {
             builder.add_gpu_lib(accel, os);
+        }
+    }
+
+    // Custom GPU lib files (local paths)
+    for lib in &saved.custom_gpu_libs {
+        let path = std::path::Path::new(&lib.path);
+        let (accel, os_list) = crate::commands::build::parse_gpu_spec(
+            &format!("{}:{}", lib.accel, lib.os)
+        )?;
+        for os in os_list {
+            builder.add_custom_gpu_lib(path, accel, os);
         }
     }
 

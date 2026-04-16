@@ -632,6 +632,8 @@ impl App {
             args_file: self.args_file.clone(),
             output_path: self.output_path.clone(),
             gpu_libs,
+            custom_gpu_libs: vec![],
+            custom_companion_files: Default::default(),
             custom_zipalign: self.custom_zipalign.clone(),
         }
     }

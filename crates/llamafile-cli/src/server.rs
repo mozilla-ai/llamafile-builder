@@ -17,7 +17,9 @@ use utoipa::OpenApi;
 
 use llamafile_core::cache::Cache;
 use llamafile_core::config_manager::BuilderConfig;
-use llamafile_core::config_store::{ConfigStore, SavedState};
+use llamafile_core::config_store::{ConfigStore, CustomGpuLib, SavedState};
+
+use crate::log_forwarder;
 
 use crate::state_file;
 
@@ -34,11 +36,13 @@ use crate::state_file;
         get_versions, get_models, get_model, get_config_schema,
         get_system_info, get_ollama_models, get_lmstudio_models,
         create_recipe, list_recipes, get_recipe, delete_recipe, name_recipe,
-        get_recipe_state, set_version, set_model, set_model_file,
+        get_recipe_state, put_recipe_state, set_version, set_model, set_model_file,
         set_ollama_model, set_lmstudio_model,
         set_quantization, set_config, set_output, set_args_file,
-        modify_gpu, set_runtime, set_zipalign, reset_state,
-        get_args, get_validate, get_components,
+        modify_gpu, modify_custom_gpu, modify_companion_file,
+        set_runtime, set_zipalign, reset_state,
+        get_args, get_validate, get_components, get_resolved_state,
+        set_args_content, file_dialog,
         start_build, cancel_build,
     ),
 )]
@@ -53,6 +57,7 @@ const DOCS_PATH: &str = "/docs";
 struct AppState {
     config: BuilderConfig,
     store: ConfigStore,
+    recipes_dir: PathBuf,
     cancel_flag: Arc<AtomicBool>,
     build_tx: broadcast::Sender<String>,
 }
@@ -61,11 +66,17 @@ struct AppState {
 // Entry point
 // ============================================================================
 
-fn build_router(config: BuilderConfig, store: ConfigStore) -> (Router, Arc<AppState>) {
-    let (build_tx, _) = broadcast::channel::<String>(256);
+fn build_router(config: BuilderConfig, store: ConfigStore, recipes_dir: PathBuf) -> (Router, Arc<AppState>) {
+    // A single broadcast channel carries both build stage events AND tracing log events.
+    // The log_forwarder layer (wired into the global tracing subscriber) sends to this
+    // channel, so SSE clients receive live logs alongside progress events.
+    let (build_tx, _) = broadcast::channel::<String>(1024);
+    log_forwarder::init(build_tx.clone());
+
     let state = Arc::new(AppState {
         config,
         store,
+        recipes_dir,
         cancel_flag: Arc::new(AtomicBool::new(false)),
         build_tx,
     });
@@ -87,6 +98,7 @@ fn build_router(config: BuilderConfig, store: ConfigStore) -> (Router, Arc<AppSt
         .route("/api/recipes/{id}/name", put(name_recipe))
         // Recipe state
         .route("/api/recipes/{id}/state", get(get_recipe_state))
+        .route("/api/recipes/{id}/state", put(put_recipe_state))
         .route("/api/recipes/{id}/state/version", post(set_version))
         .route("/api/recipes/{id}/state/model", post(set_model))
         .route("/api/recipes/{id}/state/model-file", post(set_model_file))
@@ -101,8 +113,14 @@ fn build_router(config: BuilderConfig, store: ConfigStore) -> (Router, Arc<AppSt
         .route("/api/recipes/{id}/state/zipalign", post(set_zipalign))
         .route("/api/recipes/{id}/state/reset", post(reset_state))
         .route("/api/recipes/{id}/state/args", get(get_args))
+        .route("/api/recipes/{id}/state/args-content", post(set_args_content))
+        .route("/api/recipes/{id}/state/resolved", get(get_resolved_state))
         .route("/api/recipes/{id}/state/validate", get(get_validate))
         .route("/api/recipes/{id}/state/components", get(get_components))
+        .route("/api/recipes/{id}/state/custom-gpu", post(modify_custom_gpu))
+        .route("/api/recipes/{id}/state/companion-file", post(modify_companion_file))
+        // File picker
+        .route("/api/file-dialog", post(file_dialog))
         // Build
         .route("/api/recipes/{id}/build", post(start_build))
         .route("/api/cancel", post(cancel_build))
@@ -128,8 +146,9 @@ pub async fn run(
     web_dir: Option<PathBuf>,
     no_open: bool,
 ) -> Result<(), String> {
-    let store = ConfigStore::new(crate::get_recipes_dir());
-    let (router, _state) = build_router(config, store);
+    let recipes_dir = crate::get_recipes_dir();
+    let store = ConfigStore::new(recipes_dir.clone());
+    let (router, _state) = build_router(config, store, recipes_dir);
 
     let mut app = router;
 
@@ -151,7 +170,8 @@ pub async fn run(
     tracing::info!("server listening on http://{addr}");
 
     if !no_open {
-        let url = format!("http://{addr}{DOCS_PATH}");
+        let path = if web_dir.as_ref().map(|d| d.exists()).unwrap_or(false) { "/" } else { DOCS_PATH };
+        let url = format!("http://{addr}{path}");
         if open::that(&url).is_err() {
             tracing::warn!("could not open browser, visit {url} manually");
         }
@@ -326,6 +346,19 @@ async fn get_recipe_state(State(st): State<Arc<AppState>>, Path(id): Path<String
     Ok(Json(serde_json::to_value(&recipe.state).unwrap()))
 }
 
+#[utoipa::path(put, path = "/api/recipes/{id}/state", tag = "State",
+    summary = "Replace the entire saved state (used to revert a modal edit)",
+    params(("id" = String, Path)), request_body = Value)]
+async fn put_recipe_state(
+    State(st): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult {
+    let new_state: SavedState = serde_json::from_value(body)
+        .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("invalid state: {e}")))?;
+    mutate_recipe(&st, &id, |s| { *s = new_state; Ok(()) }).await
+}
+
 #[utoipa::path(post, path = "/api/recipes/{id}/state/version", tag = "State",
     summary = "Set version", params(("id" = String, Path)), request_body = Value)]
 async fn set_version(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
@@ -416,7 +449,10 @@ async fn set_config(State(st): State<Arc<AppState>>, Path(id): Path<String>, Jso
 async fn set_output(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
     let path = body.get("path").and_then(|v| v.as_str())
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'path'"))?.to_string();
-    mutate_recipe(&st, &id, |s| { s.output_path = Some(path); Ok(()) }).await
+    mutate_recipe(&st, &id, |s| {
+        s.output_path = if path.is_empty() { None } else { Some(path) };
+        Ok(())
+    }).await
 }
 
 #[utoipa::path(post, path = "/api/recipes/{id}/state/args-file", tag = "State",
@@ -424,7 +460,10 @@ async fn set_output(State(st): State<Arc<AppState>>, Path(id): Path<String>, Jso
 async fn set_args_file(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
     let path = body.get("path").and_then(|v| v.as_str())
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'path'"))?.to_string();
-    mutate_recipe(&st, &id, |s| { s.args_file = Some(path); Ok(()) }).await
+    mutate_recipe(&st, &id, |s| {
+        s.args_file = if path.is_empty() { None } else { Some(path) };
+        Ok(())
+    }).await
 }
 
 #[utoipa::path(post, path = "/api/recipes/{id}/state/gpu", tag = "State",
@@ -509,6 +548,201 @@ async fn get_components(State(st): State<Arc<AppState>>, Path(id): Path<String>)
         json!({ "role": format!("{:?}", c.role), "source": c.source_display(), "zip_path": c.zip_path })
     }).collect();
     Ok(Json(Value::Array(comps)))
+}
+
+// ============================================================================
+// New derived-state endpoints
+// ============================================================================
+
+#[utoipa::path(get, path = "/api/recipes/{id}/state/resolved", tag = "State",
+    summary = "Get recipe state with all defaults resolved", params(("id" = String, Path)))]
+async fn get_resolved_state(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> ApiResult {
+    let uuid = parse_uuid(&id)?;
+    let recipe = st.store.get(uuid).map_err(|e| api_err(StatusCode::NOT_FOUND, format!("{e}")))?;
+    let mut resolved = recipe.state.clone();
+    resolved.resolve_defaults(&st.config);
+    Ok(Json(serde_json::to_value(&resolved).unwrap()))
+}
+
+#[utoipa::path(post, path = "/api/recipes/{id}/state/args-content", tag = "State",
+    summary = "Save raw .args content as an override file",
+    params(("id" = String, Path)), request_body = Value)]
+async fn set_args_content(
+    State(st): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult {
+    let content = body.get("content").and_then(|v| v.as_str())
+        .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'content'"))?;
+    // Validate UUID early so we don't write files for bogus IDs
+    let uuid = parse_uuid(&id)?;
+    let uuid_str = uuid.to_string();
+
+    if content.is_empty() {
+        // Clear the override: delete the file and unset args_file
+        let args_path = st.recipes_dir.join("args").join(format!("{uuid_str}.args"));
+        let _ = std::fs::remove_file(&args_path);
+        mutate_recipe(&st, &id, |s| { s.args_file = None; Ok(()) }).await
+    } else {
+        // Write content to a managed file and set args_file to that path
+        let args_dir = st.recipes_dir.join("args");
+        std::fs::create_dir_all(&args_dir)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("create dir: {e}")))?;
+        let args_path = args_dir.join(format!("{uuid_str}.args"));
+        std::fs::write(&args_path, content)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("write file: {e}")))?;
+        let path_str = args_path.to_string_lossy().to_string();
+        mutate_recipe(&st, &id, |s| { s.args_file = Some(path_str); Ok(()) }).await
+    }
+}
+
+#[utoipa::path(post, path = "/api/recipes/{id}/state/custom-gpu", tag = "State",
+    summary = "Add or remove a custom GPU library file",
+    params(("id" = String, Path)), request_body = Value)]
+async fn modify_custom_gpu(
+    State(st): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult {
+    let action = body.get("action").and_then(|v| v.as_str())
+        .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'action'"))?.to_string();
+
+    match action.as_str() {
+        "add" => {
+            let path = body.get("path").and_then(|v| v.as_str())
+                .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'path'"))?.to_string();
+            let accel = body.get("accel").and_then(|v| v.as_str())
+                .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'accel'"))?.to_lowercase();
+            let os = body.get("os").and_then(|v| v.as_str())
+                .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'os'"))?.to_lowercase();
+            // Validate accel and os using existing parse function
+            crate::commands::build::parse_gpu_spec(&format!("{}:{}", accel, os))
+                .map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
+            mutate_recipe(&st, &id, |s| {
+                // Remove any existing entry with same accel+os
+                s.custom_gpu_libs.retain(|l| !(l.accel == accel && l.os == os));
+                s.custom_gpu_libs.push(CustomGpuLib { path, accel, os });
+                Ok(())
+            }).await
+        }
+        "remove" => {
+            let path = body.get("path").and_then(|v| v.as_str())
+                .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'path'"))?.to_string();
+            mutate_recipe(&st, &id, |s| {
+                s.custom_gpu_libs.retain(|l| l.path != path);
+                Ok(())
+            }).await
+        }
+        _ => Err(api_err(StatusCode::BAD_REQUEST, "action must be 'add' or 'remove'")),
+    }
+}
+
+/// Add or remove a companion file (e.g. mmproj) for a custom local model.
+#[utoipa::path(post, path = "/api/recipes/{id}/state/companion-file", tag = "State",
+    summary = "Add or remove a companion file for a local custom model",
+    params(("id" = String, Path)), request_body = Value)]
+async fn modify_companion_file(
+    State(st): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult {
+    let action = body.get("action").and_then(|v| v.as_str())
+        .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'action'"))?.to_string();
+    let role = body.get("role").and_then(|v| v.as_str())
+        .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'role'"))?.to_string();
+
+    match action.as_str() {
+        "add" => {
+            let path = body.get("path").and_then(|v| v.as_str())
+                .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'path'"))?.to_string();
+            mutate_recipe(&st, &id, |s| {
+                s.custom_companion_files.insert(role, path);
+                Ok(())
+            }).await
+        }
+        "remove" => {
+            mutate_recipe(&st, &id, |s| {
+                s.custom_companion_files.remove(&role);
+                Ok(())
+            }).await
+        }
+        _ => Err(api_err(StatusCode::BAD_REQUEST, "action must be 'add' or 'remove'")),
+    }
+}
+
+/// Open a native file picker dialog on the server's display.
+/// Returns `{"path": "/absolute/path"}` or `{"path": null}` if cancelled.
+#[utoipa::path(post, path = "/api/file-dialog", tag = "Data",
+    summary = "Open a native file picker dialog",
+    request_body = Value)]
+async fn file_dialog(Json(body): Json<Value>) -> ApiResult {
+    let mode = body.get("mode").and_then(|v| v.as_str()).unwrap_or("open");
+    let title = body.get("title").and_then(|v| v.as_str()).unwrap_or("Select file");
+    let path = open_native_file_dialog(mode, title).await;
+    Ok(Json(json!({ "path": path })))
+}
+
+async fn open_native_file_dialog(mode: &str, title: &str) -> Option<String> {
+    let title = title.to_string();
+    let mode = mode.to_string();
+    tokio::task::spawn_blocking(move || {
+        native_file_dialog_sync(&mode, &title)
+    }).await.ok().flatten()
+}
+
+#[cfg(target_os = "macos")]
+fn native_file_dialog_sync(mode: &str, title: &str) -> Option<String> {
+    let dialog_cmd = match mode {
+        "save" => format!(
+            r#"try
+  POSIX path of (choose file name with prompt "{}")
+on error
+  ""
+end try"#,
+            title.replace('"', "\\\"")
+        ),
+        _ => format!(
+            r#"try
+  POSIX path of (choose file with prompt "{}")
+on error
+  ""
+end try"#,
+            title.replace('"', "\\\"")
+        ),
+    };
+    let output = std::process::Command::new("osascript")
+        .args(["-e", &dialog_cmd])
+        .output().ok()?;
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if path.is_empty() { None } else { Some(path) }
+}
+
+#[cfg(target_os = "linux")]
+fn native_file_dialog_sync(_mode: &str, title: &str) -> Option<String> {
+    // Try zenity (GNOME)
+    if let Ok(out) = std::process::Command::new("zenity")
+        .args(["--file-selection", &format!("--title={}", title)])
+        .output() {
+        if out.status.success() {
+            let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !p.is_empty() { return Some(p); }
+        }
+    }
+    // Try kdialog (KDE)
+    if let Ok(out) = std::process::Command::new("kdialog")
+        .args(["--getopenfilename", "."])
+        .output() {
+        if out.status.success() {
+            let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !p.is_empty() { return Some(p); }
+        }
+    }
+    None
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn native_file_dialog_sync(_mode: &str, _title: &str) -> Option<String> {
+    None
 }
 
 // ============================================================================
@@ -598,8 +832,9 @@ mod tests {
 
     fn app() -> (Router, Arc<AppState>) {
         let tmp = tempfile::TempDir::new().unwrap();
-        let store = ConfigStore::new(tmp.into_path());
-        build_router(test_config(), store)
+        let tmp_path = tmp.into_path();
+        let store = ConfigStore::new(tmp_path.clone());
+        build_router(test_config(), store, tmp_path)
     }
 
     async fn get_json(router: &Router, uri: &str) -> (StatusCode, Value) {
