@@ -29,6 +29,10 @@ const S = {
   // Section-editor modal state.
   modalSection: null,    // section id currently open in modal, or null
   modalSnapshot: null,   // deep copy of SavedState at modal open, for Cancel
+  // Inline "add companion file" form toggle (Model section, Local tab).
+  addCompanionOpen: false,
+  // Latest validation messages so the "N warning(s)" label can open a modal with details.
+  validationMessages: [],
 };
 
 // ============================================================================
@@ -174,13 +178,21 @@ function getSummary(name) {
 
   switch (name) {
     case 'version': {
-      if (s.custom_runtime) return `custom: ${s.custom_runtime.split('/').pop()}`;
+      // Custom runtime: show the full path verbatim — user needs to know exactly what's bundled.
+      if (s.custom_runtime) return `custom: ${s.custom_runtime}`;
       const vg = s.version_group || r?.version_group;
       const vv = s.version || r?.version;
       return (vg && vv) ? `${vg} / ${vv}` : '…';
     }
     case 'model': {
-      if (s.custom_model_file) return `local: ${s.custom_model_file.split('/').pop()}`;
+      if (s.custom_model_file) {
+        // Local: list every file (weights + companions) so the summary is self-describing.
+        const files = [`weights: ${s.custom_model_file.split('/').pop()}`];
+        for (const [role, path] of Object.entries(s.custom_companion_files || {})) {
+          files.push(`${role}: ${path.split('/').pop()}`);
+        }
+        return `local — ${files.join(', ')}`;
+      }
       if (s.ollama_model) return `ollama: ${s.ollama_model.display_name || s.ollama_model.displayName}`;
       if (s.lmstudio_model) return `lm studio: ${s.lmstudio_model.display_name || s.lmstudio_model.displayName}`;
       const mid = s.model_id || r?.model_id;
@@ -226,11 +238,11 @@ function getSummary(name) {
       return all.length ? [...new Set(all)].join(', ') : 'none';
     }
     case 'advanced': {
+      // custom_runtime belongs to the Version section, don't double-count it here.
       const parts = [];
-      if (s.custom_runtime) parts.push('runtime');
       if (s.custom_zipalign) parts.push('zipalign');
-      if (s.args_file) parts.push('.args override');
-      return parts.length ? parts.join(', ') : 'defaults';
+      if (s.args_file) parts.push('.args');
+      return parts.length ? `Custom: ${parts.join(', ')}` : 'using defaults';
     }
     default: return '';
   }
@@ -247,7 +259,7 @@ function hasValue(name) {
     case 'output':  return !!s.output_path;
     case 'config':  return Object.keys(s.config_values || {}).length > 0;
     case 'gpu':     return (s.gpu_libs || []).length > 0 || (s.custom_gpu_libs || []).length > 0;
-    case 'advanced':return !!(s.custom_runtime || s.custom_zipalign || s.args_file);
+    case 'advanced':return !!(s.custom_zipalign || s.args_file);
     default: return false;
   }
 }
@@ -284,7 +296,7 @@ async function init() {
 
     renderAll();
     document.getElementById('btn-build').disabled = false;
-    document.getElementById('recipe-badge').textContent = `recipe ${S.recipeId.slice(0,8)}`;
+    await renderRecipeBadge();
     autoValidate();
   } catch (e) {
     document.getElementById('sections').innerHTML =
@@ -301,17 +313,166 @@ async function refreshState() {
 }
 
 // ============================================================================
+// Recipe badge (top-right) — clickable: opens save/load modal.
+// Orange when unsaved (no name), green when saved (named).
+// ============================================================================
+async function renderRecipeBadge() {
+  const el = document.getElementById('recipe-badge');
+  if (!el) return;
+  let recipe = null;
+  try { recipe = await apiGet(`/api/recipes/${S.recipeId}`); } catch (_) {}
+  const name = recipe?.name;
+  const label = name || S.recipeId.slice(0, 8);
+  el.textContent = `recipe: ${label}`;
+  el.classList.add('clickable');
+  el.classList.toggle('saved', !!name);
+  el.classList.toggle('unsaved', !name);
+  el.title = name
+    ? `Saved as "${name}" — click to rename or load another recipe`
+    : 'Unsaved draft — click to save or load another recipe';
+  el.onclick = showRecipeModal;
+}
+
+// Save-and-load modal. Shows the current recipe's name field at the top and a
+// list of other saved recipes to switch to below.
+async function showRecipeModal() {
+  let current = null;
+  let all = [];
+  try {
+    [current, all] = await Promise.all([
+      apiGet(`/api/recipes/${S.recipeId}`).catch(() => null),
+      apiGet('/api/recipes').catch(() => []),
+    ]);
+  } catch (_) {}
+  const currentName = current?.name || '';
+
+  // Only offer "load" for recipes other than the current one.
+  const others = (all || []).filter(r => r.id !== S.recipeId);
+  // Named ones first, then drafts, each sorted by updated_at desc.
+  others.sort((a, b) => {
+    const an = a.name ? 0 : 1, bn = b.name ? 0 : 1;
+    if (an !== bn) return an - bn;
+    return (b.updated_at || '').localeCompare(a.updated_at || '');
+  });
+
+  let loadList = '';
+  if (others.length) {
+    loadList = '<div class="recipe-load-list">';
+    for (const r of others) {
+      const label = r.name || r.id.slice(0, 8);
+      const cls = r.name ? 'saved' : 'unsaved';
+      const model = r.model ? esc(r.model) : '<span style="color:var(--text-dim)">—</span>';
+      loadList += `<div class="recipe-load-row">
+        <span class="recipe-load-label ${cls}">${esc(label)}</span>
+        <span class="recipe-load-model">${model}</span>
+        <button class="btn btn-secondary btn-small" data-load-id="${esc(r.id)}">Load</button>
+        <button class="btn btn-secondary btn-small btn-danger-hover" data-delete-id="${esc(r.id)}" data-delete-label="${esc(label)}" title="Delete this recipe">✕</button>
+      </div>`;
+    }
+    loadList += '</div>';
+  } else {
+    loadList = '<div class="empty-state" style="font-size:11px">No other recipes saved yet.</div>';
+  }
+
+  const bodyHtml = `
+    <div class="recipe-modal-section">
+      <div class="recipe-modal-heading">Save current recipe</div>
+      <div class="section-desc" style="margin-top:0">
+        Naming locks in the current defaults so the recipe stays reproducible
+        as the catalog evolves.
+      </div>
+      <div class="config-row">
+        <div class="config-label">Name</div>
+        <input class="config-input" id="recipe-name-input" placeholder="my-recipe" value="${esc(currentName)}" autofocus>
+        <button class="btn btn-primary btn-small" id="recipe-save-btn">Save</button>
+      </div>
+    </div>
+    <div class="recipe-modal-divider"></div>
+    <div class="recipe-modal-section">
+      <div class="recipe-modal-heading">Load another recipe</div>
+      ${loadList}
+    </div>`;
+
+  showModal('Recipes', bodyHtml, null, {
+    customFooter: `
+      <div style="flex:1"></div>
+      <button class="btn btn-secondary" onclick="closeModal()">Close</button>`,
+  });
+
+  // Wire save button.
+  setTimeout(() => {
+    document.getElementById('recipe-save-btn')?.addEventListener('click', saveRecipeFromModal);
+    document.getElementById('recipe-name-input')?.focus();
+    // Delegate Load clicks.
+    document.getElementById('modal-body')?.addEventListener('click', recipeModalClickHandler);
+  }, 20);
+}
+
+function recipeModalClickHandler(e) {
+  const del = e.target.closest('[data-delete-id]');
+  if (del) {
+    e.stopPropagation();
+    deleteRecipeFromModal(del.dataset.deleteId, del.dataset.deleteLabel);
+    return;
+  }
+  const load = e.target.closest('[data-load-id]');
+  if (load) {
+    const id = load.dataset.loadId;
+    if (id) switchToRecipe(id);
+  }
+}
+
+async function deleteRecipeFromModal(id, label) {
+  if (!id) return;
+  if (!confirm(`Delete recipe "${label || id.slice(0,8)}"? This cannot be undone.`)) return;
+  try {
+    const r = await fetch(`/api/recipes/${id}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+    showToast(`Deleted "${label || id.slice(0,8)}"`, 'ok');
+    // Re-open the modal so the user sees the updated list without extra clicks.
+    showRecipeModal();
+  } catch (e) { showToast('Delete failed: ' + e.message, 'err'); }
+}
+
+async function saveRecipeFromModal() {
+  const name = document.getElementById('recipe-name-input')?.value?.trim();
+  if (!name) { showToast('Please enter a name', 'err'); return; }
+  try {
+    await apiPut(`/api/recipes/${S.recipeId}/name`, { name });
+    await refreshState();
+    await renderRecipeBadge();
+    closeModal();
+    showToast(`Saved as "${name}"`, 'ok');
+  } catch (e) { showToast('Save failed: ' + e.message, 'err'); }
+}
+
+// Switch the active recipe to another one and refresh the whole UI.
+async function switchToRecipe(id) {
+  S.recipeId = id;
+  sessionStorage.setItem('recipeId', id);
+  try {
+    await refreshState();
+    await renderRecipeBadge();
+    renderAll();
+    autoValidate();
+    closeModal();
+    showToast('Recipe loaded', 'ok');
+  } catch (e) { showToast('Load failed: ' + e.message, 'err'); }
+}
+
+// ============================================================================
 // Auto-validate — updates build button + status after each mutation
 // ============================================================================
 async function autoValidate() {
   if (S.building) return;
   try {
     const msgs = await apiGet(`/api/recipes/${S.recipeId}/state/validate`);
+    S.validationMessages = msgs;
     const errors   = msgs.filter(m => m.level === 'error');
     const warnings = msgs.filter(m => m.level === 'warning');
     const btn = document.getElementById('btn-build');
     if (errors.length) {
-      setStatus(`✗ ${errors[0].message}`, 'err');
+      setStatus(`✗ ${errors.length} error${errors.length > 1 ? 's' : ''}`, 'err');
       if (btn) btn.disabled = true;
     } else if (warnings.length) {
       setStatus(`⚠ ${warnings.length} warning${warnings.length > 1 ? 's' : ''}`, 'warn');
@@ -321,6 +482,23 @@ async function autoValidate() {
       if (btn) btn.disabled = false;
     }
   } catch (_) {}
+}
+
+// Show the latest validation messages in a modal. Wired to the build-status
+// element so users can click "⚠ 1 warning" to see what's wrong.
+function showValidationDetails() {
+  const msgs = S.validationMessages || [];
+  if (!msgs.length) return;
+  let html = '';
+  for (const m of msgs) {
+    const cls = m.level === 'error' ? 'err' : 'warn';
+    const label = (m.level || '').toUpperCase();
+    html += `<div class="validation-row ${cls}">
+      <span class="validation-level">${esc(label)}</span>
+      <span class="validation-msg">${esc(m.message || '')}</span>
+    </div>`;
+  }
+  showModal('Validation messages', html, null);
 }
 
 // ============================================================================
@@ -349,7 +527,7 @@ function renderAll() {
   let html = '';
   for (const sec of SECTIONS) {
     const summary = getSummary(sec.id);
-    const dim = ['defaults', 'none', 'auto', '—', '…'].includes(summary);
+    const dim = ['defaults', 'using defaults', 'none', 'auto', '—', '…'].includes(summary);
     const active = hasValue(sec.id);
     html += `
       <div class="section ${active ? 'has-value' : ''}" id="sec-${sec.id}">
@@ -369,7 +547,7 @@ function renderAll() {
 // in the modal, re-render the modal body too.
 function refreshSection(name) {
   const summary = getSummary(name);
-  const dim = ['defaults', 'none', 'auto', '—', '…'].includes(summary);
+  const dim = ['defaults', 'using defaults', 'none', 'auto', '—', '…'].includes(summary);
   const el = document.getElementById(`ss-${name}`);
   if (el) { el.textContent = summary; el.className = `section-summary ${dim ? 'dim' : ''}`; }
   const sec = document.getElementById(`sec-${name}`);
@@ -741,6 +919,7 @@ function renderModelContent() {
 function renderLocalFilesTab(s) {
   const weightsPath = s?.custom_model_file || '';
   const companions = s?.custom_companion_files || {};
+  const addOpen = !!S.addCompanionOpen;
 
   let html = `<div class="section-desc" style="margin-top:0">
     Load local .gguf files from disk. The first file is the weights (required);
@@ -748,7 +927,6 @@ function renderLocalFilesTab(s) {
   </div>`;
 
   if (weightsPath) {
-    // Show current file list with remove buttons
     html += `<div class="local-files-list">
       <div class="local-file-row">
         <span class="role-badge role-weights">WEIGHTS</span>
@@ -764,9 +942,28 @@ function renderLocalFilesTab(s) {
     }
     html += `</div>
     <div class="local-file-actions">
-      <button class="btn btn-secondary btn-small" data-action="add-companion-file">+ Add file</button>
+      <button class="btn btn-secondary btn-small" data-action="toggle-add-companion">${addOpen ? '— Cancel add' : '+ Add file'}</button>
       <button class="btn btn-secondary btn-small btn-danger-hover" data-action="clear-model-file">Clear all</button>
     </div>`;
+
+    // Inline add-companion form (does not open a nested modal).
+    if (addOpen) {
+      html += `<div class="companion-add-form">
+        <div class="config-row">
+          <div class="config-label">Role</div>
+          <select class="config-select" id="companion-role-select">
+            <option value="mmproj">mmproj (vision adapter)</option>
+            <option value="custom">custom…</option>
+          </select>
+          <input class="config-input" id="companion-role-custom" placeholder="role name" style="display:none">
+        </div>
+        <div class="path-row" style="margin-top:8px">
+          <input class="path-input" id="companion-path-input" placeholder="/path/to/mmproj.gguf">
+          <button class="btn btn-secondary btn-browse btn-small" onclick="browseFile('companion-path-input','open','Select companion file')">Browse…</button>
+          <button class="btn btn-primary btn-small" data-action="submit-companion">Add</button>
+        </div>
+      </div>`;
+    }
   } else {
     html += `<div class="path-row">
       <input class="path-input" id="model-file-input" placeholder="/path/to/model.gguf">
@@ -796,17 +993,50 @@ function handleModelClick(e) {
     return;
   }
   if (e.target.closest('[data-action="clear-model-file"]')) {
+    S.addCompanionOpen = false;
     clearModelFiles();
     return;
   }
-  if (e.target.closest('[data-action="add-companion-file"]')) {
-    promptAddCompanionFile();
+  if (e.target.closest('[data-action="toggle-add-companion"]')) {
+    S.addCompanionOpen = !S.addCompanionOpen;
+    refreshSection('model');
+    // Wire up the custom role field visibility when the form opens.
+    if (S.addCompanionOpen) {
+      setTimeout(() => {
+        const sel = document.getElementById('companion-role-select');
+        const input = document.getElementById('companion-role-custom');
+        sel?.addEventListener('change', () => {
+          if (input) input.style.display = sel.value === 'custom' ? '' : 'none';
+        });
+      }, 0);
+    }
+    return;
+  }
+  if (e.target.closest('[data-action="submit-companion"]')) {
+    submitCompanionAdd();
     return;
   }
   const removeBtn = e.target.closest('[data-remove-companion]');
   if (removeBtn) {
     removeCompanionFile(removeBtn.dataset.removeCompanion);
   }
+}
+
+// Submit the inline companion-add form — stays inside the Model section modal.
+async function submitCompanionAdd() {
+  const sel = document.getElementById('companion-role-select')?.value;
+  const role = sel === 'custom'
+    ? (document.getElementById('companion-role-custom')?.value?.trim() || 'companion')
+    : sel;
+  const path = document.getElementById('companion-path-input')?.value?.trim();
+  if (!path) { showToast('Please enter a file path', 'err'); return; }
+  try {
+    await apiPost(`/api/recipes/${S.recipeId}/state/companion-file`, { action: 'add', role, path });
+    S.addCompanionOpen = false;
+    await refreshState();
+    refreshSection('model');
+    autoValidate();
+  } catch (e) { showToast(e.message, 'err'); }
 }
 
 async function browseAndSetModelFile() {
@@ -833,49 +1063,6 @@ async function clearModelFiles() {
     renderAll();
     autoValidate();
   } catch (e) { showToast(e.message, 'err'); }
-}
-
-function promptAddCompanionFile() {
-  const bodyHtml = `
-    <div class="section-desc" style="margin-top:0">Add a companion file (e.g. mmproj for a multimodal model).</div>
-    <div class="config-row">
-      <div class="config-label">Role</div>
-      <select class="config-select" id="companion-role-select">
-        <option value="mmproj">mmproj (vision adapter)</option>
-        <option value="custom">custom…</option>
-      </select>
-    </div>
-    <div class="config-row" id="custom-role-row" style="display:none">
-      <div class="config-label">Custom role</div>
-      <input class="config-input" id="companion-role-custom" placeholder="role name">
-    </div>
-    <div class="path-row" style="margin-top:8px">
-      <input class="path-input" id="companion-path-input" placeholder="/path/to/mmproj.gguf">
-      <button class="btn btn-secondary btn-browse btn-small" onclick="browseFile('companion-path-input','open','Select companion file')">Browse…</button>
-    </div>`;
-
-  showModal('Add companion file', bodyHtml, async () => {
-    const roleSelect = document.getElementById('companion-role-select')?.value;
-    const role = roleSelect === 'custom'
-      ? (document.getElementById('companion-role-custom')?.value?.trim() || 'companion')
-      : roleSelect;
-    const path = document.getElementById('companion-path-input')?.value?.trim();
-    if (!path) { showToast('Please enter a file path', 'err'); return; }
-    try {
-      await apiPost(`/api/recipes/${S.recipeId}/state/companion-file`, { action: 'add', role, path });
-      await refreshState();
-      refreshSection('model');
-      autoValidate();
-    } catch (e) { showToast(e.message, 'err'); }
-  });
-
-  // Wire up the custom role field visibility
-  setTimeout(() => {
-    document.getElementById('companion-role-select')?.addEventListener('change', function() {
-      const row = document.getElementById('custom-role-row');
-      if (row) row.style.display = this.value === 'custom' ? '' : 'none';
-    });
-  }, 0);
 }
 
 async function removeCompanionFile(role) {
@@ -1428,6 +1615,7 @@ function handleBuildEvent(ev) {
       S.buildCompleted = true;
       const size = ev.size ? ` (${fmtBytes(ev.size)})` : '';
       pushLog({ level: 'info', message: `✓ Build complete: ${ev.path}${size}`, cls: 'ok' });
+      pushLog({ level: 'info', message: '💾 Do you like this recipe? Click the recipe badge in the top-right and save it.' });
       setStatus('Build complete ✓', 'ok');
       setBuildPhase('Complete');
       markAllDownloadsDone();
@@ -1658,6 +1846,17 @@ function setStatus(msg, cls) {
   if (!el) return;
   el.textContent = msg;
   el.className = `build-status${cls ? ' ' + cls : ''}`;
+  // Clickable iff it's reporting validation errors/warnings we have details for.
+  const hasDetails = (cls === 'err' || cls === 'warn') && (S.validationMessages || []).length;
+  if (hasDetails) {
+    el.classList.add('clickable');
+    el.onclick = showValidationDetails;
+    el.title = 'Click to view details';
+  } else {
+    el.classList.remove('clickable');
+    el.onclick = null;
+    el.title = '';
+  }
 }
 
 // ============================================================================
