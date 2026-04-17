@@ -892,7 +892,7 @@ impl Builder {
         let by_platform = match accel {
             GpuAccel::Cuda => gpu_libs.cuda.as_ref()?,
             GpuAccel::Rocm => gpu_libs.rocm.as_ref()?,
-            GpuAccel::Vulkan => return None,
+            GpuAccel::Vulkan => gpu_libs.vulkan.as_ref()?,
         };
         let lib = match os {
             Os::Linux => by_platform.linux.as_ref()?,

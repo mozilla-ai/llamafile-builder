@@ -559,6 +559,7 @@ impl App {
         for (accel, by_platform) in [
             (GpuAccel::Cuda, gpu_libs.cuda.as_ref()),
             (GpuAccel::Rocm, gpu_libs.rocm.as_ref()),
+            (GpuAccel::Vulkan, gpu_libs.vulkan.as_ref()),
         ] {
             if let Some(bp) = by_platform {
                 if let Some(lib) = &bp.linux {

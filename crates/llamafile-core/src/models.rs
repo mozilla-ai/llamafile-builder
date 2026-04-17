@@ -27,6 +27,8 @@ pub struct GpuLibs {
     pub cuda: Option<GpuLibsByPlatform>,
     #[serde(default)]
     pub rocm: Option<GpuLibsByPlatform>,
+    #[serde(default)]
+    pub vulkan: Option<GpuLibsByPlatform>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

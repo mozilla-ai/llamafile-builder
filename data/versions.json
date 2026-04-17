@@ -5,9 +5,58 @@
     {
       "name": "llamafile 0.10",
       "tag": "latest",
-      "default": true,
+      "default" : true,
       "description": "Latest release — support for recent models, multimodal, tool calling.",
       "releases": [
+        {
+          "version": "0.10.1_alpha",
+          "description": "Supports Metal (Mac), CUDA/ROCm/Vulkan(Linux/Windows), gemma-4",
+          "release_date": "2026-04-19",
+          "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/llamafile",
+          "size_bytes": 43264942,
+          "sha256": "ba84f0c4d5b5729f343b7600d63fd8450dd248674396d2bf8cda9d7c53875632",
+          "zipalign_url": "https://github.com/mozilla-ai/llamafile/releases/download/0.10.0/zipalign-0.10.0",
+          "zipalign_size_bytes": 851513,
+          "zipalign_sha256": "7eac59c658226027b365d92131babf06341f746fb20c0db33115bbdf5c5c6c4b",
+          "gpu_libs": {
+            "cuda": {
+              "linux": {
+                "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/ggml-cuda.so",
+                "size_bytes": 834493568,
+                "sha256": "b6b278699cb283f4e3d55448dc37516fb647ad45e2c7a66d4ac266ee869c5a68"
+              },
+              "windows": {
+                "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/ggml-cuda.dll",
+                "size_bytes": 826787328,
+                "sha256": "6d0cb11806922ed4b53dbf901a354e25b72b90104ce3a11221458251a365c9e7"
+              }
+            },
+            "rocm": {
+              "linux": {
+                "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/ggml-rocm.so",
+                "size_bytes": 566567992,
+                "sha256": "78b2c47473bf845df901fb85e64cb22946cc4ac412311d9dc6cfb0f507ee4c25"
+              },
+              "windows": {
+                "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/ggml-rocm.dll",
+                "size_bytes": 577027584,
+                "sha256": "7cfcda91d6d0187f8136fdb1cd46243b09b4d7eadad5ad7ecbac516053569e75"
+              }
+            },
+            "vulkan": {
+              "linux": {
+                "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/ggml-vulkan.so",
+                "size_bytes": 34530528,
+                "sha256": "daeb7d020d8ae22bf71e961d04983e8a90bc772db970462080f3875ef555e8c8"
+              },
+              "windows": {
+                "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/ggml-vulkan.dll",
+                "size_bytes": 32253952,
+                "sha256": "ed6eee0919358df4460de660d6a0aca1dbb42958da406d7938bf2267154b8a5c"
+              }
+            }
+          }
+        },
         {
           "version": "0.10.0",
           "description": "Server, CLI, chat, combined mode, Metal+CUDA(linux) support ([release notes](https://github.com/mozilla-ai/llamafile/blob/main/README_0.10.0.md))",
@@ -39,7 +88,7 @@
     },
     {
       "name": "llamafile 0.9",
-      "tag": "stable",
+      "tag": "legacy",
       "description": "Former release — CUDA 12 support, multi-GPU, flash attention.",
       "releases": [
         {
