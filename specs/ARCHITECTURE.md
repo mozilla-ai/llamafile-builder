@@ -128,7 +128,7 @@ impl ConfigManager {
 }
 
 pub struct BuilderConfig {
-    pub versions: Vec<VersionGroup>,
+    pub versions: Vec<LlamafileVersionGroup>,
     pub models: Vec<Model>,
     pub config_schema: Vec<ConfigSchemaItem>,
     pub config_version: u32,
@@ -218,9 +218,8 @@ The `Builder` is the main entry point for constructing a llamafile. All selectio
 
 ```rust
 pub struct Builder {
-    config: BuilderConfig,
-    state: BuildState,
-    cancel_flag: Arc<AtomicBool>,
+    // private fields: config, state, cache, cancel_flag,
+    // custom_zipalign, args_override, agent_config, gpu_libs
 }
 
 impl Builder {
@@ -228,43 +227,56 @@ impl Builder {
 
     // --- State queries ---
     pub fn state(&self) -> &BuildState;
+    pub fn config(&self) -> &BuilderConfig;
     pub fn resolved_components(&self) -> Vec<Component>;
-    pub fn resolved_args(&self) -> Result<String>;  // preview the .args that would be generated
+    pub fn resolved_args(&self) -> String;  // preview the .args that would be generated
     pub fn validate(&self) -> Vec<ValidationMessage>;  // FR-6
+    pub fn can_build(&self) -> bool;
 
     // --- Version / binaries (FR-1) ---
-    pub fn select_version(&mut self, group: &str, version: &str) -> Result<()>;
-    pub fn use_custom_runtime(&mut self, path: &Path) -> Result<()>;
-    pub fn use_custom_zipalign(&mut self, path: &Path) -> Result<()>;
+    pub fn select_default_version(&mut self) -> bool;  // picks the default (or first) group/release
+    pub fn select_version(&mut self, group: &str, version: &str);
+    pub fn use_custom_runtime(&mut self, path: &Path);
+    pub fn use_custom_zipalign(&mut self, path: &Path);
 
     // --- Model (FR-1, FR-2) ---
-    pub fn select_registry_model(&mut self, model_id: &str) -> Result<()>;
-    pub fn select_custom_model(&mut self, path: &Path) -> Result<()>;
-    pub fn select_ollama_model(&mut self, name: &str, tag: &str, dir: Option<&Path>) -> Result<()>;
-    pub fn select_lmstudio_model(&mut self, dir_name: &str, dir: Option<&Path>) -> Result<()>;
-    pub fn select_quantization(&mut self, role: &str, index: usize) -> Result<()>;
+    pub fn select_default_model(&mut self) -> bool;  // picks the default (or first) registry model
+    pub fn select_registry_model(&mut self, model_id: &str);
+    pub fn select_custom_model(&mut self, path: &Path);
+    pub fn select_ollama_model(&mut self, model: OllamaModel);
+    pub fn select_lmstudio_model(&mut self, model: LMStudioModel);
+    pub fn select_quantization(&mut self, role: &str, index: usize);
+
+    // Per-role file manipulation (mixing registry model with local files, etc.)
+    pub fn use_custom_file_for_role(&mut self, role: &str, path: &Path);
+    pub fn add_custom_companion_file(&mut self, role: &str, path: &Path);
+    pub fn remove_custom_companion_file(&mut self, role: &str);
+    pub fn select_lmstudio_file(&mut self, role: &str, index: usize);
+    pub fn disable_file_role(&mut self, role: &str);  // e.g. drop mmproj for text-only
 
     // --- Configuration (FR-4) ---
-    pub fn set_config_value(&mut self, key: &str, value: serde_json::Value) -> Result<()>;
+    pub fn set_config_value(&mut self, key: &str, value: serde_json::Value);
     pub fn set_args_override(&mut self, raw_args: &str);  // bypass schema, use raw .args content
+    pub fn clear_args_override(&mut self);
 
     // --- GPU libraries (FR-1) ---
-    pub fn add_gpu_lib(&mut self, accel: GpuAccel, os: Os) -> Result<()>;
-    pub fn add_custom_gpu_lib(&mut self, path: &Path, accel: GpuAccel, os: Os) -> Result<()>;
+    pub fn add_gpu_lib(&mut self, accel: GpuAccel, os: Os);
+    pub fn add_custom_gpu_lib(&mut self, path: &Path, accel: GpuAccel, os: Os);
     pub fn remove_gpu_lib(&mut self, accel: GpuAccel, os: Os);
     pub fn clear_gpu_libs(&mut self);
 
     // --- Agent (FR-7, placeholder) ---
-    pub fn set_agent_config(&mut self, config: AgentConfig) -> Result<()>;
+    pub fn set_agent_config(&mut self, config: AgentConfig);
 
     // --- Output ---
-    pub fn set_output_path(&mut self, path: &Path) -> Result<()>;
+    pub fn set_output_path(&mut self, path: &Path);
 
     // --- Execution ---
     // All progress is observable via tracing spans and events.
     pub async fn build(&self) -> Result<PathBuf>;  // FR-3, FR-5
 
     pub fn cancel(&self);
+    pub fn set_cancel_flag(&mut self, flag: Arc<AtomicBool>);  // share a cancel flag with the caller
 }
 ```
 

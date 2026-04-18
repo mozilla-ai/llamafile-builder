@@ -72,6 +72,12 @@ Returns full model detail including files and quantizations.
 ```
 Returns `{ os, arch, cpu_cores, memory_gb, has_nvidia_gpu, has_amd_gpu, has_metal }`.
 
+#### config_schema
+```json
+{"jsonrpc":"2.0","id":1,"method":"config_schema"}
+```
+Returns the tagged `ConfigSchemaItem` array that drives the configuration UI (see [LIBRARY.md](LIBRARY.md#configuration-schema)). Useful for clients that render dynamic forms from the schema.
+
 #### list_ollama_models
 ```json
 {"jsonrpc":"2.0","id":1,"method":"list_ollama_models"}
