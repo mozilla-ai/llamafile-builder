@@ -409,7 +409,7 @@ enum DownloadError {
 |------|-----------|
 | `LlamafileVersionGroup` | `name`, `tag` (latest/stable), `default`, `description`, `releases: Vec<LlamafileRelease>` |
 | `LlamafileRelease` | `version`, `release_date`, `download_url`, `size_bytes`, `sha256`, `zipalign_url`, `zipalign_size_bytes`, `zipalign_sha256`, `gpu_libs: Option<GpuLibs>` |
-| `GpuLibs` | `cuda: Option<GpuLibsByPlatform>`, `rocm: Option<GpuLibsByPlatform>` |
+| `GpuLibs` | `cuda: Option<GpuLibsByPlatform>`, `rocm: Option<GpuLibsByPlatform>`, `vulkan: Option<GpuLibsByPlatform>` |
 | `GpuLibsByPlatform` | `linux: Option<GpuLibrary>`, `windows: Option<GpuLibrary>` |
 | `GpuLibrary` | `download_url`, `size_bytes`, `sha256` |
 
