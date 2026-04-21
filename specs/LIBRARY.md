@@ -433,13 +433,14 @@ enum DownloadError {
 | `Bool` | `key`, `label`, `description`, `default`, `flag`, `conditional` |
 | `Slider` | `key`, `label`, `description`, `default`, `min`, `max`, `step`, `flag`, `conditional` |
 
-### Compute & Agent
+### Agent
 
 | Type | Key fields |
 |------|-----------|
-| `ComputeConfig` | `mode` (Cpu/Gpu), `cuda`, `rocm`, `metal` (bools) |
 | `AgentConfig` | `enabled`, `tools: Vec<AgentTool>`, `system_prompt` |
 | `AgentTool` | `id`, `name`, `description`, `icon`, `enabled` |
+
+GPU selection is handled by the `Builder` as a flat list of `GpuLibSelection { accel, os, source }` entries (see `add_gpu_lib` / `add_custom_gpu_lib`), not by a compute-config struct.
 
 ### System info
 

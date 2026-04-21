@@ -30,7 +30,7 @@ pub use models::{
 
 // Data types used by consumers
 pub use models::{
-    AgentConfig, AgentTool, ComputeConfig, ComputeMode, ConfigSchemaItem, GpuLibrary, GpuLibs,
+    AgentConfig, AgentTool, ConfigSchemaItem, GpuLibrary, GpuLibs,
     GpuLibsByPlatform, LMStudioFile, LMStudioModel, LlamafileRelease, LlamafileVersionGroup,
     Model, ModelFile, ModelFileQuantization, OllamaModel, SystemInfo,
 };

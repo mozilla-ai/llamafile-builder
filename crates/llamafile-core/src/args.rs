@@ -209,27 +209,6 @@ pub fn generate_system_prompt(agent: &AgentConfig) -> String {
     prompt
 }
 
-pub fn estimate_size(model_size: u64, compute: &ComputeConfig, agent: &AgentConfig) -> u64 {
-    let runtime_overhead: u64 = 5_000_000;
-    let gpu_overhead: u64 = if compute.mode == ComputeMode::Gpu {
-        let mut overhead = 0u64;
-        if compute.cuda {
-            overhead += 180_000_000;
-        }
-        if compute.rocm {
-            overhead += 60_000_000;
-        }
-        if compute.metal {
-            overhead += 10_000_000;
-        }
-        overhead
-    } else {
-        0
-    };
-    let agent_overhead: u64 = if agent.enabled { 1_000_000 } else { 0 };
-    model_size + runtime_overhead + gpu_overhead + agent_overhead
-}
-
 /// Extract default config values from a schema. Useful for CLI defaults.
 pub fn default_config_values(schema: &[ConfigSchemaItem]) -> HashMap<String, serde_json::Value> {
     let mut values = HashMap::new();
@@ -440,73 +419,6 @@ mod tests {
         ] {
             assert!(prompt.contains(name), "missing {name}");
         }
-    }
-
-    // ---------- estimate_size ----------
-
-    fn compute(mode: ComputeMode, cuda: bool, rocm: bool, metal: bool) -> ComputeConfig {
-        ComputeConfig {
-            mode,
-            cuda,
-            rocm,
-            metal,
-        }
-    }
-
-    #[test]
-    fn estimate_size_cpu_only_is_model_plus_runtime() {
-        let c = compute(ComputeMode::Cpu, false, false, false);
-        let agent = AgentConfig {
-            enabled: false,
-            ..AgentConfig::default()
-        };
-        let size = estimate_size(1_000_000_000, &c, &agent);
-        assert_eq!(size, 1_000_000_000 + 5_000_000);
-    }
-
-    #[test]
-    fn estimate_size_gpu_cuda_adds_cuda_overhead() {
-        let c = compute(ComputeMode::Gpu, true, false, false);
-        let agent = AgentConfig {
-            enabled: false,
-            ..AgentConfig::default()
-        };
-        let size = estimate_size(1_000_000_000, &c, &agent);
-        assert_eq!(size, 1_000_000_000 + 5_000_000 + 180_000_000);
-    }
-
-    #[test]
-    fn estimate_size_gpu_all_flags_and_agent() {
-        let c = compute(ComputeMode::Gpu, true, true, true);
-        let agent = AgentConfig {
-            enabled: true,
-            ..AgentConfig::default()
-        };
-        let size = estimate_size(1_000_000_000, &c, &agent);
-        assert_eq!(
-            size,
-            1_000_000_000 + 5_000_000 + 180_000_000 + 60_000_000 + 10_000_000 + 1_000_000
-        );
-    }
-
-    #[test]
-    fn estimate_size_cpu_mode_ignores_gpu_flags() {
-        let c = compute(ComputeMode::Cpu, true, true, true);
-        let agent = AgentConfig {
-            enabled: false,
-            ..AgentConfig::default()
-        };
-        let size = estimate_size(500_000_000, &c, &agent);
-        assert_eq!(size, 500_000_000 + 5_000_000);
-    }
-
-    #[test]
-    fn estimate_size_agent_overhead_is_flat() {
-        let c = compute(ComputeMode::Cpu, false, false, false);
-        let mut agent = AgentConfig::default();
-        agent.enabled = true;
-        let size = estimate_size(0, &c, &agent);
-        assert_eq!(size, 5_000_000 + 1_000_000);
     }
 
     // ---------- default_config_values ----------

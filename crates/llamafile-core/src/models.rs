@@ -195,34 +195,8 @@ fn default_step() -> f64 {
 }
 
 // ============================================================================
-// Compute & Agent Config
+// Agent Config
 // ============================================================================
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum ComputeMode {
-    Cpu,
-    Gpu,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ComputeConfig {
-    pub mode: ComputeMode,
-    pub cuda: bool,
-    pub rocm: bool,
-    pub metal: bool,
-}
-
-impl Default for ComputeConfig {
-    fn default() -> Self {
-        Self {
-            mode: ComputeMode::Cpu,
-            cuda: false,
-            rocm: false,
-            metal: true, // always on, built-in on macOS
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentTool {
