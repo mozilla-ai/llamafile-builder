@@ -247,26 +247,17 @@ impl Builder {
     pub fn select_lmstudio_model(&mut self, model: LMStudioModel);
     pub fn select_quantization(&mut self, role: &str, index: usize);
 
-    // Per-role file manipulation (mixing registry model with local files, etc.)
-    pub fn use_custom_file_for_role(&mut self, role: &str, path: &Path);
+    // Custom companion files (e.g. attaching an mmproj to a local weights file)
     pub fn add_custom_companion_file(&mut self, role: &str, path: &Path);
-    pub fn remove_custom_companion_file(&mut self, role: &str);
-    pub fn select_lmstudio_file(&mut self, role: &str, index: usize);
     pub fn disable_file_role(&mut self, role: &str);  // e.g. drop mmproj for text-only
 
     // --- Configuration (FR-4) ---
     pub fn set_config_value(&mut self, key: &str, value: serde_json::Value);
     pub fn set_args_override(&mut self, raw_args: &str);  // bypass schema, use raw .args content
-    pub fn clear_args_override(&mut self);
 
     // --- GPU libraries (FR-1) ---
     pub fn add_gpu_lib(&mut self, accel: GpuAccel, os: Os);
     pub fn add_custom_gpu_lib(&mut self, path: &Path, accel: GpuAccel, os: Os);
-    pub fn remove_gpu_lib(&mut self, accel: GpuAccel, os: Os);
-    pub fn clear_gpu_libs(&mut self);
-
-    // --- Agent (FR-7, placeholder) ---
-    pub fn set_agent_config(&mut self, config: AgentConfig);
 
     // --- Output ---
     pub fn set_output_path(&mut self, path: &Path);
@@ -275,7 +266,6 @@ impl Builder {
     // All progress is observable via tracing spans and events.
     pub async fn build(&self) -> Result<PathBuf>;  // FR-3, FR-5
 
-    pub fn cancel(&self);
     pub fn set_cancel_flag(&mut self, flag: Arc<AtomicBool>);  // share a cancel flag with the caller
 }
 ```
@@ -285,7 +275,9 @@ Design notes:
 - **Component-centric**: every selection method modifies internal state that `resolved_components()` materializes into a flat list of components to assemble. This keeps the builder's internals declarative -- callers describe *what* they want, and the builder figures out the concrete files, URLs, and build steps.
 - **`resolved_args()`** lets the UI or CLI show the `.args` content that *would* be generated, before the user commits to a build. Combined with `set_args_override()`, this supports the workflow: generate from schema, review, optionally edit, then build.
 - **GPU libs are additive**: `add_gpu_lib()` adds one library at a time, allowing any combination of acceleration type and OS. `add_custom_gpu_lib()` adds a local file for a specific (accel, os) pair. This avoids a single `ComputeTarget` enum that would need to encode all possible combinations.
-- **`set_agent_config()`** is a placeholder. Agent configuration is not yet defined, so the method accepts an `AgentConfig` struct that will be fleshed out later. For now it stores the data; `build()` generates `.args.prompt` from it if enabled.
+- **Builders are rebuilt, not mutated**: CLI, TUI, and the HTTP server all reconstruct a fresh `Builder` from `SavedState` on each invocation rather than mutating a long-lived one. So removal/clear methods (for GPU libs, args overrides, companion files) live on `SavedState` instead of the `Builder` — unset a field in saved state, then rebuild.
+- **Agent (FR-7) is not yet exposed**: `AgentConfig` and the build-side handling (system-prompt file, validation warnings) exist, but no setter surfaces it through the Builder API and `SavedState` has no agent field yet. Re-add a setter when the feature ships.
+- **Cancellation uses a shared flag**: `set_cancel_flag(Arc<AtomicBool>)` lets callers share the atomic that `build()` polls. They flip the atomic themselves from the controlling task — the Builder reference is typically moved into a background task and isn't accessible from where cancel is triggered.
 
 ### Model discovery (FR-2)
 
@@ -331,16 +323,13 @@ Note: hf-hub's `download_with_progress()` does not check its own cache — it al
 
 ```rust
 pub struct Cache {
-    base_dir: PathBuf,          // e.g. ~/.llamafile-builder/
-    hf_api: hf_hub::api::tokio::Api,  // shared HF client
+    base_dir: PathBuf,          // e.g. ~/.llamafile-builder/cache/
 }
 
 impl Cache {
     pub fn new(base_dir: PathBuf) -> Self;
-    pub fn with_hf_token(self, token: &str) -> Self;
 
-    pub fn runtime_dir(&self) -> PathBuf;
-    pub fn gpu_lib_dir(&self, version: &str) -> PathBuf;
+    pub fn runtime_dir(&self) -> PathBuf;  // base_dir/bin/
 
     /// Ensure a component is available locally. Downloads if needed.
     /// For HF sources, delegates to hf-hub (shared cache).

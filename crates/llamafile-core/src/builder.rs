@@ -19,6 +19,35 @@ pub struct GpuLibSelection {
     pub accel: GpuAccel,
     pub os: Os,
     pub source: ComponentSource,
+    /// Expected download size in bytes (registry selections only).
+    pub expected_size: Option<u64>,
+    /// Expected SHA256 of the downloaded file (registry selections only).
+    pub expected_sha256: Option<String>,
+}
+
+fn gpu_accel_name(accel: GpuAccel) -> &'static str {
+    match accel {
+        GpuAccel::Cuda => "cuda",
+        GpuAccel::Rocm => "rocm",
+        GpuAccel::Vulkan => "vulkan",
+    }
+}
+
+fn gpu_lib_component(lib: &GpuLibSelection) -> Component {
+    let ext = match lib.os {
+        Os::Windows => ".dll",
+        Os::Linux => ".so",
+    };
+    Component {
+        role: ComponentRole::GpuLib {
+            accel: lib.accel,
+            os: lib.os,
+        },
+        source: lib.source.clone(),
+        zip_path: format!("ggml-{}{}", gpu_accel_name(lib.accel), ext),
+        expected_size: lib.expected_size,
+        expected_sha256: lib.expected_sha256.clone(),
+    }
 }
 
 // ============================================================================
@@ -162,25 +191,7 @@ impl Builder {
 
         // GPU libraries
         for lib in &self.gpu_libs {
-            let ext = match lib.os {
-                Os::Windows => ".dll",
-                Os::Linux => ".so",
-            };
-            let accel_name = match lib.accel {
-                GpuAccel::Cuda => "cuda",
-                GpuAccel::Rocm => "rocm",
-                GpuAccel::Vulkan => "vulkan",
-            };
-            components.push(Component {
-                role: ComponentRole::GpuLib {
-                    accel: lib.accel,
-                    os: lib.os,
-                },
-                source: lib.source.clone(),
-                zip_path: format!("ggml-{}{}", accel_name, ext),
-                expected_size: None,
-                expected_sha256: None,
-            });
+            components.push(gpu_lib_component(lib));
         }
 
         // Agent prompt
@@ -342,36 +353,11 @@ impl Builder {
         );
     }
 
-    /// Override a registry model's file for a specific role with a local file.
-    /// For example, use your own weights while keeping the registry mmproj.
-    pub fn use_custom_file_for_role(&mut self, role: &str, path: &Path) {
-        self.state.use_custom_file_for_role(
-            role.to_string(),
-            path.to_string_lossy().to_string(),
-            &self.config.models,
-        );
-    }
-
     /// Add a companion file (e.g. mmproj) to a custom model selection.
     pub fn add_custom_companion_file(&mut self, role: &str, path: &Path) {
         self.state.add_custom_companion_file(
             role.to_string(),
             path.to_string_lossy().to_string(),
-            &self.config.models,
-        );
-    }
-
-    /// Remove a companion file from a custom model selection.
-    pub fn remove_custom_companion_file(&mut self, role: &str) {
-        self.state
-            .remove_custom_companion_file(role, &self.config.models);
-    }
-
-    /// Select a specific file within an LM Studio model (by role and index).
-    pub fn select_lmstudio_file(&mut self, role: &str, index: usize) {
-        self.state.select_lmstudio_file(
-            role.to_string(),
-            index,
             &self.config.models,
         );
     }
@@ -394,18 +380,13 @@ impl Builder {
         self.args_override = Some(raw_args.to_string());
     }
 
-    pub fn clear_args_override(&mut self) {
-        self.args_override = None;
-    }
-
     // ── GPU libraries ──
 
     pub fn add_gpu_lib(&mut self, accel: GpuAccel, os: Os) {
-        let source = self.find_gpu_lib_url(accel, os);
-        if let Some(source) = source {
+        if let Some(selection) = self.find_gpu_lib(accel, os) {
             self.gpu_libs
                 .retain(|g| !(g.accel == accel && g.os == os));
-            self.gpu_libs.push(GpuLibSelection { accel, os, source });
+            self.gpu_libs.push(selection);
         }
     }
 
@@ -416,22 +397,9 @@ impl Builder {
             accel,
             os,
             source: ComponentSource::Local(path.to_path_buf()),
+            expected_size: None,
+            expected_sha256: None,
         });
-    }
-
-    pub fn remove_gpu_lib(&mut self, accel: GpuAccel, os: Os) {
-        self.gpu_libs
-            .retain(|g| !(g.accel == accel && g.os == os));
-    }
-
-    pub fn clear_gpu_libs(&mut self) {
-        self.gpu_libs.clear();
-    }
-
-    // ── Agent ──
-
-    pub fn set_agent_config(&mut self, config: AgentConfig) {
-        self.agent_config = config;
     }
 
     // ── Output ──
@@ -441,10 +409,6 @@ impl Builder {
     }
 
     // ── Execution ──
-
-    pub fn cancel(&self) {
-        self.cancel_flag.store(true, Ordering::Relaxed);
-    }
 
     /// Use an external cancel flag (shared with the caller).
     /// This allows the caller to cancel the build from outside.
@@ -748,29 +712,10 @@ impl Builder {
         }
 
         for lib in &self.gpu_libs {
-            let ext = match lib.os {
-                Os::Windows => ".dll",
-                Os::Linux => ".so",
-            };
-            let accel_name = match lib.accel {
-                GpuAccel::Cuda => "cuda",
-                GpuAccel::Rocm => "rocm",
-                GpuAccel::Vulkan => "vulkan",
-            };
-
+            let accel_name = gpu_accel_name(lib.accel);
             tracing::info!(accel = accel_name, os = ?lib.os, "preparing GPU library");
 
-            let component = Component {
-                role: ComponentRole::GpuLib {
-                    accel: lib.accel,
-                    os: lib.os,
-                },
-                source: lib.source.clone(),
-                zip_path: format!("ggml-{}{}", accel_name, ext),
-                expected_size: None,
-                expected_sha256: None,
-            };
-
+            let component = gpu_lib_component(lib);
             match self.cache.ensure(&component, self.cancel_flag.clone()).await {
                 Ok(path) => {
                     tracing::info!(path = %path.display(), "GPU library ready");
@@ -886,7 +831,7 @@ impl Builder {
         group.releases.iter().find(|r| &r.version == version).cloned()
     }
 
-    fn find_gpu_lib_url(&self, accel: GpuAccel, os: Os) -> Option<ComponentSource> {
+    fn find_gpu_lib(&self, accel: GpuAccel, os: Os) -> Option<GpuLibSelection> {
         let release = self.find_selected_release()?;
         let gpu_libs = release.gpu_libs.as_ref()?;
         let by_platform = match accel {
@@ -898,7 +843,13 @@ impl Builder {
             Os::Linux => by_platform.linux.as_ref()?,
             Os::Windows => by_platform.windows.as_ref()?,
         };
-        Some(ComponentSource::Url(lib.download_url.clone()))
+        Some(GpuLibSelection {
+            accel,
+            os,
+            source: ComponentSource::Url(lib.download_url.clone()),
+            expected_size: Some(lib.size_bytes),
+            expected_sha256: lib.sha256.clone(),
+        })
     }
 }
 
@@ -963,10 +914,6 @@ mod tests {
         let mut builder = configured_builder();
         builder.set_args_override("-m\n/zip/custom.gguf\n...");
         assert_eq!(builder.resolved_args(), "-m\n/zip/custom.gguf\n...");
-
-        builder.clear_args_override();
-        // Back to schema-generated
-        assert!(builder.resolved_args().contains("Qwen3-0.6B"));
     }
 
     // ── resolved_components ──
@@ -1044,24 +991,14 @@ mod tests {
     }
 
     #[test]
-    fn resolved_components_agent_prompt_only_when_enabled() {
-        let mut builder = configured_builder();
-        let without = builder.resolved_components();
+    fn resolved_components_no_agent_prompt_by_default() {
+        let builder = configured_builder();
+        let components = builder.resolved_components();
         assert!(
-            !without
+            !components
                 .iter()
                 .any(|c| matches!(c.role, ComponentRole::ArgsPrompt)),
             "ArgsPrompt should not appear when agent disabled"
-        );
-
-        let mut agent = AgentConfig::default();
-        agent.enabled = true;
-        builder.set_agent_config(agent);
-        let with = builder.resolved_components();
-        assert!(
-            with.iter()
-                .any(|c| matches!(c.role, ComponentRole::ArgsPrompt)),
-            "ArgsPrompt should appear when agent enabled"
         );
     }
 
@@ -1109,7 +1046,7 @@ mod tests {
     // ── GPU lib management ──
 
     #[test]
-    fn gpu_lib_deduplication_and_removal() {
+    fn gpu_lib_deduplication() {
         let mut builder = configured_builder();
 
         builder.add_gpu_lib(GpuAccel::Cuda, Os::Linux);
@@ -1126,12 +1063,42 @@ mod tests {
         // Custom libs always add regardless of registry data
         builder.add_custom_gpu_lib(Path::new("/x.dll"), GpuAccel::Cuda, Os::Windows);
         assert_eq!(builder.gpu_libs.len(), 3);
+    }
 
-        builder.remove_gpu_lib(GpuAccel::Cuda, Os::Linux);
+    #[test]
+    fn gpu_lib_vulkan_resolves_to_registry_url() {
+        // 0.10.1_alpha (first release of the default group) ships vulkan libs for
+        // both Linux and Windows. Regression guard for the original bug where
+        // GpuLibs was missing its vulkan field and serde silently dropped the section.
+        let mut builder = configured_builder();
+
+        builder.add_gpu_lib(GpuAccel::Vulkan, Os::Linux);
+        builder.add_gpu_lib(GpuAccel::Vulkan, Os::Windows);
         assert_eq!(builder.gpu_libs.len(), 2);
 
-        builder.clear_gpu_libs();
-        assert!(builder.gpu_libs.is_empty());
+        let components: Vec<_> = builder
+            .resolved_components()
+            .into_iter()
+            .filter(|c| matches!(c.role, ComponentRole::GpuLib { accel: GpuAccel::Vulkan, .. }))
+            .collect();
+        assert_eq!(components.len(), 2);
+
+        // Both must resolve to a URL from the catalog (not None, not Local).
+        for c in &components {
+            match &c.source {
+                ComponentSource::Url(u) => assert!(u.contains("vulkan"), "url is {u}"),
+                other => panic!("expected Url source, got {other:?}"),
+            }
+            // Size + sha256 must propagate from versions.json so the cache layer
+            // can short-circuit on a full match and the download layer can verify.
+            assert!(c.expected_size.is_some(), "expected_size should be populated");
+            assert!(c.expected_sha256.is_some(), "expected_sha256 should be populated");
+        }
+
+        // Filenames should map to the OS-appropriate extension.
+        let zip_paths: Vec<_> = components.iter().map(|c| c.zip_path.clone()).collect();
+        assert!(zip_paths.contains(&"ggml-vulkan.so".to_string()));
+        assert!(zip_paths.contains(&"ggml-vulkan.dll".to_string()));
     }
 
     // ── Validation ──

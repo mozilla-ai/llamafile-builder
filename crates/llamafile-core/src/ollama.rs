@@ -15,10 +15,6 @@ fn get_ollama_models_dir(custom_dir: Option<&str>) -> Option<PathBuf> {
     }
 }
 
-pub fn get_default_ollama_cache_dir() -> Option<String> {
-    get_default_ollama_dir().map(|p| p.to_string_lossy().to_string())
-}
-
 pub fn check_ollama_available(custom_dir: Option<&str>) -> bool {
     let models_dir = match get_ollama_models_dir(custom_dir) {
         Some(dir) => dir,

@@ -25,45 +25,16 @@ pub enum CacheStatus {
 /// `~/.cache/huggingface/hub/` for interoperability with llama.cpp and other tools.
 pub struct Cache {
     base_dir: PathBuf,
-    hf_token: Option<String>,
 }
 
 impl Cache {
     pub fn new(base_dir: PathBuf) -> Self {
-        Self {
-            base_dir,
-            hf_token: None,
-        }
-    }
-
-    pub fn with_hf_token(mut self, token: String) -> Self {
-        self.hf_token = Some(token);
-        self
+        Self { base_dir }
     }
 
     /// Directory for cached llamafile runtime binaries.
     pub fn runtime_dir(&self) -> PathBuf {
         self.base_dir.join("bin")
-    }
-
-    /// Directory for cached GPU libraries, versioned.
-    pub fn gpu_lib_dir(&self, version: &str) -> PathBuf {
-        let safe_version: String = version
-            .chars()
-            .map(|c| {
-                if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        self.base_dir.join("v").join(safe_version)
-    }
-
-    /// Directory for cached configuration files.
-    pub fn config_dir(&self) -> PathBuf {
-        self.base_dir.join("config")
     }
 
     /// Determine the local path where a component would be cached.
@@ -203,7 +174,7 @@ impl Cache {
                     &dest,
                     component.expected_size,
                     component.expected_sha256.as_deref(),
-                    self.hf_token.as_deref(),
+                    None,
                     resume,
                     cancel_flag,
                 )

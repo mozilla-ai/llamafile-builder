@@ -49,7 +49,4 @@ pub enum DownloadError {
 
     #[error("Authentication required (HTTP {status})")]
     AuthRequired { status: u16 },
-
-    #[error("Server does not support resume")]
-    ResumeNotSupported,
 }

@@ -875,10 +875,18 @@ mod tests {
     fn available_gpu_libs_from_selected_release() {
         let app = test_app();
         let libs = app.available_gpu_libs();
-        // The default release should have at least CUDA and/or ROCm
-        assert!(!libs.is_empty(), "default release should have GPU libs");
+        // The default release (0.10.1_alpha) ships cuda, rocm, and vulkan for
+        // Linux + Windows. Anything less means serde dropped a section (see the
+        // original vulkan regression) or the iteration skipped an accelerator.
+        assert_eq!(libs.len(), 6, "expected 3 accels × 2 OSes, got {:?}", libs);
+
+        let accels: std::collections::HashSet<_> = libs.iter().map(|l| l.accel).collect();
+        assert!(accels.contains(&GpuAccel::Cuda));
+        assert!(accels.contains(&GpuAccel::Rocm));
+        assert!(accels.contains(&GpuAccel::Vulkan));
+
         for lib in &libs {
-            assert!(lib.size > 0);
+            assert!(lib.size > 0, "zero-size lib: {:?}", lib);
         }
     }
 

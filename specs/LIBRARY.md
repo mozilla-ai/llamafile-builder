@@ -71,15 +71,14 @@ Manages downloaded files. HuggingFace models go to `~/.cache/huggingface/hub/` (
 
 ```rust
 Cache::new(base_dir: PathBuf) -> Self
-    .with_hf_token(token: String) -> Self
 
     .runtime_dir() -> PathBuf              // base_dir/bin/
-    .gpu_lib_dir(version: &str) -> PathBuf // base_dir/v/<version>/
-    .config_dir() -> PathBuf               // base_dir/config/
     .path_for(component: &Component) -> Option<PathBuf>
     .check(component: &Component) -> CacheStatus
     .ensure(component: &Component, cancel_flag: Arc<AtomicBool>) -> Result<PathBuf> // async
 ```
+
+HuggingFace auth tokens are resolved at download time via env (`HF_TOKEN`, `HUGGING_FACE_HUB_TOKEN`) or `~/.cache/huggingface/token`; there is no cache-level token setter.
 
 | Type | Variants |
 |------|----------|
@@ -183,10 +182,8 @@ Builder::new(config: BuilderConfig, cache: Cache) -> Self
 .select_ollama_model(model: OllamaModel)
 .select_lmstudio_model(model: LMStudioModel)
 .select_quantization(role: &str, index: usize)         // change quantization for a role
-.use_custom_file_for_role(role: &str, path: &Path)     // override a registry file with local
 .add_custom_companion_file(role: &str, path: &Path)    // add mmproj to custom model
-.remove_custom_companion_file(role: &str)               // remove companion file
-.select_lmstudio_file(role: &str, index: usize)        // select within LM Studio model
+.disable_file_role(role: &str)                         // e.g. drop mmproj for text-only
 ```
 
 **How registry model selection works:**
@@ -207,12 +204,6 @@ builder.select_quantization("weights", 1);  // switch weights to BF16
 builder.select_quantization("mmproj", 0);   // mmproj stays at BF16 (only option)
 ```
 
-To override a specific role with a custom local file:
-```rust
-// Use your own weights file instead of the registry one
-builder.use_custom_file_for_role("weights", Path::new("/path/to/custom.gguf"));
-```
-
 For custom models (not from registry), add companion files:
 ```rust
 builder.select_custom_model(Path::new("/path/to/weights.gguf"));
@@ -226,7 +217,6 @@ The `resolved_components()` output reflects all these per-role selections.
 ```rust
 .set_config_value(key: &str, value: serde_json::Value)
 .set_args_override(raw_args: &str)   // bypass schema generation
-.clear_args_override()
 ```
 
 ### GPU libraries
@@ -234,15 +224,9 @@ The `resolved_components()` output reflects all these per-role selections.
 ```rust
 .add_gpu_lib(accel: GpuAccel, os: Os)                         // from registry
 .add_custom_gpu_lib(path: &Path, accel: GpuAccel, os: Os)     // from disk
-.remove_gpu_lib(accel: GpuAccel, os: Os)
-.clear_gpu_libs()
 ```
 
-### Agent
-
-```rust
-.set_agent_config(config: AgentConfig)   // placeholder, FR-7
-```
+GPU selections are additive; callers that need to remove or clear entries mutate `SavedState.gpu_libs` and rebuild the `Builder` from state (see [Lifecycle](#lifecycle)).
 
 ### Output
 
@@ -253,9 +237,11 @@ The `resolved_components()` output reflects all these per-role selections.
 ### Execution
 
 ```rust
-.cancel()                          // sets cancel flag
-.build() -> Result<PathBuf>       // async, runs the 5-phase pipeline
+.set_cancel_flag(flag: Arc<AtomicBool>)   // share a cancel flag with the runtime
+.build() -> Result<PathBuf>               // async, runs the 5-phase pipeline
 ```
+
+Cancellation is triggered by the caller flipping the shared atomic — useful because the `Builder` reference is typically moved into a background task. Agent mode (FR-7) is planned but not yet surfaced through the API.
 
 Build phases (all observable via tracing):
 1. `ensure_zipalign` -- download or locate zipalign binary
@@ -349,13 +335,13 @@ Standalone functions, no Builder needed:
 ```rust
 search_models(models: &[Model], query: Option<&str>, tag: Option<&str>) -> Vec<&Model>
 system_info() -> SystemInfo
-ollama::get_default_ollama_cache_dir() -> Option<String>
 ollama::check_ollama_available(custom_dir: Option<&str>) -> bool
 ollama::get_ollama_models(custom_dir: Option<&str>) -> Vec<OllamaModel>
-lmstudio::get_default_lmstudio_cache_dir() -> Option<String>
 lmstudio::check_lmstudio_available(custom_dir: Option<&str>) -> bool
 lmstudio::get_lmstudio_models(custom_dir: Option<&str>) -> Vec<LMStudioModel>
 ```
+
+Pass `None` as `custom_dir` to use the module's built-in default (`~/.ollama` and `~/.cache/lm-studio`).
 
 
 ## Args generation
@@ -369,7 +355,6 @@ args::generate_args_from_schema(
 ) -> String
 
 args::generate_system_prompt(agent: &AgentConfig) -> String
-args::estimate_size(model_size: u64, compute: &ComputeConfig, agent: &AgentConfig) -> u64
 args::default_config_values(schema: &[ConfigSchemaItem]) -> HashMap<String, Value>
 ```
 
@@ -396,7 +381,6 @@ enum DownloadError {
     SizeMismatch { expected, actual },
     Cancelled,
     AuthRequired { status: u16 },
-    ResumeNotSupported,
 }
 ```
 

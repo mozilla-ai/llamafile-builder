@@ -364,23 +364,9 @@ impl BuildState {
         self.update_resolved_model_paths(models);
     }
 
-    pub fn select_lmstudio_file(&mut self, role: String, idx: usize, models: &[Model]) {
-        self.lmstudio_file_selections.insert(role.clone(), idx);
-        if role == "weights" {
-            self.update_output_path(models);
-        }
-        self.update_resolved_model_paths(models);
-    }
-
     pub fn add_custom_companion_file(&mut self, role: String, path: String, models: &[Model]) {
         self.custom_model_files.retain(|f| f.role != role);
         self.custom_model_files.push(CustomFile { role, path });
-        self.update_output_path(models);
-        self.update_resolved_model_paths(models);
-    }
-
-    pub fn remove_custom_companion_file(&mut self, role: &str, models: &[Model]) {
-        self.custom_model_files.retain(|f| f.role != role);
         self.update_output_path(models);
         self.update_resolved_model_paths(models);
     }
@@ -397,16 +383,6 @@ impl BuildState {
         self.update_resolved_model_paths(models);
     }
 
-    pub fn use_custom_file_for_role(&mut self, role: String, path: String, models: &[Model]) {
-        if let Some(sel) = self.model_file_selections.get_mut(&role) {
-            sel.source = FileSource::Custom;
-            sel.custom_path = Some(path);
-        }
-        if role == "weights" {
-            self.update_output_path(models);
-        }
-        self.update_resolved_model_paths(models);
-    }
 
     pub fn select_llamafile_version(
         &mut self,
@@ -643,28 +619,6 @@ mod tests {
         assert_eq!(bs.output_path, before);
     }
 
-    // ---------- use_custom_file_for_role ----------
-
-    #[test]
-    fn use_custom_file_for_role_flips_source_and_path() {
-        let models = load_models();
-        let mut bs = BuildState::default();
-        bs.select_registry_model("mistralai/Ministral-3-3B-Instruct-2512-GGUF".to_string(), &models);
-        bs.use_custom_file_for_role(
-            "weights".to_string(),
-            "/tmp/custom.gguf".to_string(),
-            &models,
-        );
-        let sel = &bs.model_file_selections["weights"];
-        assert_eq!(sel.source, FileSource::Custom);
-        assert_eq!(sel.custom_path.as_deref(), Some("/tmp/custom.gguf"));
-        assert!(bs.output_path.ends_with("custom.llamafile"));
-        assert_eq!(
-            bs.resolved_weights_filename.as_deref(),
-            Some("custom.gguf")
-        );
-    }
-
     // ---------- init_file_selections ----------
 
     #[test]
@@ -764,19 +718,6 @@ mod tests {
     }
 
     #[test]
-    fn get_gguf_filename_registry_with_custom_override() {
-        let models = load_models();
-        let mut bs = BuildState::default();
-        bs.select_registry_model("mistralai/Ministral-3-3B-Instruct-2512-GGUF".to_string(), &models);
-        bs.use_custom_file_for_role(
-            "weights".to_string(),
-            "/foo/bar/baz.gguf".to_string(),
-            &models,
-        );
-        assert_eq!(bs.get_gguf_filename(&models).as_deref(), Some("baz.gguf"));
-    }
-
-    #[test]
     fn get_gguf_filename_custom() {
         let models = load_models();
         let mut bs = BuildState::default();
@@ -872,10 +813,10 @@ mod tests {
         assert!(bs.selected_release_version.is_none());
     }
 
-    // ---------- add/remove custom companion files ----------
+    // ---------- add custom companion files ----------
 
     #[test]
-    fn add_and_remove_custom_companion_file() {
+    fn add_custom_companion_file_dedupes_by_role() {
         let models = load_models();
         let mut bs = BuildState::default();
         bs.select_custom_model("/tmp/a.gguf".to_string(), &models);
@@ -892,6 +833,7 @@ mod tests {
             Some("/tmp/mmproj.gguf")
         );
 
+        // Re-adding the same role replaces rather than duplicating.
         bs.add_custom_companion_file(
             "mmproj".to_string(),
             "/tmp/mmproj2.gguf".to_string(),
@@ -902,9 +844,5 @@ mod tests {
             bs.resolved_mmproj_path.as_deref(),
             Some("/tmp/mmproj2.gguf")
         );
-
-        bs.remove_custom_companion_file("mmproj", &models);
-        assert_eq!(bs.custom_model_files.len(), 1);
-        assert!(bs.resolved_mmproj_path.is_none());
     }
 }
