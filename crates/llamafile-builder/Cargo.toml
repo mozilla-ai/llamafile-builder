@@ -1,5 +1,5 @@
 [package]
-name = "llamafile-cli"
+name = "llamafile-builder"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,7 +10,7 @@ name = "llamafile-builder"
 path = "src/main.rs"
 
 [dependencies]
-llamafile-core = { path = "../llamafile-core" }
+llamafile-builder-core = { path = "../llamafile-builder-core" }
 clap = { version = "4", features = ["derive", "env"] }
 tokio = { workspace = true, features = ["full"] }
 serde = { workspace = true }

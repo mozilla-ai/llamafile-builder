@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use llamafile_core::config_manager::BuilderConfig;
-use llamafile_core::config_store::{BuildRecipe, ConfigStore, SavedState};
-use llamafile_core::models::*;
-use llamafile_core::cache::Cache;
-use llamafile_core::Builder;
+use llamafile_builder_core::config_manager::BuilderConfig;
+use llamafile_builder_core::config_store::{BuildRecipe, ConfigStore, SavedState};
+use llamafile_builder_core::models::*;
+use llamafile_builder_core::cache::Cache;
+use llamafile_builder_core::Builder;
 
 /// An available GPU library from the selected release.
 #[derive(Debug, Clone)]
@@ -402,7 +402,7 @@ impl App {
             return p.clone();
         }
         // Compute auto path from model source
-        let dir = llamafile_core::models::get_default_output_dir();
+        let dir = llamafile_builder_core::models::get_default_output_dir();
         if let Some(ref ollama) = self.ollama_model {
             let stem = format!("{}_{}", ollama.model_name, ollama.tag);
             return format!("{}/{}.llamafile", dir, stem);
@@ -434,7 +434,7 @@ impl App {
             return "manually overridden, check .args".to_string();
         }
 
-        let defaults = llamafile_core::args::default_config_values(&self.config.config_schema);
+        let defaults = llamafile_builder_core::args::default_config_values(&self.config.config_schema);
         let mut parts = Vec::new();
 
         // Mode: server+CLI or CLI-only
@@ -592,7 +592,7 @@ impl App {
                 .validate()
                 .iter()
                 .filter_map(|m| match m {
-                    llamafile_core::ValidationMessage::Error(s) => Some(s.clone()),
+                    llamafile_builder_core::ValidationMessage::Error(s) => Some(s.clone()),
                     _ => None,
                 })
                 .collect(),
@@ -722,13 +722,13 @@ mod tests {
 
     fn test_config() -> BuilderConfig {
         BuilderConfig {
-            versions: llamafile_core::config_manager::parse_config_data(
+            versions: llamafile_builder_core::config_manager::parse_config_data(
                 include_str!("../../../data/versions.json"),
             ).unwrap(),
-            models: llamafile_core::config_manager::parse_config_data(
+            models: llamafile_builder_core::config_manager::parse_config_data(
                 include_str!("../../../data/models.json"),
             ).unwrap(),
-            config_schema: llamafile_core::config_manager::parse_config_data(
+            config_schema: llamafile_builder_core::config_manager::parse_config_data(
                 include_str!("../../../data/config.json"),
             ).unwrap(),
             config_version: 1,

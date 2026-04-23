@@ -80,7 +80,7 @@ impl<S: Subscriber> Layer<S> for BroadcastLogLayer {
 }
 
 // ============================================================================
-// Message extraction (same pattern as llamafile-tui/src/log_layer.rs)
+// Message extraction (same pattern as llamafile-builder-tui/src/log_layer.rs)
 // ============================================================================
 
 #[derive(Default)]

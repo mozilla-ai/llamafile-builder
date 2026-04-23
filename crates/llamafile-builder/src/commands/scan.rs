@@ -1,7 +1,7 @@
-use llamafile_core::models::format_size;
+use llamafile_builder_core::models::format_size;
 
 pub fn ollama_list(custom_dir: Option<&str>, json: bool) {
-    let available = llamafile_core::ollama::check_ollama_available(custom_dir);
+    let available = llamafile_builder_core::ollama::check_ollama_available(custom_dir);
     if !available {
         if json {
             println!("[]");
@@ -12,7 +12,7 @@ pub fn ollama_list(custom_dir: Option<&str>, json: bool) {
         return;
     }
 
-    let models = llamafile_core::ollama::get_ollama_models(custom_dir);
+    let models = llamafile_builder_core::ollama::get_ollama_models(custom_dir);
     if json {
         println!("{}", serde_json::to_string_pretty(&models).unwrap());
         return;
@@ -34,7 +34,7 @@ pub fn ollama_list(custom_dir: Option<&str>, json: bool) {
 }
 
 pub fn lmstudio_list(custom_dir: Option<&str>, json: bool) {
-    let available = llamafile_core::lmstudio::check_lmstudio_available(custom_dir);
+    let available = llamafile_builder_core::lmstudio::check_lmstudio_available(custom_dir);
     if !available {
         if json {
             println!("[]");
@@ -45,7 +45,7 @@ pub fn lmstudio_list(custom_dir: Option<&str>, json: bool) {
         return;
     }
 
-    let models = llamafile_core::lmstudio::get_lmstudio_models(custom_dir);
+    let models = llamafile_builder_core::lmstudio::get_lmstudio_models(custom_dir);
     if json {
         println!("{}", serde_json::to_string_pretty(&models).unwrap());
         return;

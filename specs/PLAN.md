@@ -20,7 +20,7 @@ Related docs:
 
 ## Phase 0: Workspace scaffolding -- DONE
 
-Cargo workspace with `llamafile-core` (library) and `llamafile-cli` (binary) crates. JSON config files in `data/` at workspace root. Old `src-tauri/` untouched.
+Cargo workspace with `llamafile-builder-core` (library) and `llamafile-builder` (binary) crates. JSON config files in `data/` at workspace root. Old `src-tauri/` untouched.
 
 ---
 

@@ -3,7 +3,7 @@
 Build the CLI (see [README.md](README.md#building) for cross-compilation):
 
 ```bash
-make                # or: cargo build -p llamafile-cli
+make                # or: cargo build -p llamafile-builder
 alias lb=./target/debug/llamafile-builder
 ```
 

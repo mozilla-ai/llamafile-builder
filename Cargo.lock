@@ -1196,7 +1196,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
-name = "llamafile-cli"
+name = "llamafile-builder"
 version = "0.1.0"
 dependencies = [
  "axum",
@@ -1204,7 +1204,7 @@ dependencies = [
  "clap",
  "directories",
  "http-body-util",
- "llamafile-core",
+ "llamafile-builder-core",
  "open",
  "serde",
  "serde_json",
@@ -1221,7 +1221,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "llamafile-core"
+name = "llamafile-builder-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
@@ -1245,13 +1245,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "llamafile-tui"
+name = "llamafile-builder-tui"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "crossterm",
  "directories",
- "llamafile-core",
+ "llamafile-builder-core",
  "ratatui",
  "serde_json",
  "tempfile",

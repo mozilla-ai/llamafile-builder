@@ -1,4 +1,4 @@
-use llamafile_core::config_manager::BuilderConfig;
+use llamafile_builder_core::config_manager::BuilderConfig;
 
 pub fn run(config: &BuilderConfig, json: bool) {
     if json {
@@ -36,7 +36,7 @@ pub fn run(config: &BuilderConfig, json: bool) {
                 "  {} - {} ({})",
                 release.version,
                 release.release_date,
-                llamafile_core::models::format_size(release.size_bytes)
+                llamafile_builder_core::models::format_size(release.size_bytes)
             );
             if !desc_short.is_empty() {
                 println!("    {}", desc_short);

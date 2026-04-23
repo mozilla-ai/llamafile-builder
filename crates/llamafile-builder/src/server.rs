@@ -15,9 +15,9 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 use utoipa::OpenApi;
 
-use llamafile_core::cache::Cache;
-use llamafile_core::config_manager::BuilderConfig;
-use llamafile_core::config_store::{ConfigStore, CustomGpuLib, SavedState};
+use llamafile_builder_core::cache::Cache;
+use llamafile_builder_core::config_manager::BuilderConfig;
+use llamafile_builder_core::config_store::{ConfigStore, CustomGpuLib, SavedState};
 
 use crate::log_forwarder;
 
@@ -210,7 +210,7 @@ async fn mutate_recipe(
     Ok(Json(json!({"ok": true, "id": recipe.id.to_string()})))
 }
 
-fn make_builder(config: &BuilderConfig, saved: &SavedState) -> Result<llamafile_core::Builder, String> {
+fn make_builder(config: &BuilderConfig, saved: &SavedState) -> Result<llamafile_builder_core::Builder, String> {
     let cache = Cache::new(crate::get_cache_dir());
     state_file::build_from_state(saved, config.clone(), cache)
 }
@@ -236,7 +236,7 @@ struct ModelQuery {
     params(("search" = Option<String>, Query, description = "Filter by name/org"),
            ("tag" = Option<String>, Query, description = "Filter by tag")))]
 async fn get_models(State(st): State<Arc<AppState>>, Query(q): Query<ModelQuery>) -> Json<Value> {
-    let models = llamafile_core::search_models(
+    let models = llamafile_builder_core::search_models(
         &st.config.models, q.search.as_deref(), q.tag.as_deref(),
     );
     Json(serde_json::to_value(&models).unwrap())
@@ -260,19 +260,19 @@ async fn get_config_schema(State(st): State<Arc<AppState>>) -> Json<Value> {
 #[utoipa::path(get, path = "/api/system-info", tag = "Data",
     summary = "Get host system information")]
 async fn get_system_info() -> Json<Value> {
-    Json(serde_json::to_value(&llamafile_core::system_info()).unwrap())
+    Json(serde_json::to_value(&llamafile_builder_core::system_info()).unwrap())
 }
 
 #[utoipa::path(get, path = "/api/ollama/models", tag = "Data",
     summary = "Scan local Ollama models")]
 async fn get_ollama_models() -> Json<Value> {
-    Json(serde_json::to_value(&llamafile_core::ollama::get_ollama_models(None)).unwrap())
+    Json(serde_json::to_value(&llamafile_builder_core::ollama::get_ollama_models(None)).unwrap())
 }
 
 #[utoipa::path(get, path = "/api/lmstudio/models", tag = "Data",
     summary = "Scan local LM Studio models")]
 async fn get_lmstudio_models() -> Json<Value> {
-    Json(serde_json::to_value(&llamafile_core::lmstudio::get_lmstudio_models(None)).unwrap())
+    Json(serde_json::to_value(&llamafile_builder_core::lmstudio::get_lmstudio_models(None)).unwrap())
 }
 
 // ============================================================================
@@ -401,7 +401,7 @@ async fn set_model_file(State(st): State<Arc<AppState>>, Path(id): Path<String>,
 async fn set_ollama_model(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
     let name = body.get("name").and_then(|v| v.as_str())
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'name'"))?.to_string();
-    let models = llamafile_core::ollama::get_ollama_models(None);
+    let models = llamafile_builder_core::ollama::get_ollama_models(None);
     let model = models.into_iter().find(|m| m.display_name == name)
         .ok_or_else(|| api_err(StatusCode::NOT_FOUND, format!("Ollama model not found: {name}")))?;
     mutate_recipe(&st, &id, |s| {
@@ -415,7 +415,7 @@ async fn set_ollama_model(State(st): State<Arc<AppState>>, Path(id): Path<String
 async fn set_lmstudio_model(State(st): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult {
     let name = body.get("name").and_then(|v| v.as_str())
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "missing 'name'"))?.to_string();
-    let models = llamafile_core::lmstudio::get_lmstudio_models(None);
+    let models = llamafile_builder_core::lmstudio::get_lmstudio_models(None);
     let model = models.into_iter().find(|m| m.dir_name == name || m.display_name == name)
         .ok_or_else(|| api_err(StatusCode::NOT_FOUND, format!("LM Studio model not found: {name}")))?;
     mutate_recipe(&st, &id, |s| {
@@ -531,8 +531,8 @@ async fn get_validate(State(st): State<Arc<AppState>>, Path(id): Path<String>) -
     let builder = make_builder(&st.config, &recipe.state)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let msgs: Vec<Value> = builder.validate().iter().map(|m| match m {
-        llamafile_core::ValidationMessage::Warning(s) => json!({"level": "warning", "message": s}),
-        llamafile_core::ValidationMessage::Error(s) => json!({"level": "error", "message": s}),
+        llamafile_builder_core::ValidationMessage::Warning(s) => json!({"level": "warning", "message": s}),
+        llamafile_builder_core::ValidationMessage::Error(s) => json!({"level": "error", "message": s}),
     }).collect();
     Ok(Json(Value::Array(msgs)))
 }
@@ -762,7 +762,7 @@ async fn start_build(
 
     if !builder.can_build() {
         let errors: Vec<String> = builder.validate().iter().filter_map(|m| match m {
-            llamafile_core::ValidationMessage::Error(s) => Some(s.clone()),
+            llamafile_builder_core::ValidationMessage::Error(s) => Some(s.clone()),
             _ => None,
         }).collect();
         return Err(api_err(StatusCode::BAD_REQUEST, errors.join("; ")));
@@ -816,13 +816,13 @@ mod tests {
 
     fn test_config() -> BuilderConfig {
         BuilderConfig {
-            versions: llamafile_core::config_manager::parse_config_data(
+            versions: llamafile_builder_core::config_manager::parse_config_data(
                 include_str!("../../../data/versions.json"),
             ).unwrap(),
-            models: llamafile_core::config_manager::parse_config_data(
+            models: llamafile_builder_core::config_manager::parse_config_data(
                 include_str!("../../../data/models.json"),
             ).unwrap(),
-            config_schema: llamafile_core::config_manager::parse_config_data(
+            config_schema: llamafile_builder_core::config_manager::parse_config_data(
                 include_str!("../../../data/config.json"),
             ).unwrap(),
             config_version: 1,

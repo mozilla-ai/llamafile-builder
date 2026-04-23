@@ -123,8 +123,8 @@ fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
                 }
                 Focus::Model => {
                     // Scan local model sources
-                    let ollama_models = llamafile_core::ollama::get_ollama_models(None);
-                    let lmstudio_models = llamafile_core::lmstudio::get_lmstudio_models(None);
+                    let ollama_models = llamafile_builder_core::ollama::get_ollama_models(None);
+                    let lmstudio_models = llamafile_builder_core::lmstudio::get_lmstudio_models(None);
 
                     // Determine initial tab and cursor from current selection
                     let tab = app.model_source;
@@ -298,7 +298,7 @@ fn handle_model_popup(app: &mut App, key: event::KeyEvent) -> bool {
 
         match *tab {
             ModelTab::Registry => {
-                let filtered = llamafile_core::search_models(
+                let filtered = llamafile_builder_core::search_models(
                     &app.config.models,
                     Some(search.as_str()).filter(|s| !s.is_empty()),
                     None,
@@ -508,7 +508,7 @@ fn handle_config_popup(app: &mut App, key: event::KeyEvent) -> bool {
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
                     if let Some(entry) = entry {
-                        let defaults = llamafile_core::args::default_config_values(&app.config.config_schema);
+                        let defaults = llamafile_builder_core::args::default_config_values(&app.config.config_schema);
                         let mut need_rebuild = false;
                         match entry {
                             ConfigEntry::SectionHeader { toggle_key: Some(k), .. } => {
@@ -564,7 +564,7 @@ fn handle_config_popup(app: &mut App, key: event::KeyEvent) -> bool {
                 KeyCode::Left => {
                     // Decrease slider value
                     if let Some(ConfigEntry::Slider { key: k, min, step, .. }) = entry {
-                        let defaults = llamafile_core::args::default_config_values(&app.config.config_schema);
+                        let defaults = llamafile_builder_core::args::default_config_values(&app.config.config_schema);
                         let current = app.config_values.get(k)
                             .or_else(|| defaults.get(k))
                             .and_then(|v| v.as_f64())
@@ -578,7 +578,7 @@ fn handle_config_popup(app: &mut App, key: event::KeyEvent) -> bool {
                 KeyCode::Right => {
                     // Increase slider value
                     if let Some(ConfigEntry::Slider { key: k, max, step, .. }) = entry {
-                        let defaults = llamafile_core::args::default_config_values(&app.config.config_schema);
+                        let defaults = llamafile_builder_core::args::default_config_values(&app.config.config_schema);
                         let current = app.config_values.get(k)
                             .or_else(|| defaults.get(k))
                             .and_then(|v| v.as_f64())
@@ -675,7 +675,7 @@ fn handle_args_edit(app: &mut App, key: event::KeyEvent) -> bool {
 }
 
 fn open_config_popup(app: &mut App) {
-    let defaults = llamafile_core::args::default_config_values(&app.config.config_schema);
+    let defaults = llamafile_builder_core::args::default_config_values(&app.config.config_schema);
     let entries = crate::config_ui::flatten_schema(&app.config.config_schema, &app.config_values, &defaults);
     let first_interactive = entries.iter().position(|e| e.is_interactive()).unwrap_or(0);
     app.popup = Popup::ConfigEdit {
@@ -689,7 +689,7 @@ fn open_config_popup(app: &mut App) {
 }
 
 fn rebuild_config_entries(app: &mut App) {
-    let defaults = llamafile_core::args::default_config_values(&app.config.config_schema);
+    let defaults = llamafile_builder_core::args::default_config_values(&app.config.config_schema);
     let entries = crate::config_ui::flatten_schema(&app.config.config_schema, &app.config_values, &defaults);
     if let Popup::ConfigEdit { entries: ref mut e, .. } = app.popup {
         *e = entries;

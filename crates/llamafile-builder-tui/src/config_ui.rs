@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use llamafile_core::models::ConfigSchemaItem;
+use llamafile_builder_core::models::ConfigSchemaItem;
 
 /// A flattened, UI-ready config entry derived from the schema.
 #[derive(Debug, Clone)]

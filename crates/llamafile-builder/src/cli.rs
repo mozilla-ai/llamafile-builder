@@ -266,11 +266,11 @@ pub struct BuildArgs {
 }
 
 impl Cli {
-    pub fn parse_update_mode(&self) -> llamafile_core::UpdateMode {
+    pub fn parse_update_mode(&self) -> llamafile_builder_core::UpdateMode {
         match self.update_mode.as_str() {
-            "always" => llamafile_core::UpdateMode::Always,
-            "never" => llamafile_core::UpdateMode::Never,
-            _ => llamafile_core::UpdateMode::Ask,
+            "always" => llamafile_builder_core::UpdateMode::Always,
+            "never" => llamafile_builder_core::UpdateMode::Never,
+            _ => llamafile_builder_core::UpdateMode::Ask,
         }
     }
 }

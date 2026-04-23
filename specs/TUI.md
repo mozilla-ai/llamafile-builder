@@ -3,7 +3,7 @@
 The TUI provides an interactive terminal wizard for configuring and building llamafiles, using [ratatui](https://ratatui.rs/) and [crossterm](https://docs.rs/crossterm/).
 
 ```bash
-cargo run -p llamafile-tui    # debug
+cargo run -p llamafile-builder-tui    # debug
 make release                  # or build release, then run:
 ./target/release/llamafile-builder-tui
 ```
@@ -104,5 +104,5 @@ The TUI does not use any UI-facing progress types from the core library. Instead
 - `ratatui` — terminal UI framework
 - `crossterm` — terminal event handling
 - `tui-textarea` — text editor widget (used for .args and output path)
-- `llamafile-core` — the core library (no UI dependencies)
+- `llamafile-builder-core` — the core library (no UI dependencies)
 - `tokio` — async runtime for non-blocking builds

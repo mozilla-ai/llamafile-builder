@@ -10,9 +10,9 @@ Split the builder into a **core library** (pure Rust, no UI dependencies) and **
 This directly addresses the central problem: the builder's logic is currently trapped inside a renderer-dependent binary. By extracting it into a library, any interface -- CLI, HTTP server, TUI, or a future native GUI -- can use it without pulling in each other's dependencies.
 
 ```
-llamafile-core (library crate, zero UI deps)
+llamafile-builder-core (library crate, zero UI deps)
        |
-       +-- llamafile-cli (single binary)
+       +-- llamafile-builder (single binary)
        |       |
        |       +-- CLI mode (default)
        |       |     $ llamafile-builder build --model llama3 -o out.llamafile
@@ -25,7 +25,7 @@ llamafile-core (library crate, zero UI deps)
        |             $ llamafile-builder --interactive
        |             JSON-RPC over stdio
        |
-       +-- llamafile-tui (optional separate binary)
+       +-- llamafile-builder-tui (optional separate binary)
                ratatui, links directly to core
 ```
 
@@ -57,7 +57,7 @@ Before detailing the design, here is how each requirement maps to an architectur
 | NFR-12 Llamafile modification | `Builder` operates on components, not monolithic state; future `open()` feasible |
 
 
-## Core library (`llamafile-core`)
+## Core library (`llamafile-builder-core`)
 
 The library is the single source of truth for all builder logic. It has no UI, no CLI parsing, no HTTP handling. Its public API is what every interface layer calls.
 
@@ -515,9 +515,9 @@ Methods mirror the core library API one-to-one. This mode is useful for integrat
 
 Note: the `cancel` method is not yet implemented in JSON-RPC mode (planned for a future phase).
 
-### TUI (`llamafile-tui`)
+### TUI (`llamafile-builder-tui`)
 
-A separate binary using `ratatui` + `crossterm`. Links directly to `llamafile-core` (no IPC). The TUI provides an interactive wizard in the terminal without requiring a browser or display server.
+A separate binary using `ratatui` + `crossterm`. Links directly to `llamafile-builder-core` (no IPC). The TUI provides an interactive wizard in the terminal without requiring a browser or display server.
 
 The TUI is fully functional: version/model/quantization selection via popup menus, schema-driven configuration editing, multi-select GPU library picker, `.args` editor with `tui-textarea`, real-time log pane with level filtering, and non-blocking builds via `tokio::spawn`.
 
@@ -530,7 +530,7 @@ See [TUI.md](TUI.md) for full reference.
 llamafile-builder/
 +-- Cargo.toml                        # Workspace root
 +-- crates/
-|   +-- llamafile-core/               # Library, zero UI deps
+|   +-- llamafile-builder-core/               # Library, zero UI deps
 |   |   +-- Cargo.toml
 |   |   +-- src/
 |   |   |   +-- lib.rs                # Public API re-exports
@@ -552,7 +552,7 @@ llamafile-builder/
 |   |       +-- models.json
 |   |       +-- config.json
 |   |
-|   +-- llamafile-cli/                # Binary: CLI + server + interactive
+|   +-- llamafile-builder/                # Binary: CLI + server + interactive
 |   |   +-- Cargo.toml
 |   |   +-- src/
 |   |       +-- main.rs               # Entry point, mode dispatch
@@ -568,7 +568,7 @@ llamafile-builder/
 |   |       +-- interactive.rs        # JSON-RPC over stdio
 |   |       +-- progress.rs           # Terminal progress display (indicatif)
 |   |
-|   +-- llamafile-tui/                # Terminal UI wizard
+|   +-- llamafile-builder-tui/                # Terminal UI wizard
 |       +-- Cargo.toml
 |       +-- src/
 |           +-- main.rs              # Entry point, tokio runtime, build task spawning

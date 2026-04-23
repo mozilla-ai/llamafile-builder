@@ -20,8 +20,8 @@ use ratatui::prelude::*;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use llamafile_core::config_manager::ConfigManager;
-use llamafile_core::config_store::ConfigStore;
+use llamafile_builder_core::config_manager::ConfigManager;
+use llamafile_builder_core::config_store::ConfigStore;
 
 use app::{App, BuildStatus, LogEntry, LogLevel};
 
@@ -181,7 +181,7 @@ async fn run_app(
                     app.add_log(LogLevel::Info, format!(
                         "Build complete: {} ({})",
                         path,
-                        llamafile_core::models::format_size(size)
+                        llamafile_builder_core::models::format_size(size)
                     ));
                     build_result_rx = None;
                 }
@@ -247,8 +247,8 @@ async fn run_app(
 
                     tokio::spawn(async move {
                         // Reconstruct builder inside the task (on a Send-compatible thread)
-                        let cache = llamafile_core::cache::Cache::new(cache_dir);
-                        let mut builder = llamafile_core::Builder::new(config, cache);
+                        let cache = llamafile_builder_core::cache::Cache::new(cache_dir);
+                        let mut builder = llamafile_builder_core::Builder::new(config, cache);
                         builder.set_cancel_flag(shared_cancel);
 
                         // Apply state

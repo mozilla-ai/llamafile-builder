@@ -1,6 +1,6 @@
-use llamafile_core::cache::Cache;
-use llamafile_core::config_manager::BuilderConfig;
-use llamafile_core::models::{GpuAccel, Os};
+use llamafile_builder_core::cache::Cache;
+use llamafile_builder_core::config_manager::BuilderConfig;
+use llamafile_builder_core::models::{GpuAccel, Os};
 
 use crate::cli::BuildArgs;
 use crate::state_file::{self, SavedState};
@@ -10,7 +10,7 @@ pub async fn run(args: &BuildArgs, config: BuilderConfig, cache: Cache) -> Resul
     let saved = if let Some(ref model) = args.model {
         saved_state_from_args(args, model)?
     } else {
-        let store = llamafile_core::ConfigStore::new(crate::get_recipes_dir());
+        let store = llamafile_builder_core::ConfigStore::new(crate::get_recipes_dir());
         let config_dir = crate::get_config_dir();
         let recipe = state_file::get_or_create_current_recipe(&store, &config_dir)?;
         let mut s = recipe.state;
@@ -24,10 +24,10 @@ pub async fn run(args: &BuildArgs, config: BuilderConfig, cache: Cache) -> Resul
     let msgs = builder.validate();
     for msg in &msgs {
         match msg {
-            llamafile_core::validation::ValidationMessage::Warning(s) => {
+            llamafile_builder_core::validation::ValidationMessage::Warning(s) => {
                 tracing::warn!("{s}");
             }
-            llamafile_core::validation::ValidationMessage::Error(s) => {
+            llamafile_builder_core::validation::ValidationMessage::Error(s) => {
                 tracing::error!("{s}");
             }
         }

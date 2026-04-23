@@ -1,6 +1,6 @@
-# llamafile-core Library API
+# llamafile-builder-core Library API
 
-This document describes the public API of `llamafile-core`, the library crate that all interface layers (CLI, JSON-RPC, HTTP server, web UI) call.
+This document describes the public API of `llamafile-builder-core`, the library crate that all interface layers (CLI, JSON-RPC, HTTP server, web UI) call.
 
 **Zero UI dependencies.** The library depends only on: `tokio`, `reqwest`, `serde`, `serde_json`, `sha2`, `hex`, `thiserror`, `tracing`, `directories`, `dirs`, `futures-util`, `url`, `hf-hub`.
 
@@ -10,7 +10,7 @@ This document describes the public API of `llamafile-core`, the library crate th
 ## Quick start
 
 ```rust
-use llamafile_core::{Builder, BuilderConfig, Cache, ConfigManager};
+use llamafile_builder_core::{Builder, BuilderConfig, Cache, ConfigManager};
 
 // 1. Load configuration
 let cm = ConfigManager::new(config_dir);

@@ -21,7 +21,7 @@ TARGETS := \
 	aarch64-unknown-linux-gnu \
 	x86_64-pc-windows-gnu
 
-CRATES := -p llamafile-cli -p llamafile-tui
+CRATES := -p llamafile-builder -p llamafile-builder-tui
 
 # Default: build for current platform in debug mode
 .PHONY: build

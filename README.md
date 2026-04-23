@@ -71,11 +71,11 @@ JSON-RPC 2.0 over stdin/stdout — one request per line, one response per line, 
 The builder is split into a **core library** (pure Rust, no UI dependencies) and **thin interface layers** that call into it:
 
 ```
-llamafile-core (library)
+llamafile-builder-core (library)
        |
-       +-- llamafile-cli  (one binary: CLI + --serve + --interactive)
+       +-- llamafile-builder  (one binary: CLI + --serve + --interactive)
        |
-       +-- llamafile-tui  (one binary: ratatui)
+       +-- llamafile-builder-tui  (one binary: ratatui)
 ```
 
 The core owns all state, validation, downloads, and assembly. Interface layers only handle argument parsing, rendering, and protocol translation. This keeps the logic portable to headless environments (CI, containers, SSH) and makes each layer independently testable. See [`specs/ARCHITECTURE.md`](specs/ARCHITECTURE.md) for the details.
@@ -124,9 +124,9 @@ Binaries are 2.5–4 MB, statically linked for TLS (rustls).
 ```
 .
 ├── crates/
-│   ├── llamafile-core/   pure library — state, downloads, assembly, validation
-│   ├── llamafile-cli/    CLI + --serve (HTTP) + --interactive (JSON-RPC)
-│   └── llamafile-tui/    ratatui wizard
+│   ├── llamafile-builder-core/   pure library — state, downloads, assembly, validation
+│   ├── llamafile-builder/    CLI + --serve (HTTP) + --interactive (JSON-RPC)
+│   └── llamafile-builder-tui/    ratatui wizard
 ├── data/                 default versions.json, models.json, config.json (bundled fallback)
 ├── web/                  static assets served by --serve
 ├── specs/                design documents — see below
@@ -143,7 +143,7 @@ The `specs/` directory is the authoritative source of truth.
 |----------|-------|
 | [`specs/README.md`](specs/README.md) | What a llamafile is, what the builder does, requirements (FR-1…, NFR-1…) |
 | [`specs/ARCHITECTURE.md`](specs/ARCHITECTURE.md) | Core library / interface-layer split, data types, build pipeline |
-| [`specs/LIBRARY.md`](specs/LIBRARY.md) | Public API reference for `llamafile-core` |
+| [`specs/LIBRARY.md`](specs/LIBRARY.md) | Public API reference for `llamafile-builder-core` |
 | [`specs/CLI.md`](specs/CLI.md) | CLI command reference and examples |
 | [`specs/TUI.md`](specs/TUI.md) | TUI layout, navigation, popups |
 | [`specs/JSON-RPC.md`](specs/JSON-RPC.md) | JSON-RPC method reference (interactive mode + HTTP server) |

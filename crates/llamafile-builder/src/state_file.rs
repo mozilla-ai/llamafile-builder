@@ -1,17 +1,17 @@
 use std::path::Path;
 
 // Re-export SavedState from core — single source of truth
-pub use llamafile_core::config_store::SavedState;
-use llamafile_core::config_store::{BuildRecipe, ConfigStore};
+pub use llamafile_builder_core::config_store::SavedState;
+use llamafile_builder_core::config_store::{BuildRecipe, ConfigStore};
 
 /// Create a fully configured Builder from saved state + defaults.
 /// This is the single place where defaults are applied at build time.
 pub fn build_from_state(
     saved: &SavedState,
-    config: llamafile_core::BuilderConfig,
-    cache: llamafile_core::Cache,
-) -> Result<llamafile_core::Builder, String> {
-    let mut builder = llamafile_core::Builder::new(config, cache);
+    config: llamafile_builder_core::BuilderConfig,
+    cache: llamafile_builder_core::Cache,
+) -> Result<llamafile_builder_core::Builder, String> {
+    let mut builder = llamafile_builder_core::Builder::new(config, cache);
 
     // Apply defaults for anything not explicitly configured
     if saved.version_group.is_none() && saved.version.is_none() && saved.custom_runtime.is_none() {
@@ -34,7 +34,7 @@ pub fn build_from_state(
 /// Apply saved state to a Builder (without defaults — use build_from_state instead).
 fn apply_to_builder(
     saved: &SavedState,
-    builder: &mut llamafile_core::Builder,
+    builder: &mut llamafile_builder_core::Builder,
 ) -> Result<(), String> {
     // Version
     if let Some(ref runtime) = saved.custom_runtime {
@@ -196,15 +196,15 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn test_config() -> llamafile_core::BuilderConfig {
-        llamafile_core::BuilderConfig {
-            versions: llamafile_core::config_manager::parse_config_data(
+    fn test_config() -> llamafile_builder_core::BuilderConfig {
+        llamafile_builder_core::BuilderConfig {
+            versions: llamafile_builder_core::config_manager::parse_config_data(
                 include_str!("../../../data/versions.json"),
             ).unwrap(),
-            models: llamafile_core::config_manager::parse_config_data(
+            models: llamafile_builder_core::config_manager::parse_config_data(
                 include_str!("../../../data/models.json"),
             ).unwrap(),
-            config_schema: llamafile_core::config_manager::parse_config_data(
+            config_schema: llamafile_builder_core::config_manager::parse_config_data(
                 include_str!("../../../data/config.json"),
             ).unwrap(),
             config_version: 1,
@@ -212,8 +212,8 @@ mod tests {
         }
     }
 
-    fn test_cache() -> llamafile_core::Cache {
-        llamafile_core::Cache::new(std::path::PathBuf::from("/tmp/test-cache"))
+    fn test_cache() -> llamafile_builder_core::Cache {
+        llamafile_builder_core::Cache::new(std::path::PathBuf::from("/tmp/test-cache"))
     }
 
     #[test]

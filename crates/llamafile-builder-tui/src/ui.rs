@@ -3,7 +3,7 @@ use ratatui::widgets::*;
 
 use crate::app;
 use crate::app::*;
-use llamafile_core::models::{GpuAccel, Os, OllamaModel, LMStudioModel, format_size};
+use llamafile_builder_core::models::{GpuAccel, Os, OllamaModel, LMStudioModel, format_size};
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let chunks = if app.log_expanded {
@@ -137,7 +137,7 @@ fn draw_dashboard(frame: &mut Frame, app: &App, area: Rect) {
                     .unwrap_or(f.quantizations.first().map(|q| q.name.as_str()).unwrap_or(""));
                 f.quantizations.iter().find(|q| q.name == qname)
                     .or(f.quantizations.first())
-                    .map(|q| llamafile_core::models::format_size(q.size_bytes))
+                    .map(|q| llamafile_builder_core::models::format_size(q.size_bytes))
             })
         }).unwrap_or_default();
         let label = format!(" {} Weights    {} ({})", marker, quant, size);
@@ -259,7 +259,7 @@ fn draw_dashboard(frame: &mut Frame, app: &App, area: Rect) {
             } else {
                 format!("{}s", elapsed)
             };
-            format!("   Done: {} ({}) in {}", path, llamafile_core::models::format_size(*size), time_str)
+            format!("   Done: {} ({}) in {}", path, llamafile_builder_core::models::format_size(*size), time_str)
         }
         BuildStatus::Failed { error } => {
             let max_len = area.width.saturating_sub(14) as usize; // "   Failed: " + margin
@@ -284,8 +284,8 @@ fn draw_dashboard(frame: &mut Frame, app: &App, area: Rect) {
             "░".repeat(empty),
             dl.percentage,
             dl.filename,
-            llamafile_core::models::format_size(dl.bytes_downloaded),
-            llamafile_core::models::format_size(dl.bytes_total),
+            llamafile_builder_core::models::format_size(dl.bytes_downloaded),
+            llamafile_builder_core::models::format_size(dl.bytes_total),
         );
         frame.render_widget(
             Paragraph::new(dl_text).style(Style::default().fg(Color::Cyan)),
@@ -513,7 +513,7 @@ fn draw_model_popup(
                 rows[1],
             );
 
-            let filtered = llamafile_core::search_models(
+            let filtered = llamafile_builder_core::search_models(
                 &app.config.models,
                 Some(search).filter(|s| !s.is_empty()),
                 None,
@@ -534,7 +534,7 @@ fn draw_model_popup(
                     let label = format!(
                         " {} {} — {} {} [{}]",
                         marker, model.name, model.parameters,
-                        llamafile_core::models::format_size(size), tags
+                        llamafile_builder_core::models::format_size(size), tags
                     );
                     let style = if i == selected {
                         Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
@@ -652,7 +652,7 @@ fn draw_config_popup_full(
 ) {
     use crate::config_ui::ConfigEntry;
 
-    let defaults = llamafile_core::args::default_config_values(&app.config.config_schema);
+    let defaults = llamafile_builder_core::args::default_config_values(&app.config.config_schema);
 
     let height = (entries.len() + 5).min(22) as u16;
     let area = centered_rect(68, height, frame.area());
@@ -811,7 +811,7 @@ fn draw_save_recipe_popup(frame: &mut Frame, input: &str) {
 
 fn draw_load_recipe_popup(
     frame: &mut Frame,
-    recipes: &[llamafile_core::config_store::BuildRecipe],
+    recipes: &[llamafile_builder_core::config_store::BuildRecipe],
     selected: usize,
 ) {
     let height = (recipes.len() + 4).max(5).min(14) as u16;

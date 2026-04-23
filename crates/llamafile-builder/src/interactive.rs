@@ -2,9 +2,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{self, BufRead, Write};
 
-use llamafile_core::cache::Cache;
-use llamafile_core::config_manager::BuilderConfig;
-use llamafile_core::config_store::{ConfigStore, SavedState};
+use llamafile_builder_core::cache::Cache;
+use llamafile_builder_core::config_manager::BuilderConfig;
+use llamafile_builder_core::config_store::{ConfigStore, SavedState};
 
 use crate::state_file;
 
@@ -101,7 +101,7 @@ impl Session {
             "list_models" => {
                 let search = params.get("search").and_then(|v| v.as_str());
                 let tag = params.get("tag").and_then(|v| v.as_str());
-                let models = llamafile_core::search_models(&self.config.models, search, tag);
+                let models = llamafile_builder_core::search_models(&self.config.models, search, tag);
                 Ok(serde_json::to_value(&models).unwrap())
             }
             "show_model" => {
@@ -110,13 +110,13 @@ impl Session {
                     .ok_or((-32000, format!("model not found: {id}")))?;
                 Ok(serde_json::to_value(model).unwrap())
             }
-            "system_info" => Ok(serde_json::to_value(&llamafile_core::system_info()).unwrap()),
+            "system_info" => Ok(serde_json::to_value(&llamafile_builder_core::system_info()).unwrap()),
             "config_schema" => Ok(serde_json::to_value(&self.config.config_schema).unwrap()),
             "list_ollama_models" => {
-                Ok(serde_json::to_value(&llamafile_core::ollama::get_ollama_models(None)).unwrap())
+                Ok(serde_json::to_value(&llamafile_builder_core::ollama::get_ollama_models(None)).unwrap())
             }
             "list_lmstudio_models" => {
-                Ok(serde_json::to_value(&llamafile_core::lmstudio::get_lmstudio_models(None)).unwrap())
+                Ok(serde_json::to_value(&llamafile_builder_core::lmstudio::get_lmstudio_models(None)).unwrap())
             }
 
             // ── Recipe management ──
@@ -194,7 +194,7 @@ impl Session {
             }
             "set_ollama_model" => {
                 let name = str_param(params, "name")?;
-                let models = llamafile_core::ollama::get_ollama_models(None);
+                let models = llamafile_builder_core::ollama::get_ollama_models(None);
                 let model = models.into_iter().find(|m| m.display_name == name)
                     .ok_or((-32000, format!("Ollama model not found: {name}")))?;
                 self.mutate_state(|s| {
@@ -204,7 +204,7 @@ impl Session {
             }
             "set_lmstudio_model" => {
                 let name = str_param(params, "name")?;
-                let models = llamafile_core::lmstudio::get_lmstudio_models(None);
+                let models = llamafile_builder_core::lmstudio::get_lmstudio_models(None);
                 let model = models.into_iter().find(|m| m.dir_name == name || m.display_name == name)
                     .ok_or((-32000, format!("LM Studio model not found: {name}")))?;
                 self.mutate_state(|s| {
@@ -262,8 +262,8 @@ impl Session {
             "validate" => {
                 let builder = self.make_builder()?;
                 let msgs: Vec<Value> = builder.validate().iter().map(|m| match m {
-                    llamafile_core::ValidationMessage::Warning(s) => serde_json::json!({"level": "warning", "message": s}),
-                    llamafile_core::ValidationMessage::Error(s) => serde_json::json!({"level": "error", "message": s}),
+                    llamafile_builder_core::ValidationMessage::Warning(s) => serde_json::json!({"level": "warning", "message": s}),
+                    llamafile_builder_core::ValidationMessage::Error(s) => serde_json::json!({"level": "error", "message": s}),
                 }).collect();
                 Ok(Value::Array(msgs))
             }
@@ -289,7 +289,7 @@ impl Session {
         }
     }
 
-    fn make_builder(&self) -> Result<llamafile_core::Builder, (i32, String)> {
+    fn make_builder(&self) -> Result<llamafile_builder_core::Builder, (i32, String)> {
         let cache = Cache::new(crate::get_cache_dir());
         state_file::build_from_state(&self.current_state(), self.config.clone(), cache)
             .map_err(|e| (-32000, e))
@@ -335,7 +335,7 @@ pub async fn run(config: BuilderConfig) -> Result<(), String> {
                 Ok(builder) => {
                     if !builder.can_build() {
                         let errors: Vec<String> = builder.validate().iter().filter_map(|m| match m {
-                            llamafile_core::ValidationMessage::Error(s) => Some(s.clone()),
+                            llamafile_builder_core::ValidationMessage::Error(s) => Some(s.clone()),
                             _ => None,
                         }).collect();
                         Response::err(req.id, -32000, errors.join("; "))

@@ -9,8 +9,8 @@ use clap::Parser;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use llamafile_core::cache::Cache;
-use llamafile_core::config_manager::ConfigManager;
+use llamafile_builder_core::cache::Cache;
+use llamafile_builder_core::config_manager::ConfigManager;
 
 use cli::{Cli, Commands, LmStudioCmd, ModelsCmd, OllamaCmd};
 
@@ -98,10 +98,10 @@ async fn main() -> ExitCode {
 
     // Check for config updates (NFR-9, NFR-10)
     match cm.update_mode() {
-        llamafile_core::UpdateMode::Always => {
+        llamafile_builder_core::UpdateMode::Always => {
             tracing::info!("checking for config updates");
             match cm.check_for_updates().await {
-                Ok(llamafile_core::UpdateStatus::ConfigUpdateAvailable(update)) => {
+                Ok(llamafile_builder_core::UpdateStatus::ConfigUpdateAvailable(update)) => {
                     tracing::info!("config update available, applying");
                     if let Err(e) = cm.apply_update(&update) {
                         tracing::warn!("failed to apply config update: {e}");
@@ -113,13 +113,13 @@ async fn main() -> ExitCode {
                         }
                     }
                 }
-                Ok(llamafile_core::UpdateStatus::BuilderUpdateRequired { min_version }) => {
+                Ok(llamafile_builder_core::UpdateStatus::BuilderUpdateRequired { min_version }) => {
                     tracing::warn!(
                         min_version,
                         "remote config requires a newer builder version"
                     );
                 }
-                Ok(llamafile_core::UpdateStatus::UpToDate) => {
+                Ok(llamafile_builder_core::UpdateStatus::UpToDate) => {
                     tracing::debug!("config is up to date");
                 }
                 Err(e) => {
@@ -127,12 +127,12 @@ async fn main() -> ExitCode {
                 }
             }
         }
-        llamafile_core::UpdateMode::Ask => {
+        llamafile_builder_core::UpdateMode::Ask => {
             // In CLI mode, Ask behaves like Always with a log message.
             // A graphical frontend would show a dialog instead.
             tracing::info!("checking for config updates (use --update-mode=never to skip)");
             match cm.check_for_updates().await {
-                Ok(llamafile_core::UpdateStatus::ConfigUpdateAvailable(update)) => {
+                Ok(llamafile_builder_core::UpdateStatus::ConfigUpdateAvailable(update)) => {
                     tracing::info!("config update available, applying");
                     if let Err(e) = cm.apply_update(&update) {
                         tracing::warn!("failed to apply config update: {e}");
@@ -143,13 +143,13 @@ async fn main() -> ExitCode {
                         }
                     }
                 }
-                Ok(llamafile_core::UpdateStatus::BuilderUpdateRequired { min_version }) => {
+                Ok(llamafile_builder_core::UpdateStatus::BuilderUpdateRequired { min_version }) => {
                     tracing::warn!(
                         min_version,
                         "remote config requires a newer builder version"
                     );
                 }
-                Ok(llamafile_core::UpdateStatus::UpToDate) => {
+                Ok(llamafile_builder_core::UpdateStatus::UpToDate) => {
                     tracing::debug!("config is up to date");
                 }
                 Err(e) => {
@@ -157,7 +157,7 @@ async fn main() -> ExitCode {
                 }
             }
         }
-        llamafile_core::UpdateMode::Never => {}
+        llamafile_builder_core::UpdateMode::Never => {}
     }
 
     if cli.serve {
@@ -220,7 +220,7 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some(Commands::SystemInfo) => {
-            let info = llamafile_core::system_info::system_info();
+            let info = llamafile_builder_core::system_info::system_info();
             if cli.json {
                 println!("{}", serde_json::to_string_pretty(&info).unwrap());
             } else {
@@ -243,7 +243,7 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some(Commands::Recipe { ref cmd }) => {
-            let store = llamafile_core::ConfigStore::new(get_recipes_dir());
+            let store = llamafile_builder_core::ConfigStore::new(get_recipes_dir());
             let config_dir = get_config_dir();
             match commands::recipe::run(cmd, &config, &store, &config_dir, cli.json) {
                 Ok(()) => ExitCode::SUCCESS,

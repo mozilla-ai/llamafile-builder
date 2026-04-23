@@ -1,5 +1,5 @@
-use llamafile_core::config_manager::BuilderConfig;
-use llamafile_core::models::{format_size, search_models};
+use llamafile_builder_core::config_manager::BuilderConfig;
+use llamafile_builder_core::models::{format_size, search_models};
 
 pub fn list(config: &BuilderConfig, search: Option<&str>, tag: Option<&str>, json: bool) {
     let models = search_models(&config.models, search, tag);

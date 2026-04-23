@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use llamafile_core::cache::Cache;
-use llamafile_core::config_manager::BuilderConfig;
-use llamafile_core::config_store::{ConfigStore, SavedState};
-use llamafile_core::Builder;
+use llamafile_builder_core::cache::Cache;
+use llamafile_builder_core::config_manager::BuilderConfig;
+use llamafile_builder_core::config_store::{ConfigStore, SavedState};
+use llamafile_builder_core::Builder;
 
 use crate::cli::RecipeCmd;
 use crate::state_file;
@@ -111,7 +111,7 @@ pub fn run(
             tracing::info!("custom model file set to {}", path.display());
         }
         RecipeCmd::SetOllamaModel { name } => {
-            let models = llamafile_core::ollama::get_ollama_models(None);
+            let models = llamafile_builder_core::ollama::get_ollama_models(None);
             let model = models.into_iter().find(|m| m.display_name == *name)
                 .ok_or_else(|| format!("Ollama model '{}' not found locally. Use 'ollama list' to see available models.", name))?;
             recipe.state.ollama_model = Some(model);
@@ -122,7 +122,7 @@ pub fn run(
             tracing::info!("Ollama model set to {}", name);
         }
         RecipeCmd::SetLmstudioModel { name } => {
-            let models = llamafile_core::lmstudio::get_lmstudio_models(None);
+            let models = llamafile_builder_core::lmstudio::get_lmstudio_models(None);
             let model = models.into_iter().find(|m| m.dir_name == *name || m.display_name == *name)
                 .ok_or_else(|| format!("LM Studio model '{}' not found locally. Use 'lm-studio list' to see available models.", name))?;
             recipe.state.lmstudio_model = Some(model);
@@ -218,7 +218,7 @@ pub fn run(
 }
 
 fn show_recipe(
-    recipe: &llamafile_core::config_store::BuildRecipe,
+    recipe: &llamafile_builder_core::config_store::BuildRecipe,
     config: &BuilderConfig,
     json: bool,
 ) -> Result<(), String> {
@@ -259,9 +259,9 @@ fn show_recipe(
     if let Some(ref path) = saved.custom_model_file {
         println!("Model:         custom ({})", path);
     } else if let Some(ref m) = saved.ollama_model {
-        println!("Model:         [Ollama] {} ({})", m.display_name, llamafile_core::models::format_size(m.size_bytes));
+        println!("Model:         [Ollama] {} ({})", m.display_name, llamafile_builder_core::models::format_size(m.size_bytes));
     } else if let Some(ref m) = saved.lmstudio_model {
-        println!("Model:         [LM Studio] {} ({})", m.display_name, llamafile_core::models::format_size(m.total_size_bytes));
+        println!("Model:         [LM Studio] {} ({})", m.display_name, llamafile_builder_core::models::format_size(m.total_size_bytes));
     } else {
         let model_id = saved.model_id.as_deref()
             .or(builder.state().selected_model_id.as_deref());
@@ -311,7 +311,7 @@ fn show_recipe(
     }
 
     // Config values
-    let all_values = llamafile_core::args::default_config_values(&config.config_schema);
+    let all_values = llamafile_builder_core::args::default_config_values(&config.config_schema);
     println!();
     println!("Configuration (.args parameters):");
     let mut keys: Vec<_> = all_values.keys().collect();
