@@ -13,7 +13,7 @@ const BUILDER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Default remote URL for fetching updated config files (GitHub raw content).
 const DEFAULT_REMOTE_URL: &str =
-    "https://raw.githubusercontent.com/Mozilla-Ocho/llamafile-builder/main/data";
+    "https://raw.githubusercontent.com/mozilla-ai/llamafile-builder/main/data";
 
 /// Versioned envelope around a JSON config file.
 #[derive(Debug, Deserialize)]
