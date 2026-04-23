@@ -1,1 +1,0 @@
-{"default":{"identifier":"default","description":"Default capabilities for llamafile builder","local":true,"windows":["main"],"permissions":["core:default","dialog:default","dialog:allow-save","dialog:allow-open","dialog:allow-ask","dialog:allow-confirm","dialog:allow-message","fs:default","shell:allow-open","opener:default"]}}

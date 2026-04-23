@@ -1,10 +1,6 @@
 # Rust
 /target/
-/src-tauri/target/
 **/*.rs.bk
-
-# Tauri (legacy, to be removed)
-/src-tauri/WixTools/
 
 # Node (if using for dev tooling)
 node_modules/

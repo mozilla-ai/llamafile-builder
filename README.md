@@ -130,7 +130,6 @@ Binaries are 2.5–4 MB, statically linked for TLS (rustls).
 ├── data/                 default versions.json, models.json, config.json (bundled fallback)
 ├── web/                  static assets served by --serve
 ├── specs/                design documents — see below
-├── src-tauri/            legacy Tauri app (pre-split, retained for reference)
 ├── Cargo.toml            workspace manifest
 └── Makefile              native + cross-compile build targets
 ```
@@ -147,7 +146,6 @@ The `specs/` directory is the authoritative source of truth.
 | [`specs/CLI.md`](specs/CLI.md) | CLI command reference and examples |
 | [`specs/TUI.md`](specs/TUI.md) | TUI layout, navigation, popups |
 | [`specs/JSON-RPC.md`](specs/JSON-RPC.md) | JSON-RPC method reference (interactive mode + HTTP server) |
-| [`CLEAN.md`](CLEAN.md) | Recent cleanup pass (vulkan fix, dead-code removals, spec/code alignment) |
 
 ## License
 
