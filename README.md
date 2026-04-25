@@ -129,6 +129,7 @@ Binaries are 2.5–4 MB, statically linked for TLS (rustls).
 │   └── llamafile-builder-tui/    ratatui wizard
 ├── data/                 default versions.json, models.json, config.json (bundled fallback)
 ├── web/                  static assets served by --serve
+├── assets/icons/         icon masters (icon.png 512×512, icon.icns, icon.ico) for future packaging
 ├── specs/                design documents — see below
 ├── Cargo.toml            workspace manifest
 └── Makefile              native + cross-compile build targets

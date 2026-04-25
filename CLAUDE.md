@@ -17,7 +17,8 @@ The project is split into a **core library** (pure Rust, zero UI dependencies) a
 │   ├── llamafile-builder/        CLI binary + --serve (HTTP) + --interactive (JSON-RPC)
 │   └── llamafile-builder-tui/    TUI binary (ratatui)
 ├── data/                         default versions.json, models.json, config.json
-├── web/                          static assets served by `--serve`
+├── web/                          static assets served by `--serve` (incl. favicon)
+├── assets/icons/                 icon masters (PNG/ICNS/ICO) for future packaging
 ├── specs/                        design documents — authoritative source of truth
 ├── Cargo.toml                    workspace manifest (members = ["crates/*"])
 ├── Makefile                      native + cross-compile build targets
