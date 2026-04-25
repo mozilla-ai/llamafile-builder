@@ -150,4 +150,4 @@ The `specs/` directory is the authoritative source of truth.
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+Apache 2.0. See [`LICENSE`](LICENSE).
