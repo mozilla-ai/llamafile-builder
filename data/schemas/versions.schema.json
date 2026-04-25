@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llamafile-builder/schemas/versions.schema.json",
+  "title": "Llamafile Builder Versions Registry",
+  "description": "Schema for versions.json - defines available llamafile runtime versions",
+  "type": "object",
+  "required": ["config_version", "data"],
+  "properties": {
+    "config_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Schema version number. Incremented when the format changes."
+    },
+    "min_builder_version": {
+      "type": "string",
+      "description": "Minimum builder version required to use this config (semver, e.g. '0.1.0')"
+    },
+    "data": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/VersionGroup" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "VersionGroup": {
+      "type": "object",
+      "description": "A group of related llamafile releases (e.g., all 0.9.x versions)",
+      "required": ["name", "tag", "releases"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name for the version group (e.g., 'llamafile 0.9', 'llamafile 0.10')"
+        },
+        "tag": {
+          "type": "string",
+          "enum": ["latest", "stable", "legacy"],
+          "description": "Release channel tag. 'latest' for newest features, 'stable' for production-ready, 'legacy' for older versions."
+        },
+        "description": {
+          "type": "string",
+          "description": "Brief description of this version group's features. Supports markdown links."
+        },
+        "default": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, this version group is selected by default when no version is specified"
+        },
+        "releases": {
+          "type": "array",
+          "description": "Individual releases within this version group, ordered newest first",
+          "items": {
+            "$ref": "#/$defs/Release"
+          },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "Release": {
+      "type": "object",
+      "description": "A specific llamafile release",
+      "required": ["version", "release_date", "download_url", "size_bytes", "sha256"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "Version string (e.g., '0.9.3', '0.10.0 - commit 11f4446')"
+        },
+        "description": {
+          "type": "string",
+          "description": "Brief description of this release's changes. Supports markdown links to release notes."
+        },
+        "release_date": {
+          "type": "string",
+          "format": "date",
+          "description": "Release date in ISO 8601 format (YYYY-MM-DD)"
+        },
+        "download_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Direct download URL for the llamafile binary"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "File size in bytes"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 checksum of the file for integrity verification"
+        },
+        "zipalign_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Direct download URL for the zipalign binary for this release"
+        },
+        "zipalign_size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "File size of the zipalign binary in bytes"
+        },
+        "zipalign_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 checksum of the zipalign binary"
+        },
+        "gpu_libs": {
+          "$ref": "#/$defs/GpuLibs",
+          "description": "Optional GPU library downloads for this release"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GpuLibs": {
+      "type": "object",
+      "description": "GPU libraries available for different backends",
+      "properties": {
+        "cuda": {
+          "$ref": "#/$defs/GpuLibsByPlatform",
+          "description": "CUDA libraries for NVIDIA GPUs"
+        },
+        "rocm": {
+          "$ref": "#/$defs/GpuLibsByPlatform",
+          "description": "ROCm libraries for AMD GPUs"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GpuLibsByPlatform": {
+      "type": "object",
+      "description": "GPU library downloads by platform",
+      "properties": {
+        "linux": {
+          "$ref": "#/$defs/GpuLibrary",
+          "description": "Linux shared library (.so)"
+        },
+        "windows": {
+          "$ref": "#/$defs/GpuLibrary",
+          "description": "Windows DLL (.dll)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GpuLibrary": {
+      "type": "object",
+      "description": "A downloadable GPU library",
+      "required": ["download_url", "size_bytes"],
+      "properties": {
+        "download_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Direct download URL for the library"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "File size in bytes"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 checksum for integrity verification"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

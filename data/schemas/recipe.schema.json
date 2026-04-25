@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llamafile-builder/schemas/recipe.schema.json",
+  "title": "Llamafile Builder Recipe",
+  "description": "Schema for a named build recipe stored in ~/.llamafile-builder/recipes/{uuid}.json",
+  "type": "object",
+  "required": ["id", "created_at", "updated_at", "state"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique recipe identifier (UUID v4)"
+    },
+    "name": {
+      "type": "string",
+      "description": "Optional human-readable name assigned by the user"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 creation timestamp"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 last-modified timestamp"
+    },
+    "state": { "$ref": "#/$defs/SavedState" }
+  },
+  "$defs": {
+    "SavedState": {
+      "type": "object",
+      "description": "The build configuration. Sparse during interactive use; all defaults resolved when saved via `config save`.",
+      "additionalProperties": false,
+      "properties": {
+        "version_group": {
+          "type": "string",
+          "description": "Version group name from versions.json (e.g. 'llamafile-0.9')"
+        },
+        "version": {
+          "type": "string",
+          "description": "Specific release version (e.g. '0.9.3')"
+        },
+        "custom_runtime": {
+          "type": "string",
+          "description": "Absolute path to a custom llamafile runtime binary. Mutually exclusive with version_group/version."
+        },
+        "model_id": {
+          "type": "string",
+          "description": "Registry model ID from models.json (e.g. 'Qwen/Qwen3-0.6B-GGUF'). Mutually exclusive with custom_model_file, ollama_model, lmstudio_model."
+        },
+        "custom_model_file": {
+          "type": "string",
+          "description": "Absolute path to a local .gguf model file. Mutually exclusive with model_id, ollama_model, lmstudio_model."
+        },
+        "ollama_model": { "$ref": "#/$defs/OllamaModel" },
+        "lmstudio_model": { "$ref": "#/$defs/LMStudioModel" },
+        "quantizations": {
+          "type": "object",
+          "description": "Per-role quantization overrides. Keys are file roles (e.g. 'weights', 'mmproj'), values are quantization names (e.g. 'Q4_K_M').",
+          "additionalProperties": { "type": "string" }
+        },
+        "config_values": {
+          "type": "object",
+          "description": "Runtime config overrides keyed by config schema key. Values are JSON scalars (string, number, boolean).",
+          "additionalProperties": {}
+        },
+        "args_file": {
+          "type": "string",
+          "description": "Absolute path to a custom .args file. When set, config_values are ignored."
+        },
+        "output_path": {
+          "type": "string",
+          "description": "Output path for the built .llamafile"
+        },
+        "gpu_libs": {
+          "type": "array",
+          "description": "GPU acceleration library specs to bundle (e.g. 'cuda-12.4-linux-x86_64')",
+          "items": { "type": "string" }
+        },
+        "custom_zipalign": {
+          "type": "string",
+          "description": "Absolute path to a custom zipalign binary"
+        }
+      }
+    },
+    "OllamaModel": {
+      "type": "object",
+      "description": "A local Ollama model (from `ollama list`)",
+      "required": ["modelName", "tag", "displayName", "weightsPath", "sizeBytes"],
+      "additionalProperties": false,
+      "properties": {
+        "modelName": { "type": "string" },
+        "tag": { "type": "string" },
+        "displayName": { "type": "string" },
+        "weightsPath": { "type": "string" },
+        "sizeBytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "LMStudioModel": {
+      "type": "object",
+      "description": "A local LM Studio model",
+      "required": ["dirName", "displayName", "dirPath", "files", "totalSizeBytes"],
+      "additionalProperties": false,
+      "properties": {
+        "dirName": { "type": "string" },
+        "displayName": { "type": "string" },
+        "dirPath": { "type": "string" },
+        "files": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LMStudioFile" }
+        },
+        "totalSizeBytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "LMStudioFile": {
+      "type": "object",
+      "required": ["filename", "path", "sizeBytes", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "filename": { "type": "string" },
+        "path": { "type": "string" },
+        "sizeBytes": { "type": "integer", "minimum": 0 },
+        "role": { "type": "string" }
+      }
+    }
+  }
+}

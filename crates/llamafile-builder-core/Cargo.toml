@@ -1,0 +1,28 @@
+[package]
+name = "llamafile-builder-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core library for building llamafiles — no UI dependencies"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+directories = { workspace = true }
+dirs = { workspace = true }
+tokio = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true }
+futures-util = { workspace = true }
+url = { workspace = true }
+hf-hub = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = "1"
+tempfile = "3"
+temp-env = "0.3"

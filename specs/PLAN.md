@@ -1,0 +1,178 @@
+# Implementation Plan: New llamafile-builder Architecture
+
+## Context
+
+The llamafile-builder is being rewritten from a monolithic Tauri desktop app into a Rust workspace with a core library (zero UI dependencies) and thin interface layers (CLI, TUI, HTTP server, JSON-RPC, web UI). This solves the fundamental problem that the builder's logic (downloading, configuring, assembling) is trapped inside renderer-dependent binaries that break on various platforms (WebKit in Snap, WGPU on Intel Macs).
+
+Related docs:
+- `specs/README.md` -- requirements (FR-1..7, NFR-1..13)
+- `specs/ARCHITECTURE.md` -- architecture decisions
+- `specs/LIBRARY.md` -- core library API
+- `specs/CLI.md` -- CLI usage
+- `specs/TUI.md` -- TUI reference
+- `specs/JSON-RPC.md` -- JSON-RPC protocol
+- `specs/CODE_REVIEW.md` -- which existing code was reused
+
+**Primary source code**: dioxus branch at `~/workspace/llamafile-builder-worktrees/add-dioxus/`
+**Target directory**: `~/workspace/llamafile-builder-worktrees/new_architecture/`
+
+---
+
+## Phase 0: Workspace scaffolding -- DONE
+
+Cargo workspace with `llamafile-builder-core` (library) and `llamafile-builder` (binary) crates. JSON config files in `data/` at workspace root.
+
+---
+
+## Phase 1: Data types and state management -- DONE
+
+`error.rs`, `models.rs` (all data types + Component model), `state.rs` (BuildState with 20 tests). Types adapted from dioxus branch `crates/models/`.
+
+---
+
+## Phase 2: Args, file ops, scanners, system info -- DONE
+
+`args.rs` (schema-driven .args generation, 16 tests), `file_ops.rs`, `zipalign.rs` (with ENOEXEC fallback), `ollama.rs` (6 tests), `lmstudio.rs` (7 tests), `system_info.rs` (real memory/GPU detection, 2 tests). 53 tests total at this point.
+
+---
+
+## Phase 3: Downloads and cache -- DONE
+
+`download.rs` (HTTP downloads with resume, SHA256, tracing, 17 tests), `cache.rs` (Cache with `check`/`ensure`, hf-hub integration for HF sources, 10 tests). 81 tests total.
+
+---
+
+## Phase 4: ConfigManager, validation, and Builder API -- DONE
+
+`config_manager.rs` (load from disk with bundled fallbacks, remote update checking, 6 tests), `validation.rs` (required components, context length, GPU compat, zipalign availability, 5 tests), `agent.rs` (placeholder), `builder.rs` (full Builder API with `resolved_components()`, `resolved_args()`, `validate()`, `build()`, 13 tests). 105 tests total.
+
+---
+
+## Phase 5: CLI interface (one-shot mode) -- DONE
+
+`cli.rs` (clap), `commands/` (versions, models, build, scan), `main.rs`. Tracing-based observability (no UI-facing progress types in core). Exit codes 0/1/2/3/4/5. Config update checking wired in for Always/Ask modes. `search_models()` in core library. All core types re-exported from `lib.rs`.
+
+---
+
+## Phase 5a: Config versioning -- DONE
+
+JSON config files carry version metadata in an envelope format:
+```json
+{ "config_version": 1, "min_builder_version": "0.1.0", "data": [ ... ] }
+```
+`ConfigManager::load()` parses both envelope and bare-array formats. `check_for_updates()` compares versions and detects when a builder update is required.
+
+---
+
+## Phase 5b: HuggingFace downloads via hf-hub -- DONE
+
+Model downloads use the `hf-hub` crate and the shared HuggingFace cache at `~/.cache/huggingface/hub/`. Models in `models.json` use `"source": "hf"` with `filename` fields; the builder produces `ComponentSource::HuggingFace` which is resolved by the Cache via hf-hub's API.
+
+Key design decisions:
+- `hf_hub::Cache::from_env()` is used for local cache checks (pure filesystem, no network).
+- `download_with_progress()` is called only on cache miss (it doesn't check its own cache).
+- Lock file errors are surfaced to the user (not auto-removed — could be a concurrent download).
+- No fallback to our own HTTP downloader for HF sources (interoperability with llama.cpp is the priority).
+
+---
+
+## Phase 5c: Zipalign as a managed dependency -- DONE
+
+zipalign is downloaded and cached automatically from `zipalign_url` in each release entry in `versions.json`. The builder tries: custom zipalign → cached download → PATH lookup. The builder downloads it as phase 1 of the build pipeline, before any other component.
+
+---
+
+## Phase 5d: Multi-step CLI -- DONE
+
+State is persisted to `~/.llamafile-builder/build-state.json` between invocations. `SavedState` is the universal intermediate representation: both one-shot mode and multi-step mode go through `build_from_state()` to create a configured Builder. Subcommands: `recipe set-*`, `recipe show`, `recipe show-args`, `recipe reset`.
+
+---
+
+## Phase 5e: JSON-RPC interactive mode -- DONE
+
+`--interactive` mode exposes the Builder API over JSON-RPC 2.0 on stdin/stdout. 20 methods mirroring the Builder API. Stateful session with in-memory SavedState. Progress notifications pushed during builds.
+
+Missing (deferred): `cancel` method.
+
+---
+
+## Phase 5f: TUI with ratatui -- DONE
+
+Full terminal UI wizard using `ratatui` and `crossterm`. Dashboard form with popup editors for each parameter. Multi-select GPU library picker driven by `versions.json` data. Schema-driven configuration editor. `.args` and output path editing via `tui-textarea`. Real-time log pane with level filtering. Non-blocking builds via `tokio::spawn` with shared cancel flag. Elapsed time display.
+
+See `specs/TUI.md` for full reference.
+
+Key design decisions:
+- Tracing is the sole observability mechanism — the TUI has a custom `tracing::Layer` that captures events via `mpsc` channel.
+- Build phase and download progress are extracted from structured tracing fields in log messages.
+- The build task receives cloned state and reconstructs the Builder in the spawned task (must be `Send`-compatible).
+- No `#[tracing::instrument]` on async functions (creates `!Send` spans).
+
+---
+
+## Phase 5g: Spec alignment -- DONE
+
+Audit and update all spec documents to match the implementation. Document the TUI, HF download strategy, tracing-only observability, config envelope format, and zip_path semantics. Add plan items for missing features (Ollama/LM Studio in TUI + JSON-RPC). Also includes the `config` → `recipe` rename across all interfaces (CLI subcommand, JSON-RPC methods, HTTP endpoints, filesystem storage dir, specs).
+
+---
+
+## Phase 6a: Named build recipes (ConfigStore) -- DONE
+
+**Goal**: Build configurations are named, UUID-identified, and shared across all interfaces. Multiple clients can work on different recipes simultaneously.
+
+- **Core**: `config_store.rs` with `BuildRecipe`, `ConfigStore`, `SavedState` (moved from CLI). `resolve_defaults()` for full snapshots at save time. Short UUID prefix matching in `find_by_name_or_id`. 14 unit tests.
+- **CLI**: migrated from single `build-state.json` to `ConfigStore`. Subcommand `recipe new/list/load/save/delete`. Current recipe tracked via pointer file. Every mutation auto-persists and shows `[recipe: ...]`. `recipe save` resolves defaults for reproducibility.
+- **HTTP server**: all state endpoints scoped under `/api/recipes/:id/...`. Recipe CRUD (`POST/GET/DELETE /api/recipes`, `PUT .../name`). `mutate_recipe` helper for DRY load-modify-save. Multi-client verified with independent recipes. 17 server tests.
+- **JSON-RPC**: added `create_recipe`, `list_recipes`, `load_recipe`, `save_recipe`, `delete_recipe`, `list_ollama_models`, `list_lmstudio_models`. Session tracks current recipe ID; all mutations auto-persist via ConfigStore.
+- **TUI**: integrated ConfigStore. Ctrl+S saves recipe (with name prompt, resolves defaults). Ctrl+L loads from saved recipes. `to_saved_state()` / `load_from_recipe()` sync between App fields and SavedState. Status bar shows ^S/^L hints.
+
+---
+
+## Phase 6b: HTTP server and SSE -- DONE
+
+**Goal**: `--serve` mode exposes REST API + SSE for the web UI.
+
+`server.rs` built with Axum. All planned endpoints implemented. Key design decisions as planned: SSE via `tokio::sync::broadcast`, CORS permissive, static file serving via `tower-http::ServeDir` with SPA fallback to `index.html`, `--serve`/`--port`/`--web-dir`/`--no-open` CLI flags.
+
+Also added beyond plan: `POST /api/recipes/:id/state/ollama-model` and `POST /api/recipes/:id/state/lmstudio-model` for Ollama/LM Studio model selection via HTTP.
+
+17 server unit tests pass. Verified curl-testable per NFR-12.
+
+---
+
+## Phase 7: Web UI -- DONE (first pass)
+
+**Goal**: Browser-based dashboard UI served by `llamafile-builder --serve`.
+
+### Implemented:
+- `web/index.html` — two-column shell: accordion sections left, build panel right
+- `web/styles.css` — same design language (dark theme, JetBrains Mono, orange accent); no sidebar/step-wizard layout
+- `web/app.js` — complete plain-JS implementation; no framework, no build step
+
+### Design (TUI-derived dashboard, not step wizard):
+- Accordion sections matching TUI Focus rows: Version, Model, Weights, Mmproj, Output, Config, GPU, Advanced
+- Model section: Registry/Ollama/LM Studio/Local File tabs, searchable
+- Config section: schema-driven (dropdown, slider, text, bool toggle)
+- GPU section: checkboxes driven by selected version's `gpu_libs`
+- Build panel: Validate, Preview .args, Reset, Build button
+- SSE build progress via `fetch()` + `ReadableStream` (POST /api/recipes/:id/build)
+- Recipe ID stored in `sessionStorage`; auto-created on first load, restored on refresh
+
+### Key decisions:
+- No recipe management UI — use CLI or API directly; avoids duplicating backend features
+- `fetch()` streaming (not `EventSource`) since build endpoint is POST
+- Event delegation for all section interactions — only one listener per section body
+
+### All `cargo test --workspace` passes (105+ tests).
+
+---
+
+## Future work
+
+### Ollama and LM Studio model selection in TUI
+
+The TUI model popup has Registry/Ollama/LM Studio tabs for browsing, but selecting an Ollama or LM Studio model and building from it needs end-to-end testing and polish.
+
+### JSON-RPC cancellation
+
+Add a `cancel` method to the JSON-RPC protocol so long-running builds/downloads can be interrupted by the client.

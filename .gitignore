@@ -1,10 +1,6 @@
 # Rust
-/src-tauri/target/
+/target/
 **/*.rs.bk
-Cargo.lock
-
-# Tauri
-/src-tauri/WixTools/
 
 # Node (if using for dev tooling)
 node_modules/

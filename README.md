@@ -1,157 +1,153 @@
 # llamafile Builder
 
-A desktop application for building custom [llamafiles](https://github.com/Mozilla-Ocho/llamafile) with bundled models and configurations.
+A tool for assembling [llamafiles](https://github.com/Mozilla-Ocho/llamafile) — single-file executables that bundle an inference runtime together with model weights, a configuration, and optional GPU acceleration libraries.
 
-![llamafile Builder Screenshot](docs/screenshot.png)
+A llamafile itself is an [APE](https://justine.lol/ape.html) (Actually Portable Executable) that uses its ZIP container for extra data: the `llamafile` binary, one or more GGUF weight files, a `.args` configuration file, and optional `ggml-*.so`/`ggml-*.dll` GPU libraries. These components are combined using [`zipalign`](https://github.com/jart/zipalign). llamafile-builder is the "pick and mix" front-end for that workflow: it selects the components, downloads the ones that aren't already on disk, generates the configuration file, and invokes `zipalign` to produce the final executable.
 
-## Features
+## What it does
 
-- **Version Selection** — Choose from stable, latest, or legacy llamafile runtime versions
-- **Model Browser** — Search and filter models from Hugging Face with various quantization options
-- **Configuration** — Set server parameters (host, port, context length, threads, etc.)
-- **Compute Target** — Build CPU-only or GPU-accelerated (CUDA, ROCm, Metal) llamafiles
-- **Agent Mode** — Create agentfiles with bundled tools and custom system instructions
-- **One-Click Build** — Downloads weights, bundles runtime, and creates a single executable
+- **Runtime selection** — picks a llamafile runtime and matching `zipalign` binary from a versioned catalog. Downloads are cached; people who are building from source may also point at a freshly compiled binary.
+- **Model selection** — browses a curated registry holding a HuggingFace subset of tested models, scans local Ollama and LM Studio caches, or accepts an arbitrary local `.gguf` file. Per-role quantization choice (weights, mmproj) where applicable.
+- **Configuration** — allows for a custom `.args` file or one generated from user choices in the UI. The UI itself is configurable to provide different levels of detail.
+- **GPU libraries** — optionally bundles pre-compiled CUDA, ROCm, or Vulkan libraries for Linux/Windows. Metal on macOS is compiled into the llamafile binary itself and needs nothing extra.
+- **Downloads** — HTTP with resume, SHA256 verification, progress reporting. Relies on HuggingFace Hub for interoperability.
+- **Recipes** — every build configuration is a JSON recipe you can save, reuse, and share with others.
 
-## Prerequisites
+## Interfaces
 
-- [Rust](https://rustup.rs/) (1.70+)
-- [Node.js](https://nodejs.org/) (18+) — optional, only for frontend development
-- Platform-specific dependencies for Tauri:
-  - **macOS**: Xcode Command Line Tools
-  - **Linux**: `libwebkit2gtk-4.0-dev`, `libssl-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`
-  - **Windows**: Microsoft Visual Studio C++ Build Tools
+All interfaces drive the same core library, so they share behaviour and the recipe store.
 
-## Development Setup
+### CLI
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-org/llamafile-builder.git
-cd llamafile-builder
+# One-shot build with defaults
+llamafile-builder build --model Qwen/Qwen3-0.6B-GGUF
 
-# Install Tauri CLI
-cargo install tauri-cli
-
-# Run in development mode
-cargo tauri dev
+# Incremental: configure, inspect, build
+llamafile-builder recipe set-model Qwen/Qwen3-0.6B-GGUF
+llamafile-builder recipe set context_length 8192
+llamafile-builder recipe add-gpu cuda
+llamafile-builder recipe show
+llamafile-builder build
 ```
 
-The app will open with hot-reload enabled for frontend changes.
-
-## Building for Production
+Add `--json` for machine-readable output, e.g.:
 
 ```bash
-# Build optimized release binary
-cargo tauri build
+llamafile-builder --json recipe show
 ```
 
-Binaries will be output to `src-tauri/target/release/bundle/`.
 
-## Project Structure
+See [`specs/CLI.md`](specs/CLI.md) for the full reference.
 
+### TUI
+
+```bash
+llamafile-builder-tui
 ```
-llamafile-builder/
-├── src/                    # Frontend (HTML/CSS/JS)
-│   ├── index.html
-│   ├── styles.css
-│   └── app.js
-├── src-tauri/              # Rust backend
-│   ├── Cargo.toml
-│   ├── tauri.conf.json
-│   └── src/
-│       ├── main.rs         # Entry point
-│       ├── commands.rs     # Tauri command handlers
-│       ├── models.rs       # Data structures
-│       ├── download.rs     # File download with progress
-│       └── builder.rs      # llamafile assembly logic
-└── README.md
+
+A [ratatui](https://ratatui.rs/) terminal wizard: dashboard form on top, live log pane below. See [`specs/TUI.md`](specs/TUI.md).
+
+### Web UI
+
+```bash
+llamafile-builder --serve
+# opens http://localhost:8765 in a browser
 ```
+
+The CLI binary serves a browser-based wizard from the `web/` directory (static HTML/CSS/JS). 
+Static assets are served from disk, so the UI can be modified or replaced without rebuilding.
+
+### JSON-RPC
+
+```bash
+llamafile-builder --interactive
+```
+
+JSON-RPC 2.0 over stdin/stdout — one request per line, one response per line, progress events as notifications. Used for tests, scripting, and as the integration point for external GUIs. See [`specs/JSON-RPC.md`](specs/JSON-RPC.md).
 
 ## Architecture
 
-### Frontend
+The builder is split into a **core library** (pure Rust, no UI dependencies) and **thin interface layers** that call into it:
 
-Pure HTML/CSS/JS with no build step. The UI is a multi-step wizard inspired by Raspberry Pi Imager:
-
-1. **Version** — Select llamafile runtime version
-2. **Model** — Choose model weights and quantization
-3. **Configuration** — Set runtime parameters (`.args` file)
-4. **Compute** — CPU-only or GPU with library selection
-5. **Agent** — Optional agentfile mode with tools
-6. **Build** — Review and execute
-
-### Backend
-
-Rust + Tauri handles:
-
-- Fetching llamafile versions from GitHub releases
-- Downloading model weights from Hugging Face (with progress reporting)
-- Generating `.args` configuration files
-- Bundling GPU libraries (CUDA, ROCm, Metal)
-- Creating the final executable via zipalign
-
-### Communication
-
-Frontend ↔ Backend communication uses Tauri's IPC:
-
-```javascript
-// Frontend: invoke a command
-const versions = await invoke('get_llamafile_versions');
-
-// Frontend: listen for events
-listen('build-progress', (event) => {
-  updateProgressUI(event.payload);
-});
+```
+llamafile-builder-core (library)
+       |
+       +-- llamafile-builder  (one binary: CLI + --serve + --interactive)
+       |
+       +-- llamafile-builder-tui  (one binary: ratatui)
 ```
 
-```rust
-// Backend: define a command
-#[tauri::command]
-async fn get_llamafile_versions() -> Result<Vec<LlamafileVersion>, String> {
-    // ...
-}
+The core owns all state, validation, downloads, and assembly. Interface layers only handle argument parsing, rendering, and protocol translation. This keeps the logic portable to headless environments (CI, containers, SSH) and makes each layer independently testable. See [`specs/ARCHITECTURE.md`](specs/ARCHITECTURE.md) for the details.
 
-// Backend: emit an event
-app_handle.emit_all("build-progress", &progress)?;
+The model registry, llamafile versions, and configuration schema are **not** embedded at compile time — they are fetched from a remote URL at startup (with a bundled fallback for first-run and offline use), so the catalog can be updated without shipping a new binary. See `NFR-9` and `NFR-10` in [`specs/README.md`](specs/README.md).
+
+## Building
+
+### Native (current platform)
+
+```bash
+make          # debug build
+make test     # run the test suite
+make release  # optimized build
 ```
 
-## Configuration
+Output binaries: `target/debug/llamafile-builder` and `target/debug/llamafile-builder-tui` (or `target/release/…`).
 
-### Server Options (`.args` file)
+Only Rust (stable, 1.70+) is required for native builds.
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--host` | Network interface to bind | `127.0.0.1` |
-| `--port` | HTTP server port | `8080` |
-| `-c` | Context length (tokens) | `4096` |
-| `-t` | CPU threads | auto |
-| `-b` | Batch size | `512` |
-| `--api-key` | Require API key | none |
+### Cross-compilation
 
-### Compute Targets
+All five supported targets are cross-compilable from a single host using [`cargo-zigbuild`](https://github.com/rust-cross/cargo-zigbuild) and [Zig](https://ziglang.org/) as a drop-in C cross-compiler. No Docker, no VMs.
 
-| Target | Size Overhead | Platforms |
-|--------|---------------|-----------|
-| CPU Only | ~5 MB | x86_64, ARM64 |
-| CUDA 12 | ~180 MB | NVIDIA GPUs |
-| ROCm 6 | ~60 MB | AMD GPUs |
-| Metal | ~10 MB | Apple Silicon/Intel Macs |
+```bash
+make setup    # one-time: installs zig, cargo-zigbuild, and required Rust targets
+make all      # build all 5 targets (release)
+make dist     # same, plus copy binaries to dist/
+make target T=x86_64-unknown-linux-gnu   # single target
+```
 
-## Roadmap
+Supported targets:
 
-- [ ] Custom model URL input (local GGUF files)
-- [ ] Quantization selection per model
-- [ ] Model preview/info panel
-- [ ] Build history and presets
-- [ ] Auto-update for new llamafile versions
-- [ ] MCP server tool integration for agentfiles
+| Target | Platform |
+|--------|----------|
+| `aarch64-apple-darwin` | macOS Apple Silicon |
+| `x86_64-apple-darwin` | macOS Intel |
+| `x86_64-unknown-linux-gnu` | Linux x86_64 |
+| `aarch64-unknown-linux-gnu` | Linux ARM64 (e.g. Raspberry Pi) |
+| `x86_64-pc-windows-gnu` | Windows x86_64 |
+
+Binaries are 2.5–4 MB, statically linked for TLS (rustls).
+
+## Project layout
+
+```
+.
+├── crates/
+│   ├── llamafile-builder-core/   pure library — state, downloads, assembly, validation
+│   ├── llamafile-builder/    CLI + --serve (HTTP) + --interactive (JSON-RPC)
+│   └── llamafile-builder-tui/    ratatui wizard
+├── data/                 default versions.json, models.json, config.json (bundled fallback)
+├── web/                  static assets served by --serve
+├── assets/icons/         icon masters (icon.png 512×512, icon.icns, icon.ico) for future packaging
+├── specs/                design documents — see below
+├── Cargo.toml            workspace manifest
+└── Makefile              native + cross-compile build targets
+```
+
+## Further reading
+
+The `specs/` directory is the authoritative source of truth.
+
+| Document | Topic |
+|----------|-------|
+| [`specs/README.md`](specs/README.md) | What a llamafile is, what the builder does, requirements (FR-1…, NFR-1…) |
+| [`specs/ARCHITECTURE.md`](specs/ARCHITECTURE.md) | Core library / interface-layer split, data types, build pipeline |
+| [`specs/LIBRARY.md`](specs/LIBRARY.md) | Public API reference for `llamafile-builder-core` |
+| [`specs/CLI.md`](specs/CLI.md) | CLI command reference and examples |
+| [`specs/TUI.md`](specs/TUI.md) | TUI layout, navigation, popups |
+| [`specs/JSON-RPC.md`](specs/JSON-RPC.md) | JSON-RPC method reference (interactive mode + HTTP server) |
 
 ## License
 
-MIT
-
-## Acknowledgments
-
-- [llamafile](https://github.com/Mozilla-Ocho/llamafile) by Mozilla Ocho / Justine Tunney
-- [Tauri](https://tauri.app/) for the lightweight desktop runtime
-- [Hugging Face](https://huggingface.co/) for model hosting
+MIT. See [`LICENSE`](LICENSE).
