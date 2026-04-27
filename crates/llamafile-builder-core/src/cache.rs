@@ -37,6 +37,13 @@ impl Cache {
         self.base_dir.join("bin")
     }
 
+    /// Root cache directory passed to [`Cache::new`]. Used by callers that
+    /// need to inspect free space at the cache location (see
+    /// [`crate::disk_space`]).
+    pub fn base_dir(&self) -> &PathBuf {
+        &self.base_dir
+    }
+
     /// Determine the local path where a component would be cached.
     /// For URL sources, returns a path in our cache. For HuggingFace sources,
     /// checks hf-hub's shared cache. For Local sources, returns the path as-is.

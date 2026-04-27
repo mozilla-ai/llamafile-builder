@@ -424,6 +424,11 @@ impl Builder {
         tracing::info!(output = %self.state.output_path, "build started");
         self.cancel_flag.store(false, Ordering::Relaxed);
 
+        // Phase 0: Disk-space pre-check. Fail fast before any download starts
+        // rather than running out mid-transfer.
+        self.preflight_disk_space()?;
+        self.check_cancelled()?;
+
         // Phase 1: Ensure zipalign (prerequisite for everything)
         let zipalign_path = {
             tracing::info!("preparing zipalign");
@@ -491,6 +496,60 @@ impl Builder {
     }
 
     // ── Internal helpers ──
+
+    /// Estimate per-destination disk requirements for the current state. The
+    /// caller can preview this before building. Same logic [`build`] runs at
+    /// Phase 0.
+    pub fn estimate_disk_requirements(&self) -> Vec<crate::disk_space::DiskRequirement> {
+        let components = self.resolved_components();
+        let output_path = std::path::PathBuf::from(&self.state.output_path);
+        crate::disk_space::estimate(&components, &self.cache, &output_path)
+    }
+
+    fn preflight_disk_space(&self) -> crate::Result<()> {
+        let requirements = self.estimate_disk_requirements();
+        if requirements.is_empty() {
+            tracing::debug!("disk-space pre-check skipped: nothing to download or write");
+            return Ok(());
+        }
+
+        for req in &requirements {
+            tracing::debug!(
+                destination = %req.destination.display(),
+                bytes_required = req.bytes,
+                purpose = req.purpose.label(),
+                "disk-space requirement"
+            );
+        }
+
+        match crate::disk_space::check(&requirements) {
+            Ok(reports) => {
+                for r in &reports {
+                    tracing::info!(
+                        path = %r.checked_path.display(),
+                        bytes_required = r.bytes_required,
+                        bytes_available = r.bytes_available,
+                        "disk-space ok"
+                    );
+                }
+                Ok(())
+            }
+            Err(crate::disk_space::DiskSpaceError::Query { path, source }) => {
+                // Failing to query free space (e.g. unsupported filesystem) is
+                // non-fatal — log and continue rather than blocking the build.
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %source,
+                    "skipping disk-space check (could not query free space)"
+                );
+                Ok(())
+            }
+            Err(e @ crate::disk_space::DiskSpaceError::Insufficient { .. }) => {
+                tracing::error!(error = %e, "disk-space pre-check failed");
+                Err(crate::Error::DiskSpace(e))
+            }
+        }
+    }
 
     fn check_cancelled(&self) -> crate::Result<()> {
         if self.cancel_flag.load(Ordering::Relaxed) {
@@ -1133,6 +1192,54 @@ mod tests {
                 "should warn about GPU libs on macOS"
             );
         }
+    }
+
+    // ── Disk-space pre-check ──
+
+    #[test]
+    fn estimate_disk_requirements_for_default_qwen_build() {
+        // The default Qwen build pulls runtime + zipalign over HTTP and
+        // weights from HuggingFace. The pre-check should report space at
+        // three destinations: cache, hf cache, and output.
+        let mut builder = configured_builder();
+        builder.set_output_path(Path::new("/tmp/test-out.llamafile"));
+
+        let reqs = builder.estimate_disk_requirements();
+        let purposes: Vec<_> = reqs.iter().map(|r| r.purpose).collect();
+        assert!(
+            purposes.contains(&crate::disk_space::Purpose::Cache),
+            "expected Cache requirement, got {:?}",
+            purposes
+        );
+        assert!(
+            purposes.contains(&crate::disk_space::Purpose::HuggingFaceCache),
+            "expected HuggingFaceCache requirement, got {:?}",
+            purposes
+        );
+        assert!(
+            purposes.contains(&crate::disk_space::Purpose::Output),
+            "expected Output requirement, got {:?}",
+            purposes
+        );
+        // Every reported requirement must be non-zero
+        for r in &reqs {
+            assert!(r.bytes > 0, "requirement {:?} had zero bytes", r);
+        }
+    }
+
+    #[test]
+    fn estimate_disk_requirements_empty_for_unconfigured_builder() {
+        // Builder with no model and no version selected resolves no
+        // downloadable components beyond .args (Generated). Nothing to
+        // require, nothing to fail on.
+        let builder = Builder::new(test_config(), test_cache());
+        let reqs = builder.estimate_disk_requirements();
+        assert!(
+            reqs.iter().all(|r| r.bytes == 0)
+                || reqs.is_empty(),
+            "got non-trivial requirements from unconfigured builder: {:?}",
+            reqs
+        );
     }
 
     // ── Defaults ──

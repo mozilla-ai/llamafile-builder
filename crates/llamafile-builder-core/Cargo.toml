@@ -21,6 +21,7 @@ url = { workspace = true }
 hf-hub = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+fs4 = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = "1"

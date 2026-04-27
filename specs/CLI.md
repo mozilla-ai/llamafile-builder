@@ -246,6 +246,6 @@ RUST_LOG=warn lb build --model Qwen/Qwen3-0.6B-GGUF   # quiet
 | 0 | Success |
 | 1 | General error |
 | 2 | Invalid arguments (model not found, bad quantization name) |
-| 3 | Download failed (network error, auth required) |
+| 3 | Download failed (network error, auth required, insufficient disk space) |
 | 4 | Build failed (zipalign error, file copy error) |
 | 5 | Cancelled |

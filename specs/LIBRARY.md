@@ -238,12 +238,14 @@ GPU selections are additive; callers that need to remove or clear entries mutate
 
 ```rust
 .set_cancel_flag(flag: Arc<AtomicBool>)   // share a cancel flag with the runtime
-.build() -> Result<PathBuf>               // async, runs the 5-phase pipeline
+.estimate_disk_requirements() -> Vec<DiskRequirement>  // preview pre-flight requirements
+.build() -> Result<PathBuf>               // async, runs the pre-check + build pipeline
 ```
 
 Cancellation is triggered by the caller flipping the shared atomic — useful because the `Builder` reference is typically moved into a background task. Agent mode (FR-7) is planned but not yet surfaced through the API.
 
 Build phases (all observable via tracing):
+0. `preflight_disk_space` -- estimate per-destination requirements and abort with `Error::DiskSpace` if any filesystem lacks free space
 1. `ensure_zipalign` -- download or locate zipalign binary
 2. `ensure_runtime` -- download or locate the llamafile binary
 3. `ensure_model` -- download or locate model weights (and mmproj)
@@ -300,6 +302,39 @@ struct Component {
 | `Cuda`, `Rocm`, `Vulkan` | `Linux`, `Windows` |
 
 Metal is not in `GpuAccel` -- it is compiled on-the-fly from sources embedded in the llamafile binary.
+
+
+## Disk-space pre-check
+
+Before any download, `Builder::build()` runs a pre-flight check that estimates how many bytes need to land at each destination on disk and verifies that enough free space is available. The goal is to fail fast with a clear error message instead of dying mid-download with `ENOSPC` after multi-GB transfers have already started.
+
+```rust
+disk_space::estimate(
+    components: &[Component],
+    cache: &Cache,
+    output_path: &Path,
+) -> Vec<DiskRequirement>
+
+disk_space::check(reqs: &[DiskRequirement]) -> Result<Vec<DiskSpaceReport>, DiskSpaceError>
+
+// Test seam: inject a custom available_space query (used by core unit tests)
+disk_space::check_with(
+    reqs: &[DiskRequirement],
+    available_space_fn: &dyn Fn(&Path) -> std::io::Result<u64>,
+) -> Result<Vec<DiskSpaceReport>, DiskSpaceError>
+```
+
+`Builder::estimate_disk_requirements()` returns the same `Vec<DiskRequirement>` for the current state, so the CLI/TUI/server can preview requirements without invoking `build()`.
+
+| Type | Purpose |
+|------|---------|
+| `Purpose::Cache` | bytes added to the llamafile-builder cache (runtimes, zipalign, GPU libs) |
+| `Purpose::HuggingFaceCache` | bytes added to `~/.cache/huggingface/hub/` (model weights, mmproj) |
+| `Purpose::Output` | bytes added at the final `.llamafile` location |
+
+Components without `expected_size`, components already cached, and `Local` / `Generated` sources contribute nothing to the requirement (so a fully populated cache produces zero bytes for the cache and HF buckets while still reserving space at the output).
+
+`DiskSpaceError::Query` (e.g. unsupported filesystem) is logged at WARN and treated as non-fatal — the build proceeds rather than blocking. Only `DiskSpaceError::Insufficient` aborts the build with `Error::DiskSpace`.
 
 
 ## Validation
@@ -372,6 +407,12 @@ enum Error {
     Validation(String),
     NotFound(String),
     Cancelled,
+    DiskSpace(DiskSpaceError),
+}
+
+enum DiskSpaceError {
+    Insufficient { path, required, available, purposes },
+    Query { path, source: io::Error },  // logged at WARN; build continues
 }
 
 enum DownloadError {
@@ -452,17 +493,18 @@ GPU selection is handled by the `Builder` as a flat list of `GpuLibSelection { a
 
 ## Test coverage
 
-149 tests across core library (114), CLI (17), and TUI (18):
+160 tests across core library (125), CLI (17), and TUI (18):
 
 | Module | Tests | What's covered |
 |--------|-------|----------------|
 | `state` | 20 | All model sources, file selection, output path, resolved paths |
 | `args` | 16 | Schema-driven .args generation, system prompt, size estimation, defaults |
 | `download` | 15 | HF URL detection, token resolution, file info, checksums |
-| `builder` | 17 | resolved_components (simple, multimodal, GPU, agent, custom, quantization), HF source, zipalign, defaults, validation |
+| `builder` | 19 | resolved_components, HF source, zipalign, defaults, validation, disk-space estimate |
 | `config_store` | 14 | CRUD, list sorting, find by name/UUID, cleanup unnamed, resolve_defaults (structural checks), round-trip |
 | `cache` | 5 | Cache status: local existing/missing, generated, URL partial/complete/missing |
 | `config_manager` | 6 | Load, fallback, invalid JSON, bare array rejection, apply update, version comparison |
+| `disk_space` | 15 | Estimation per source/role, cache hits, output sizing, fs-grouped check, error on insufficient, real fs4 sanity |
 | `validation` | 5 | Required components, context length, custom binary, large context |
 | `ollama` | 6 | Availability, scanning, missing blobs, empty dirs |
 | `lmstudio` | 7 | Availability, scanning, role inference, non-gguf filtering |
