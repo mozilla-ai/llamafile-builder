@@ -56,6 +56,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Popup::SaveRecipe { input } => draw_save_recipe_popup(frame, input),
         Popup::LoadRecipe { recipes, selected } => draw_load_recipe_popup(frame, recipes, *selected),
         Popup::Confirm { message, .. } => draw_confirm_popup(frame, message),
+        Popup::BuildError { message } => draw_build_error_popup(frame, message),
     }
 }
 
@@ -860,4 +861,19 @@ fn draw_confirm_popup(frame: &mut Frame, message: &str) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
     frame.render_widget(Paragraph::new(format!(" {}", message)), inner);
+}
+
+fn draw_build_error_popup(frame: &mut Frame, message: &str) {
+    let area = centered_rect(70, 12, frame.area());
+    frame.render_widget(Clear, area);
+    let block = Block::bordered()
+        .title(" Build failed ")
+        .title_bottom(" press any key to dismiss ")
+        .style(Style::default().fg(Color::Red));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    frame.render_widget(
+        Paragraph::new(message.to_string()).wrap(Wrap { trim: false }),
+        inner,
+    );
 }

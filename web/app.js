@@ -1624,10 +1624,18 @@ function handleBuildEvent(ev) {
     }
     case 'error':
       S.buildCompleted = true;
-      pushLog({ level: 'error', message: `✗ ${ev.message}` });
-      setStatus('Build failed', 'err');
-      setBuildPhase('Failed');
-      showToast('Build failed: ' + ev.message, 'err');
+      if (isUserCancellation(ev.message)) {
+        // User-initiated cancel — not a failure, just an info-level note.
+        pushLog({ level: 'warn', message: 'Build cancelled' });
+        setStatus('Build cancelled', 'warn');
+        setBuildPhase('Cancelled');
+      } else {
+        pushLog({ level: 'error', message: `✗ ${ev.message}` });
+        setStatus('Build failed', 'err');
+        setBuildPhase('Failed');
+        showToast('Build failed', 'err');
+        showBuildErrorModal(ev.message);
+      }
       break;
     case 'log': {
       // Forwarded tracing event. Cache every event regardless of current filter.
@@ -1696,11 +1704,48 @@ function stopBuildTicker() {
 }
 
 async function cancelBuild() {
+  // Confirmation modal — same UX as the TUI's cancel-build prompt. The user
+  // explicitly opts in before we fire /api/cancel.
+  showModal(
+    'Cancel build?',
+    `<p>The current build will stop. Already-downloaded components stay in the cache so the next build can resume.</p>`,
+    () => doCancelBuild(),
+    {
+      customFooter: `
+        <button class="btn btn-secondary" onclick="closeModal()">Keep building</button>
+        <button class="btn btn-primary" id="modal-ok">Cancel build</button>`,
+    }
+  );
+  const okBtn = document.getElementById('modal-ok');
+  if (okBtn) okBtn.onclick = () => { closeModal(); doCancelBuild(); };
+}
+
+async function doCancelBuild() {
   try {
     await apiPost('/api/cancel');
     pushLog({ level: 'warn', message: 'Cancellation requested…' });
     setStatus('Cancelling…', 'running');
   } catch (e) { showToast(e.message, 'err'); }
+}
+
+// "Cancelled" / "Download cancelled" are user-initiated and should not surface
+// as build-failed errors. Mirrors `is_user_cancellation` in the TUI binary.
+function isUserCancellation(message) {
+  if (!message) return false;
+  const m = String(message).trim().toLowerCase();
+  return m === 'cancelled' || m === 'download cancelled';
+}
+
+// Show the build-failed error in a modal with the raw error text. The same
+// message is also appended to the log pane (handled by the caller).
+function showBuildErrorModal(message) {
+  const safe = (message || 'Build failed').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const body = `
+    <p style="margin-bottom: 0.5em;">The build did not complete. The error was:</p>
+    <pre class="modal-error-body" style="white-space: pre-wrap; word-break: break-word;">${safe}</pre>`;
+  showModal('Build failed', body, null, {
+    customFooter: `<button class="btn btn-primary" onclick="closeModal()">Dismiss</button>`,
+  });
 }
 
 function setBuildingState(building) {

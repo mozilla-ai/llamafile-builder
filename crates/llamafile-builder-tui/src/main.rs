@@ -187,7 +187,14 @@ async fn run_app(
                 }
                 Ok(BuildResult::Failed { error }) => {
                     app.build_status = BuildStatus::Failed { error: error.clone() };
-                    app.add_log(LogLevel::Error, format!("Build failed: {}", error));
+                    if is_user_cancellation(&error) {
+                        app.add_log(LogLevel::Warn, "Build cancelled".to_string());
+                    } else {
+                        app.add_log(LogLevel::Error, format!("Build failed: {}", error));
+                        if matches!(app.popup, app::Popup::None) {
+                            app.popup = app::Popup::BuildError { message: error.clone() };
+                        }
+                    }
                     build_result_rx = None;
                 }
                 Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
@@ -196,10 +203,12 @@ async fn run_app(
                 }
                 Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
                     // Task panicked or was dropped
-                    app.build_status = BuildStatus::Failed {
-                        error: "Build task terminated unexpectedly".to_string(),
-                    };
-                    app.add_log(LogLevel::Error, "Build task terminated unexpectedly".to_string());
+                    let msg = "Build task terminated unexpectedly".to_string();
+                    app.build_status = BuildStatus::Failed { error: msg.clone() };
+                    app.add_log(LogLevel::Error, msg.clone());
+                    if matches!(app.popup, app::Popup::None) {
+                        app.popup = app::Popup::BuildError { message: msg };
+                    }
                     build_result_rx = None;
                 }
             }
@@ -368,6 +377,15 @@ async fn run_app(
     Ok(())
 }
 
+/// True for `Error::Cancelled` and `DownloadError::Cancelled` — both render
+/// to the literal string "Cancelled" via thiserror's Display. User-initiated
+/// cancellations should not show as build-failed popups.
+fn is_user_cancellation(error: &str) -> bool {
+    let trimmed = error.trim();
+    trimmed.eq_ignore_ascii_case("cancelled")
+        || trimmed.eq_ignore_ascii_case("download cancelled")
+}
+
 /// Extract a u64 field value from a log message like "bytes_downloaded=12345"
 fn extract_field(msg: &str, key: &str) -> Option<u64> {
     let start = msg.find(key)? + key.len();
@@ -386,5 +404,28 @@ fn extract_str_field(msg: &str, key: &str) -> Option<String> {
     } else {
         let end = rest.find(|c: char| c == ' ' || c == ',').unwrap_or(rest.len());
         Some(rest[..end].to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cancellation_strings_classified_as_user_cancel() {
+        assert!(is_user_cancellation("Cancelled"));
+        assert!(is_user_cancellation("cancelled"));
+        assert!(is_user_cancellation("  Cancelled  "));
+        assert!(is_user_cancellation("Download cancelled"));
+    }
+
+    #[test]
+    fn build_failures_not_classified_as_cancel() {
+        assert!(!is_user_cancellation(
+            "Insufficient disk space at /home/u/.cache: need 5 GB, have 1 GB"
+        ));
+        assert!(!is_user_cancellation("HTTP request failed: timeout"));
+        assert!(!is_user_cancellation("zipalign failed with exit code: 1"));
+        assert!(!is_user_cancellation(""));
     }
 }

@@ -6,7 +6,7 @@ use crate::app::*;
 pub fn handle_key(app: &mut App, key: event::KeyEvent) -> bool {
     // Global keys
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-        app.should_quit = true;
+        request_quit(app);
         return true;
     }
 
@@ -56,7 +56,22 @@ pub fn handle_key(app: &mut App, key: event::KeyEvent) -> bool {
         Popup::SaveRecipe { .. } => handle_save_recipe(app, key),
         Popup::LoadRecipe { .. } => handle_load_recipe(app, key),
         Popup::Confirm { .. } => handle_confirm_popup(app, key),
+        Popup::BuildError { .. } => handle_build_error_popup(app, key),
     }
+}
+
+fn handle_build_error_popup(app: &mut App, key: event::KeyEvent) -> bool {
+    // Any keypress dismisses (Enter / Esc / space / q / etc.)
+    match key.code {
+        KeyCode::Char('q') | KeyCode::Char('Q') => {
+            // Dismiss the popup; treat 'q' here as cancel-popup, not quit-app
+            app.popup = Popup::None;
+        }
+        _ => {
+            app.popup = Popup::None;
+        }
+    }
+    true
 }
 
 fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
@@ -73,14 +88,7 @@ fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
             true
         }
         KeyCode::Char('q') => {
-            if matches!(app.build_status, BuildStatus::Building { .. }) {
-                app.popup = Popup::Confirm {
-                    message: "Build in progress. Quit anyway?".to_string(),
-                    action: ConfirmAction::Quit,
-                };
-            } else {
-                app.should_quit = true;
-            }
+            request_quit(app);
             true
         }
         KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -757,7 +765,11 @@ fn handle_confirm_popup(app: &mut App, key: event::KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
                 match action {
-                    ConfirmAction::Quit => app.should_quit = true,
+                    ConfirmAction::CancelBuildAndQuit => {
+                        // Main loop sets the cancel flag if a build is still
+                        // running when should_quit is observed.
+                        app.should_quit = true;
+                    }
                 }
                 app.popup = Popup::None;
             }
@@ -768,4 +780,154 @@ fn handle_confirm_popup(app: &mut App, key: event::KeyEvent) -> bool {
         }
     }
     true
+}
+
+/// Either pop up a yes/no cancel-build confirmation (during a build) or
+/// quit immediately (when idle). Shared by Q and Ctrl+C.
+fn request_quit(app: &mut App) {
+    if matches!(app.build_status, BuildStatus::Building { .. }) {
+        app.popup = Popup::Confirm {
+            message: "Cancel build?".to_string(),
+            action: ConfirmAction::CancelBuildAndQuit,
+        };
+    } else {
+        app.should_quit = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use llamafile_builder_core::config_manager::BuilderConfig;
+    use llamafile_builder_core::config_store::ConfigStore;
+    use std::path::PathBuf;
+
+    fn test_config() -> BuilderConfig {
+        BuilderConfig {
+            versions: llamafile_builder_core::config_manager::parse_config_data(
+                include_str!("../../../data/versions.json"),
+            )
+            .unwrap(),
+            models: llamafile_builder_core::config_manager::parse_config_data(
+                include_str!("../../../data/models.json"),
+            )
+            .unwrap(),
+            config_schema: llamafile_builder_core::config_manager::parse_config_data(
+                include_str!("../../../data/config.json"),
+            )
+            .unwrap(),
+            config_version: 1,
+            min_builder_version: None,
+        }
+    }
+
+    fn test_app() -> App {
+        let tmp = tempfile::TempDir::new().unwrap();
+        App::new(
+            test_config(),
+            PathBuf::from("/tmp/test-cache"),
+            ConfigStore::new(tmp.keep()),
+        )
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+    fn ctrl(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn quit_when_idle_exits_immediately() {
+        let mut app = test_app();
+        app.build_status = BuildStatus::Idle;
+        handle_key(&mut app, key(KeyCode::Char('q')));
+        assert!(app.should_quit);
+        assert!(matches!(app.popup, Popup::None));
+    }
+
+    #[test]
+    fn ctrl_c_when_idle_exits_immediately() {
+        let mut app = test_app();
+        app.build_status = BuildStatus::Idle;
+        handle_key(&mut app, ctrl(KeyCode::Char('c')));
+        assert!(app.should_quit);
+        assert!(matches!(app.popup, Popup::None));
+    }
+
+    #[test]
+    fn quit_during_build_opens_cancel_confirmation() {
+        let mut app = test_app();
+        app.build_status = BuildStatus::Building {
+            phase: "downloading".to_string(),
+            progress: 0.5,
+        };
+        handle_key(&mut app, key(KeyCode::Char('q')));
+        assert!(!app.should_quit, "no immediate quit during build");
+        match &app.popup {
+            Popup::Confirm {
+                action: ConfirmAction::CancelBuildAndQuit,
+                message,
+            } => {
+                assert!(message.to_lowercase().contains("cancel"));
+            }
+            other => panic!("expected CancelBuildAndQuit confirm popup, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ctrl_c_during_build_opens_same_cancel_confirmation_as_q() {
+        let mut app = test_app();
+        app.build_status = BuildStatus::Building {
+            phase: "downloading".to_string(),
+            progress: 0.5,
+        };
+        handle_key(&mut app, ctrl(KeyCode::Char('c')));
+        assert!(!app.should_quit);
+        assert!(matches!(
+            app.popup,
+            Popup::Confirm {
+                action: ConfirmAction::CancelBuildAndQuit,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn confirm_yes_sets_should_quit() {
+        let mut app = test_app();
+        app.build_status = BuildStatus::Building {
+            phase: "downloading".to_string(),
+            progress: 0.5,
+        };
+        handle_key(&mut app, key(KeyCode::Char('q')));
+        // popup is now CancelBuildAndQuit
+        handle_key(&mut app, key(KeyCode::Char('y')));
+        assert!(app.should_quit);
+        assert!(matches!(app.popup, Popup::None));
+    }
+
+    #[test]
+    fn confirm_no_keeps_build_running() {
+        let mut app = test_app();
+        app.build_status = BuildStatus::Building {
+            phase: "downloading".to_string(),
+            progress: 0.5,
+        };
+        handle_key(&mut app, key(KeyCode::Char('q')));
+        handle_key(&mut app, key(KeyCode::Char('n')));
+        assert!(!app.should_quit);
+        assert!(matches!(app.popup, Popup::None));
+    }
+
+    #[test]
+    fn build_error_popup_dismisses_on_any_key() {
+        let mut app = test_app();
+        app.popup = Popup::BuildError {
+            message: "Insufficient disk space at /tmp".to_string(),
+        };
+        handle_key(&mut app, key(KeyCode::Esc));
+        assert!(matches!(app.popup, Popup::None));
+    }
 }

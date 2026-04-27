@@ -493,7 +493,7 @@ GPU selection is handled by the `Builder` as a flat list of `GpuLibSelection { a
 
 ## Test coverage
 
-161 tests across core library (125), CLI (18), and TUI (18):
+170 tests across core library (125), CLI (18), and TUI (27):
 
 | Module | Tests | What's covered |
 |--------|-------|----------------|
@@ -511,3 +511,5 @@ GPU selection is handled by the `Builder` as a flat list of `GpuLibSelection { a
 | CLI `state_file` | 3 | build_from_state with explicit config, build_from_state with defaults, current recipe pointer round-trip |
 | CLI `server` | 15 | Data endpoints, recipe CRUD (create/list/get/delete/name), state mutations (model, config, GPU), derived queries (args, components, validate, disk-requirements), cancel, missing recipe 404 |
 | TUI `app` | 18 | Defaults, focus navigation (wrap, skip, local model), model source switching, output filenames, GPU libs, log filtering |
+| TUI `events` | 7 | Q/Ctrl+C dispatch (idle vs. mid-build), cancel-confirm popup yes/no, build-error popup dismiss |
+| TUI `main` | 2 | `is_user_cancellation` classification |
