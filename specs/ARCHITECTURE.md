@@ -485,6 +485,7 @@ POST /api/recipes/:id/state/reset
 GET  /api/recipes/:id/state/args           -> preview .args
 GET  /api/recipes/:id/state/validate       -> validation messages
 GET  /api/recipes/:id/state/components     -> resolved components
+GET  /api/recipes/:id/state/disk-requirements -> [{ destination, bytes, purpose }]
 
 # Build execution (scoped by recipe UUID)
 POST /api/recipes/:id/build                -> SSE stream

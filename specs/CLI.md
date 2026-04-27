@@ -85,8 +85,9 @@ Configure incrementally, then build. The current recipe persists between invocat
 ### View default configuration
 
 ```bash
-lb recipe show          # shows what would be built with all defaults
-lb recipe show-args     # preview the .args file content
+lb recipe show               # shows what would be built with all defaults
+lb recipe show-args          # preview the .args file content
+lb recipe disk-requirements  # preview per-destination disk space needed
 ```
 
 ### Configure step by step
@@ -152,6 +153,7 @@ lb recipe set-zipalign /path/to/zipalign    # custom zipalign
 # View
 lb recipe show                              # full state with all config values
 lb recipe show-args                         # preview .args content
+lb recipe disk-requirements                 # per-destination space estimate (cache, hf cache, output)
 ```
 
 ### Defaults

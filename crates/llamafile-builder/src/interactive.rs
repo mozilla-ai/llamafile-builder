@@ -278,6 +278,17 @@ impl Session {
                 }).collect();
                 Ok(Value::Array(json))
             }
+            "disk_requirements" => {
+                let builder = self.make_builder()?;
+                let json: Vec<Value> = builder.estimate_disk_requirements().iter().map(|r| {
+                    serde_json::json!({
+                        "destination": r.destination.to_string_lossy(),
+                        "bytes": r.bytes,
+                        "purpose": r.purpose.label(),
+                    })
+                }).collect();
+                Ok(Value::Array(json))
+            }
             "reset" => {
                 self.mutate_state(|s| { *s = SavedState::default(); })
             }

@@ -493,7 +493,7 @@ GPU selection is handled by the `Builder` as a flat list of `GpuLibSelection { a
 
 ## Test coverage
 
-160 tests across core library (125), CLI (17), and TUI (18):
+161 tests across core library (125), CLI (18), and TUI (18):
 
 | Module | Tests | What's covered |
 |--------|-------|----------------|
@@ -509,5 +509,5 @@ GPU selection is handled by the `Builder` as a flat list of `GpuLibSelection { a
 | `ollama` | 6 | Availability, scanning, missing blobs, empty dirs |
 | `lmstudio` | 7 | Availability, scanning, role inference, non-gguf filtering |
 | CLI `state_file` | 3 | build_from_state with explicit config, build_from_state with defaults, current recipe pointer round-trip |
-| CLI `server` | 14 | Data endpoints, recipe CRUD (create/list/get/delete/name), state mutations (model, config, GPU), derived queries (args, components, validate), cancel, missing recipe 404 |
+| CLI `server` | 15 | Data endpoints, recipe CRUD (create/list/get/delete/name), state mutations (model, config, GPU), derived queries (args, components, validate, disk-requirements), cancel, missing recipe 404 |
 | TUI `app` | 18 | Defaults, focus navigation (wrap, skip, local model), model source switching, output filenames, GPU libs, log filtering |

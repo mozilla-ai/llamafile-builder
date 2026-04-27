@@ -41,7 +41,7 @@ use crate::state_file;
         set_quantization, set_config, set_output, set_args_file,
         modify_gpu, modify_custom_gpu, modify_companion_file,
         set_runtime, set_zipalign, reset_state,
-        get_args, get_validate, get_components, get_resolved_state,
+        get_args, get_validate, get_components, get_disk_requirements, get_resolved_state,
         set_args_content, file_dialog,
         start_build, cancel_build,
     ),
@@ -117,6 +117,7 @@ fn build_router(config: BuilderConfig, store: ConfigStore, recipes_dir: PathBuf)
         .route("/api/recipes/{id}/state/resolved", get(get_resolved_state))
         .route("/api/recipes/{id}/state/validate", get(get_validate))
         .route("/api/recipes/{id}/state/components", get(get_components))
+        .route("/api/recipes/{id}/state/disk-requirements", get(get_disk_requirements))
         .route("/api/recipes/{id}/state/custom-gpu", post(modify_custom_gpu))
         .route("/api/recipes/{id}/state/companion-file", post(modify_companion_file))
         // File picker
@@ -548,6 +549,27 @@ async fn get_components(State(st): State<Arc<AppState>>, Path(id): Path<String>)
         json!({ "role": format!("{:?}", c.role), "source": c.source_display(), "zip_path": c.zip_path })
     }).collect();
     Ok(Json(Value::Array(comps)))
+}
+
+#[utoipa::path(get, path = "/api/recipes/{id}/state/disk-requirements", tag = "State",
+    summary = "Pre-flight disk-space requirements (cache, hf cache, output)",
+    params(("id" = String, Path)))]
+async fn get_disk_requirements(
+    State(st): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> ApiResult {
+    let uuid = parse_uuid(&id)?;
+    let recipe = st.store.get(uuid).map_err(|e| api_err(StatusCode::NOT_FOUND, format!("{e}")))?;
+    let builder = make_builder(&st.config, &recipe.state)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let reqs: Vec<Value> = builder.estimate_disk_requirements().iter().map(|r| {
+        json!({
+            "destination": r.destination.to_string_lossy(),
+            "bytes": r.bytes,
+            "purpose": r.purpose.label(),
+        })
+    }).collect();
+    Ok(Json(Value::Array(reqs)))
 }
 
 // ============================================================================
@@ -1033,6 +1055,39 @@ mod tests {
         let roles: Vec<&str> = comps.as_array().unwrap().iter()
             .filter_map(|c| c["role"].as_str()).collect();
         assert!(roles.contains(&"Weights"));
+    }
+
+    #[tokio::test]
+    async fn disk_requirements_returns_per_destination_buckets() {
+        let (router, _) = app();
+        let id = create(&router).await;
+        post_json(
+            &router,
+            &format!("/api/recipes/{id}/state/model"),
+            json!({"id": "Qwen/Qwen3-0.6B-GGUF"}),
+        )
+        .await;
+
+        let (s, reqs) =
+            get_json(&router, &format!("/api/recipes/{id}/state/disk-requirements")).await;
+        assert_eq!(s, StatusCode::OK);
+        let arr = reqs.as_array().unwrap();
+        let purposes: Vec<&str> = arr.iter().filter_map(|r| r["purpose"].as_str()).collect();
+        assert!(
+            purposes.iter().any(|p| *p == "huggingface cache"),
+            "expected huggingface cache requirement, got {:?}",
+            purposes
+        );
+        assert!(
+            purposes.iter().any(|p| *p == "output"),
+            "expected output requirement, got {:?}",
+            purposes
+        );
+        // Every bucket must report a positive byte count
+        for r in arr {
+            assert!(r["bytes"].as_u64().unwrap_or(0) > 0);
+            assert!(r["destination"].as_str().is_some());
+        }
     }
 
     #[tokio::test]
