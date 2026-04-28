@@ -840,21 +840,7 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
-    fn test_config() -> BuilderConfig {
-        BuilderConfig {
-            versions: llamafile_builder_core::config_manager::parse_config_data(
-                include_str!("../../../data/versions.json"),
-            ).unwrap(),
-            models: llamafile_builder_core::config_manager::parse_config_data(
-                include_str!("../../../data/models.json"),
-            ).unwrap(),
-            config_schema: llamafile_builder_core::config_manager::parse_config_data(
-                include_str!("../../../data/config.json"),
-            ).unwrap(),
-            config_version: 1,
-            min_builder_version: None,
-        }
-    }
+    use llamafile_builder_core::test_utils::test_config;
 
     fn app() -> (Router, Arc<AppState>) {
         let tmp = tempfile::TempDir::new().unwrap();

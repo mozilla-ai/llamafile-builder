@@ -995,24 +995,7 @@ impl Builder {
 mod tests {
     use super::*;
 
-    fn test_config() -> BuilderConfig {
-        BuilderConfig {
-            versions: crate::config_manager::parse_config_data(
-                include_str!("../../../data/versions.json"),
-            )
-            .unwrap(),
-            models: crate::config_manager::parse_config_data(
-                include_str!("../../../data/models.json"),
-            )
-            .unwrap(),
-            config_schema: crate::config_manager::parse_config_data(
-                include_str!("../../../data/config.json"),
-            )
-            .unwrap(),
-            config_version: 1,
-            min_builder_version: None,
-        }
-    }
+    use crate::test_utils::test_config;
 
     fn test_cache() -> Cache {
         Cache::new(PathBuf::from("/tmp/llamafile-test-cache"))

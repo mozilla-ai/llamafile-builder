@@ -801,28 +801,9 @@ fn request_quit(app: &mut App) {
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use llamafile_builder_core::config_manager::BuilderConfig;
     use llamafile_builder_core::config_store::ConfigStore;
+    use llamafile_builder_core::test_utils::test_config;
     use std::path::PathBuf;
-
-    fn test_config() -> BuilderConfig {
-        BuilderConfig {
-            versions: llamafile_builder_core::config_manager::parse_config_data(
-                include_str!("../../../data/versions.json"),
-            )
-            .unwrap(),
-            models: llamafile_builder_core::config_manager::parse_config_data(
-                include_str!("../../../data/models.json"),
-            )
-            .unwrap(),
-            config_schema: llamafile_builder_core::config_manager::parse_config_data(
-                include_str!("../../../data/config.json"),
-            )
-            .unwrap(),
-            config_version: 1,
-            min_builder_version: None,
-        }
-    }
 
     fn test_app() -> App {
         let tmp = tempfile::TempDir::new().unwrap();

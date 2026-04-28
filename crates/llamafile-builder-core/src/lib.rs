@@ -16,6 +16,9 @@ pub mod system_info;
 pub mod validation;
 pub mod zipalign;
 
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
+
 // Primary API
 pub use builder::{Builder, BuildPhase};
 pub use cache::{Cache, CacheStatus};
