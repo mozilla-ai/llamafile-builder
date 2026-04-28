@@ -19,16 +19,10 @@ use tracing_subscriber::util::SubscriberInitExt;
 use llamafile_builder_core::config_manager::ConfigManager;
 use llamafile_builder_core::config_store::ConfigStore;
 
-use app::{build_from_state, App, BuildStatus, LogEntry, LogLevel};
-
-/// Result sent back from the build task.
-enum BuildResult {
-    Complete { path: String, size: u64 },
-    /// User-initiated cancellation. Distinct from `Failed` so the UI can show
-    /// a notice instead of an error popup.
-    Cancelled,
-    Failed { error: String },
-}
+use app::{
+    apply_build_result, apply_build_task_terminated, build_from_state, App, BuildResult,
+    BuildStatus, LogEntry, LogLevel,
+};
 
 fn get_config_dir() -> PathBuf {
     directories::BaseDirs::new()
@@ -145,45 +139,21 @@ async fn run_app(
             app.logs.push(entry);
         }
 
-        // Check if a build task finished
+        // Check if a build task finished. The state-transition logic
+        // lives in `app::apply_build_result` / `apply_build_task_terminated`
+        // so it's testable without spawning a real build.
         if let Some(ref mut rx) = build_result_rx {
             match rx.try_recv() {
-                Ok(BuildResult::Complete { path, size }) => {
-                    app.build_status = BuildStatus::Complete { path: path.clone(), size };
-                    app.add_log(LogLevel::Info, format!(
-                        "Build complete: {} ({})",
-                        path,
-                        llamafile_builder_core::models::format_size(size)
-                    ));
-                    build_result_rx = None;
-                }
-                Ok(BuildResult::Cancelled) => {
-                    app.build_status = BuildStatus::Failed {
-                        error: "Cancelled".to_string(),
-                    };
-                    app.add_log(LogLevel::Warn, "Build cancelled".to_string());
-                    build_result_rx = None;
-                }
-                Ok(BuildResult::Failed { error }) => {
-                    app.build_status = BuildStatus::Failed { error: error.clone() };
-                    app.add_log(LogLevel::Error, format!("Build failed: {}", error));
-                    if matches!(app.popup, app::Popup::None) {
-                        app.popup = app::Popup::BuildError { message: error.clone() };
-                    }
+                Ok(result) => {
+                    apply_build_result(app, result);
                     build_result_rx = None;
                 }
                 Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
-                    // Build still running -- state is updated incrementally
-                    // from the log drain above, nothing to do here
+                    // Build still running — state is updated incrementally
+                    // from the log drain above; nothing to do here.
                 }
                 Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
-                    // Task panicked or was dropped
-                    let msg = "Build task terminated unexpectedly".to_string();
-                    app.build_status = BuildStatus::Failed { error: msg.clone() };
-                    app.add_log(LogLevel::Error, msg.clone());
-                    if matches!(app.popup, app::Popup::None) {
-                        app.popup = app::Popup::BuildError { message: msg };
-                    }
+                    apply_build_task_terminated(app);
                     build_result_rx = None;
                 }
             }

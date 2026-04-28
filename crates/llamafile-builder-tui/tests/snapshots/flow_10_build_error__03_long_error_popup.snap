@@ -1,6 +1,6 @@
 ---
 source: crates/llamafile-builder-tui/tests/flow_10_build_error.rs
-assertion_line: 65
+assertion_line: 76
 expression: frame
 ---
 ┌───────────────────────────── llamafile builder ──────────────────────────────┐
@@ -14,7 +14,7 @@ expression: frame
 │   C│'mistralai/Ministral-3-3B-Instruct-2512-GGUF'. Check your connection│    │
 │   G│and retry. If you are behind a proxy, set HTTPS_PROXY before        │    │
 │    │launching.                                                          │    │
-│   R│                                                                    │    │
+│   F│                                                                    │ode.│
 │    │                                                                    │    │
 │   [│                                                                    │    │
 │    │                                                                    │    │
@@ -25,5 +25,5 @@ expression: frame
 └──────────────────────────────────────────────────────────────────────────────┘
  Select the llamafile runtime version to use  │  Enter=change  ↑↓=navigate  │  ^
 ┌ Logs < INFO > l=expand ──────────────────────────────────────────────────────┐
-│                                                                              │
+│ Build failed: Build failed: network unreachable while resolving HuggingFace m│
 └──────────────────────────────────────────────────────────────────────────────┘

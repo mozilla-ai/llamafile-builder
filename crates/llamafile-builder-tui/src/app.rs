@@ -205,6 +205,22 @@ pub enum BuildStatus {
     Failed { error: String },
 }
 
+/// Outcome of a spawned build task. Sent from the background task back to
+/// `run_app` over a `oneshot` channel.
+///
+/// Lives on `App` (not in `main.rs`) so that `apply_build_result` is
+/// callable from tests — without this, the only way to verify "the
+/// `Failed` branch raises a `BuildError` popup with the right message"
+/// is to spawn a real build, which the L3 boundary explicitly skips.
+#[derive(Debug, Clone)]
+pub enum BuildResult {
+    Complete { path: String, size: u64 },
+    /// User-initiated cancellation. Distinct from `Failed` so the UI
+    /// shows a notice instead of an error popup.
+    Cancelled,
+    Failed { error: String },
+}
+
 /// Current download progress, parsed from tracing events.
 #[derive(Debug, Clone)]
 pub struct DownloadInfo {
@@ -705,6 +721,66 @@ impl App {
     }
 }
 
+/// Apply a build result to the App state. Called by `run_app`'s loop
+/// when the background build task signals completion (or failure, or
+/// cancellation) over its `oneshot` channel.
+///
+/// Splitting this out of `main.rs::run_app` makes the App-side state
+/// transitions testable without spawning a real build. Each match arm
+/// is covered by a unit test below, including the "popup is not
+/// raised when one is already open" rule (`Failed` arm) — a subtle
+/// invariant that's easy to break.
+pub fn apply_build_result(app: &mut App, result: BuildResult) {
+    match result {
+        BuildResult::Complete { path, size } => {
+            app.build_status = BuildStatus::Complete {
+                path: path.clone(),
+                size,
+            };
+            app.add_log(
+                LogLevel::Info,
+                format!(
+                    "Build complete: {} ({})",
+                    path,
+                    llamafile_builder_core::models::format_size(size)
+                ),
+            );
+        }
+        BuildResult::Cancelled => {
+            app.build_status = BuildStatus::Failed {
+                error: "Cancelled".to_string(),
+            };
+            app.add_log(LogLevel::Warn, "Build cancelled".to_string());
+        }
+        BuildResult::Failed { error } => {
+            app.build_status = BuildStatus::Failed {
+                error: error.clone(),
+            };
+            app.add_log(LogLevel::Error, format!("Build failed: {}", error));
+            // Don't stomp an existing popup — e.g. the user already
+            // hit Ctrl+C and is looking at the cancel-confirm modal.
+            if matches!(app.popup, Popup::None) {
+                app.popup = Popup::BuildError { message: error };
+            }
+        }
+    }
+}
+
+/// Apply the "build task terminated unexpectedly" path — i.e. the
+/// `oneshot` sender was dropped without sending a result. Treated as a
+/// failure so the user sees something rather than the build appearing
+/// to hang forever.
+pub fn apply_build_task_terminated(app: &mut App) {
+    let msg = "Build task terminated unexpectedly".to_string();
+    app.build_status = BuildStatus::Failed {
+        error: msg.clone(),
+    };
+    app.add_log(LogLevel::Error, msg.clone());
+    if matches!(app.popup, Popup::None) {
+        app.popup = Popup::BuildError { message: msg };
+    }
+}
+
 /// Construct a fully configured `Builder` from a `SavedState`.
 ///
 /// This is the single place where SavedState is applied to a Builder. Both
@@ -1019,5 +1095,118 @@ mod tests {
         }
         assert_eq!(app.logs.len(), 1000);
         assert!(app.logs.last().unwrap().message.contains("1099"));
+    }
+
+    // ── apply_build_result ──
+    //
+    // These cover the four BuildResult dispatch paths that used to live
+    // inline in `main.rs::run_app`'s match-on-oneshot. Without them, a
+    // change like "BuildResult::Failed silently stops setting the popup"
+    // would not be caught by any test — flow_10's render snapshot
+    // pre-stamped the popup directly.
+
+    #[test]
+    fn apply_build_result_complete_sets_status_and_logs() {
+        let mut app = test_app();
+        app.build_status = BuildStatus::Building {
+            phase: "assembling".to_string(),
+            progress: 0.9,
+        };
+        apply_build_result(
+            &mut app,
+            BuildResult::Complete {
+                path: "/tmp/out.llamafile".to_string(),
+                size: 1024 * 1024,
+            },
+        );
+        assert!(matches!(
+            app.build_status,
+            BuildStatus::Complete { ref path, size: 1048576 } if path == "/tmp/out.llamafile"
+        ));
+        assert!(matches!(app.popup, Popup::None), "complete must not raise a popup");
+        let last = app.logs.last().expect("complete should log");
+        assert_eq!(last.level, LogLevel::Info);
+        assert!(last.message.contains("Build complete"));
+        assert!(last.message.contains("/tmp/out.llamafile"));
+    }
+
+    #[test]
+    fn apply_build_result_cancelled_sets_failed_status_and_warns() {
+        let mut app = test_app();
+        app.build_status = BuildStatus::Building {
+            phase: "downloading".to_string(),
+            progress: 0.3,
+        };
+        apply_build_result(&mut app, BuildResult::Cancelled);
+        assert!(matches!(
+            app.build_status,
+            BuildStatus::Failed { ref error } if error == "Cancelled"
+        ));
+        assert!(
+            matches!(app.popup, Popup::None),
+            "cancellation is user-initiated; never raise the BuildError popup",
+        );
+        let last = app.logs.last().expect("cancellation should log");
+        assert_eq!(last.level, LogLevel::Warn);
+    }
+
+    #[test]
+    fn apply_build_result_failed_raises_build_error_popup() {
+        let mut app = test_app();
+        apply_build_result(
+            &mut app,
+            BuildResult::Failed { error: "disk full at /tmp".to_string() },
+        );
+        match &app.popup {
+            Popup::BuildError { message } => {
+                assert_eq!(message, "disk full at /tmp");
+            }
+            other => panic!("expected BuildError popup, got {:?}", other),
+        }
+        assert!(matches!(
+            app.build_status,
+            BuildStatus::Failed { ref error } if error == "disk full at /tmp"
+        ));
+    }
+
+    #[test]
+    fn apply_build_result_failed_does_not_stomp_existing_popup() {
+        // If the user already opened a popup (e.g. they hit Ctrl+C and
+        // are looking at the cancel-confirm modal) and Failed arrives
+        // afterwards, the existing popup must survive — otherwise the
+        // user's interactive state is wiped from under them.
+        let mut app = test_app();
+        app.popup = Popup::Confirm {
+            message: "Cancel build?".to_string(),
+            action: ConfirmAction::CancelBuildAndQuit,
+        };
+        apply_build_result(
+            &mut app,
+            BuildResult::Failed { error: "network unreachable".to_string() },
+        );
+        assert!(
+            matches!(app.popup, Popup::Confirm { .. }),
+            "BuildError must not stomp an existing popup; got {:?}",
+            app.popup,
+        );
+        // The status still updates to Failed even though the popup is
+        // suppressed — the user will see the error in the log pane.
+        assert!(matches!(app.build_status, BuildStatus::Failed { .. }));
+    }
+
+    #[test]
+    fn apply_build_task_terminated_sets_failed_and_raises_popup() {
+        let mut app = test_app();
+        apply_build_task_terminated(&mut app);
+        match &app.popup {
+            Popup::BuildError { message } => {
+                assert!(message.contains("terminated"));
+            }
+            other => panic!("expected BuildError popup, got {:?}", other),
+        }
+        match &app.build_status {
+            BuildStatus::Failed { error } => assert!(error.contains("terminated")),
+            other => panic!("expected Failed status, got {:?}", other),
+        }
     }
 }

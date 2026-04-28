@@ -1,6 +1,6 @@
 ---
 source: crates/llamafile-builder-tui/tests/flow_10_build_error.rs
-assertion_line: 47
+assertion_line: 53
 expression: frame
 ---
 ┌───────────────────────────── llamafile builder ──────────────────────────────┐
@@ -25,5 +25,5 @@ expression: frame
 └──────────────────────────────────────────────────────────────────────────────┘
  Select the llamafile runtime version to use  │  Enter=change  ↑↓=navigate  │  ^
 ┌ Logs < INFO > l=expand ──────────────────────────────────────────────────────┐
-│                                                                              │
+│ Build failed: Insufficient disk space at /tmp: need 6.4 GiB, have 1.2 GiB ava│
 └──────────────────────────────────────────────────────────────────────────────┘

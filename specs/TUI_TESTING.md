@@ -241,6 +241,7 @@ The §5 table starts at 10 flows. The 11th should take ~10 minutes once Phase 1'
 **Common pitfalls.**
 
 - Bypassing `handle_event` to set state directly. This skips the test of intent capture (failure mode A) — the most common TUI bug class.
+- **Pre-stamping the value the production path is meant to derive.** A test that does `app.build_status = Building { phase: "downloading", … }` "to set up state" passes happily even if the layer that *should* set that field (here, `TuiLogLayer` extracting the `phase` tracing field) is broken or never runs. The shipped-and-reverted dead-code bug from commit 2f9ef8d is the canonical case: every flow test went green while the progress bar was permanently stuck. Rule: if production code derives a value, the test must drive whatever derives it. Synthetic injection is acceptable only at a *named boundary* the spec calls out (e.g. "`SavedState` is the L3 assertion point") — and even then, prefer driving the layer above. When you must inject, write a sibling unit test that drives the bypassed layer, so a regression there isn't invisible.
 - Snapshotting too aggressively. One `assert_snapshot!` every 3–5 keys is usually right; one every keystroke is too much.
 - Asserting on text that shifts with config-driven labels (e.g., model display names from `models.json`). Use stable fixtures from `support::fixtures` instead of bundled defaults.
 - Forgetting to drive a tick after dispatching a key. Some state updates (download progress, async completion) only land on the next tick.
