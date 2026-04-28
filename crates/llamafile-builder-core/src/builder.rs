@@ -18,8 +18,10 @@ use crate::validation::{self, ValidationMessage};
 /// (TUIs, dashboards) can drive a progress display without parsing log
 /// message text.
 ///
-/// Each variant fires exactly once per build, in the order listed below. New
-/// phases must be added explicitly; do not infer phase from message strings.
+/// All emit-on-entry phases below fire at most once per build, in the
+/// order listed. `PreparingGpuLibs` is conditional: it fires only when
+/// the user has selected at least one GPU library. New phases must be
+/// added explicitly; do not infer phase from message strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuildPhase {
     PreparingZipalign,
@@ -31,8 +33,8 @@ pub enum BuildPhase {
 }
 
 impl BuildPhase {
-    /// Stable string identifier for this phase. Used as the value of the
-    /// `phase` tracing field and parsed back via [`BuildPhase::from_str`].
+    /// Stable kebab-case identifier for this phase. Used as the value of
+    /// the `phase` tracing field via the `%` (Display) formatter.
     pub fn as_str(self) -> &'static str {
         match self {
             BuildPhase::PreparingZipalign => "preparing-zipalign",
@@ -44,15 +46,19 @@ impl BuildPhase {
         }
     }
 
-    /// Parse a phase identifier emitted by [`BuildPhase::as_str`].
+    /// Parse a phase identifier from either the `%` (Display, kebab-case)
+    /// form produced by [`BuildPhase::as_str`] or the `?` (Debug,
+    /// PascalCase) form produced by the derived `Debug` impl. Accepting
+    /// both keeps the wire contract forgiving against emit-site mistakes
+    /// — the visitor never sees a "phase" field it can't map.
     pub fn from_str(s: &str) -> Option<Self> {
         Some(match s {
-            "preparing-zipalign" => BuildPhase::PreparingZipalign,
-            "preparing-runtime" => BuildPhase::PreparingRuntime,
-            "preparing-model" => BuildPhase::PreparingModel,
-            "writing-args" => BuildPhase::WritingArgs,
-            "preparing-gpu-libs" => BuildPhase::PreparingGpuLibs,
-            "assembling" => BuildPhase::Assembling,
+            "preparing-zipalign" | "PreparingZipalign" => BuildPhase::PreparingZipalign,
+            "preparing-runtime" | "PreparingRuntime" => BuildPhase::PreparingRuntime,
+            "preparing-model" | "PreparingModel" => BuildPhase::PreparingModel,
+            "writing-args" | "WritingArgs" => BuildPhase::WritingArgs,
+            "preparing-gpu-libs" | "PreparingGpuLibs" => BuildPhase::PreparingGpuLibs,
+            "assembling" | "Assembling" => BuildPhase::Assembling,
             _ => return None,
         })
     }

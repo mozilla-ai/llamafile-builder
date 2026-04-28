@@ -105,8 +105,12 @@ fn apply_to_builder(
         builder.set_config_value(key, value.clone());
     }
 
-    // Args override
-    if let Some(ref args_file) = saved.args_file {
+    // Args override: an inline `args_override` (e.g. set via the TUI's
+    // .args editor and saved into a recipe) takes precedence over a
+    // file path. Either way the builder ends up with the raw content.
+    if let Some(ref content) = saved.args_override {
+        builder.set_args_override(content);
+    } else if let Some(ref args_file) = saved.args_file {
         let content = std::fs::read_to_string(args_file)
             .map_err(|e| format!("Failed to read args file '{}': {e}", args_file))?;
         builder.set_args_override(&content);
@@ -115,6 +119,13 @@ fn apply_to_builder(
     // Output path
     if let Some(ref path) = saved.output_path {
         builder.set_output_path(std::path::Path::new(path));
+    }
+
+    // mmproj_disabled: drop the vision adapter even if the selected
+    // model offers one. Recipes carrying this from the TUI must
+    // honour it from the CLI too.
+    if saved.mmproj_disabled {
+        builder.disable_file_role("mmproj");
     }
 
     // GPU libs (spec-based, from version catalog)
@@ -244,6 +255,43 @@ mod tests {
         assert!(builder.state().selected_version_group.is_some());
         assert!(builder.state().selected_model_id.is_some());
         assert!(builder.can_build());
+    }
+
+    /// Regression: a recipe saved with `args_override` set (e.g. from
+    /// the TUI's .args editor) must build with that override applied
+    /// when loaded by the CLI. Earlier code only honoured `args_file`,
+    /// which is a different field, so the override was silently dropped.
+    #[test]
+    fn build_from_state_applies_args_override() {
+        let saved = SavedState {
+            args_override: Some("# custom\n-m\n/zip/x.gguf\n".to_string()),
+            ..Default::default()
+        };
+        let builder = build_from_state(&saved, test_config(), test_cache()).unwrap();
+        assert_eq!(builder.resolved_args(), "# custom\n-m\n/zip/x.gguf\n");
+    }
+
+    /// Regression: a recipe with `mmproj_disabled = true` must drop the
+    /// vision adapter from the build even when the selected model
+    /// offers one.
+    #[test]
+    fn build_from_state_honours_mmproj_disabled() {
+        // Pick a multimodal model so disabling mmproj is observable.
+        let saved = SavedState {
+            model_id: Some("mistralai/Ministral-3-3B-Instruct-2512-GGUF".to_string()),
+            mmproj_disabled: true,
+            ..Default::default()
+        };
+        let builder = build_from_state(&saved, test_config(), test_cache()).unwrap();
+        let has_mmproj = builder
+            .resolved_components()
+            .iter()
+            .any(|c| matches!(c.role, llamafile_builder_core::ComponentRole::MmprojWeights));
+        assert!(
+            !has_mmproj,
+            "mmproj_disabled should drop the vision-adapter component, got components {:?}",
+            builder.resolved_components(),
+        );
     }
 
     #[test]

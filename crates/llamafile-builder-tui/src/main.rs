@@ -106,8 +106,13 @@ async fn run_app(
         // structured tracing fields (`phase`, `bytes_downloaded`, …) — never
         // by parsing message text here.
         while let Ok(entry) = log_rx.try_recv() {
-            // Download progress
-            if let Some(ref dl) = entry.signals.download {
+            // Download finish takes precedence over progress: the
+            // "download complete" event from `download.rs` carries both
+            // the final bytes and the finish marker, and we want it to
+            // clear the bar (not stamp 100% and stick).
+            if entry.signals.download_finished {
+                app.download_info = None;
+            } else if let Some(ref dl) = entry.signals.download {
                 let is_forward = app.download_info.as_ref()
                     .map(|prev| dl.bytes_downloaded >= prev.bytes_downloaded)
                     .unwrap_or(true);
@@ -124,8 +129,6 @@ async fn run_app(
                         percentage: pct,
                     });
                 }
-            } else if entry.signals.download_finished {
-                app.download_info = None;
             }
 
             // Build phase

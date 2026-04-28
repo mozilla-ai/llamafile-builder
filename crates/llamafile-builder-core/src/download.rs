@@ -200,8 +200,15 @@ pub async fn download_file(
         content_length
     };
 
+    // Emit the same field shape `bytes_downloaded` + `bytes_total` +
+    // `filename` as the in-flight progress events. The TUI's
+    // `TuiLogLayer` extracts these structurally; without them the
+    // download bar wouldn't appear until the first 10%-interval event
+    // landed (or — at INFO log level — never at all).
     tracing::info!(
-        total_bytes = total_size,
+        filename = %filename,
+        bytes_downloaded = starting_offset,
+        bytes_total = total_size,
         resuming,
         "download started"
     );

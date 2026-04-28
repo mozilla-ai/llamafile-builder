@@ -146,22 +146,57 @@ impl MessageVisitor {
     }
 }
 
+/// Strip a single layer of surrounding double quotes, if present.
+/// `format!("{:?}", "foo")` yields `"\"foo\""`; we want `"foo"`.
+fn unquote(s: String) -> String {
+    if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
+        s[1..s.len() - 1].to_string()
+    } else {
+        s
+    }
+}
+
 impl Visit for MessageVisitor {
+    /// Critical: in `tracing-core`, `DisplayValue<T>::record` (the `%`
+    /// formatter) calls `visitor.record_debug(self)` with a `Debug` impl
+    /// that delegates to `Display`. Same for `DebugValue<T>` (the `?`
+    /// formatter). So *every* tracing event field emitted with `%` or
+    /// `?` lands here — including `phase` and `filename`. Anything not
+    /// extracted in `record_debug` is invisible to `BuildSignals`.
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
         let name = field.name();
+        let formatted = format!("{:?}", value);
+
         if name == "message" {
-            self.message = format!("{:?}", value);
-            // Remove surrounding quotes if present
-            if self.message.starts_with('"') && self.message.ends_with('"') {
-                self.message = self.message[1..self.message.len() - 1].to_string();
-            }
+            self.message = unquote(formatted);
             self.note_message_for_finish(&self.message.clone());
-        } else if !name.starts_with("log.") {
-            self.fields
-                .push((name.to_string(), format!("{:?}", value)));
+            return;
+        }
+
+        // Structured signal extraction. `BuildPhase::from_str` accepts
+        // both the kebab-case Display form and the PascalCase Debug form,
+        // so callers using either `%` or `?` with the enum work.
+        match name {
+            "phase" => {
+                if let Some(p) = BuildPhase::from_str(&formatted) {
+                    self.phase = Some(p);
+                }
+            }
+            "filename" => {
+                self.filename = Some(unquote(formatted.clone()));
+            }
+            _ => {}
+        }
+
+        if !name.starts_with("log.") {
+            self.fields.push((name.to_string(), formatted));
         }
     }
 
+    /// `record_str` fires for `&str` values recorded *without* a
+    /// formatter — e.g. `Span::current().record("filename", &s.as_str())`
+    /// or string literals passed bare. Keeps the same field detection so
+    /// span-recorded values populate signals too.
     fn record_str(&mut self, field: &Field, value: &str) {
         let name = field.name();
         match name {

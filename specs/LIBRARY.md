@@ -130,6 +130,8 @@ Build selections. **Sparse** during interactive use (only user overrides; defaul
 | `quantizations` | `HashMap<String, String>` | role -> quant name |
 | `config_values` | `HashMap<String, Value>` | schema-driven config |
 | `args_file` | `Option<String>` | custom .args path |
+| `args_override` | `Option<String>` | inline raw .args content; takes precedence over `args_file` |
+| `mmproj_disabled` | `bool` | drop the vision adapter even if the model offers one |
 | `output_path` | `Option<String>` | output .llamafile path |
 | `gpu_libs` | `Vec<String>` | GPU specs ("cuda", "rocm:linux") |
 | `custom_zipalign` | `Option<String>` | custom zipalign path |
@@ -252,6 +254,34 @@ Build phases (all observable via tracing):
 4. `write_config` -- generate .args from schema or override
 5. `ensure_gpu_libs` -- download GPU libraries (non-fatal on failure)
 6. `create_executable` -- copy runtime, run zipalign to bundle everything
+
+### `BuildPhase` (tracing field)
+
+Each phase emits a `tracing::info!` event whose `phase` field is a
+`BuildPhase` variant — the wire contract observers (TUI, planned HTTP
+SSE) use to drive progress. Edit message strings freely; extend the
+enum to add a phase.
+
+```rust
+pub enum BuildPhase {
+    PreparingZipalign,    // phase = "preparing-zipalign"
+    PreparingRuntime,     // phase = "preparing-runtime"
+    PreparingModel,       // phase = "preparing-model"
+    WritingArgs,          // phase = "writing-args"
+    PreparingGpuLibs,     // phase = "preparing-gpu-libs" — only when libs selected
+    Assembling,           // phase = "assembling"
+}
+```
+
+`BuildPhase::as_str` returns the kebab-case identifier used as the
+field value with the `%` (Display) formatter:
+
+```rust
+tracing::info!(phase = %BuildPhase::PreparingZipalign, "preparing zipalign");
+```
+
+`BuildPhase::from_str` accepts both the kebab-case Display form and the
+PascalCase Debug form, so emit sites using `?` parse correctly too.
 
 
 ## Component model

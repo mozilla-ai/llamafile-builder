@@ -53,13 +53,25 @@ This is the assertion point for failure mode D.
 
 Today, `TuiLogLayer` extracts phase and download progress by regex-matching log message text (e.g., `"download started"`, `"bytes_downloaded="`). This couples the TUI to log copy. Editing a `tracing::info!("downloading model")` to `"fetching model"` silently breaks the progress bar — exactly the "tool doesn't do what it claims" hazard.
 
-**Refactor.** Define a closed enum of phases in core (e.g., `BuildPhase::ZipalignReady`, `RuntimeReady`, `ModelDownloading`, `ModelReady`, `ArgsBuilt`, `Assembled`). Emit them as structured tracing fields:
+**Refactor.** Define a closed enum of phases in core. The implementation
+ships these variants, in pipeline order: `BuildPhase::PreparingZipalign`,
+`PreparingRuntime`, `PreparingModel`, `WritingArgs`, `PreparingGpuLibs`,
+`Assembling`. Emit them as structured tracing fields, using the `%` (Display)
+formatter so the value lands as the stable kebab-case identifier:
 
 ```rust
-tracing::info!(phase = ?BuildPhase::ModelDownloading, file = %name, "downloading model");
+tracing::info!(phase = %BuildPhase::PreparingModel, filename = %name, "downloading model");
 ```
 
-`TuiLogLayer` reads the `phase` field directly from the `tracing::Event`'s field visitor, never the message text. Same for `bytes_downloaded` / `bytes_total` — already candidates for structured fields, just not enforced.
+`TuiLogLayer` reads the `phase` field directly from the `tracing::Event`'s
+field visitor, never the message text. **Crucial implementation detail**:
+`%`-formatted values (`DisplayValue<T>`) land in `Visit::record_debug`, not
+`record_str` — the visitor's debug arm is the one that must extract the
+`phase` and `filename` fields. `BuildPhase::from_str` accepts both the
+kebab-case Display form and the PascalCase Debug form, so a future emit
+site that uses `?` instead of `%` still parses correctly. Same for
+`bytes_downloaded` / `bytes_total` — already candidates for structured
+fields, just not enforced.
 
 This is the contract surface for failure mode E.
 
