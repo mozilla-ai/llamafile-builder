@@ -1,0 +1,25 @@
+---
+source: crates/llamafile-builder-tui/tests/flow_06_recipe_save.rs
+assertion_line: 63
+expression: "(&written.name, &written.state.version_group, &written.state.version,\n&written.state.model_id, &written.state.gpu_libs, &written.state.output_path,)"
+---
+(
+    Some(
+        "cuda-linux-build",
+    ),
+    Some(
+        "llamafile 0.10",
+    ),
+    Some(
+        "0.10.1_alpha",
+    ),
+    Some(
+        "Qwen/Qwen3-0.6B-GGUF",
+    ),
+    [
+        "cuda:linux",
+    ],
+    Some(
+        "/tmp/test.llamafile",
+    ),
+)

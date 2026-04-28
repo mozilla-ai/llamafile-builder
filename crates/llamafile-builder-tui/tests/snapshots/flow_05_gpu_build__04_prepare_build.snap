@@ -1,0 +1,35 @@
+---
+source: crates/llamafile-builder-tui/tests/flow_05_gpu_build.rs
+assertion_line: 41
+expression: saved
+---
+SavedState {
+    version_group: Some(
+        "llamafile 0.10",
+    ),
+    version: Some(
+        "0.10.1_alpha",
+    ),
+    custom_runtime: None,
+    model_id: Some(
+        "Qwen/Qwen3-0.6B-GGUF",
+    ),
+    custom_model_file: None,
+    ollama_model: None,
+    lmstudio_model: None,
+    quantizations: {},
+    config_values: {},
+    args_file: None,
+    args_override: None,
+    mmproj_disabled: false,
+    output_path: Some(
+        "/tmp/test.llamafile",
+    ),
+    custom_companion_files: {},
+    gpu_libs: [
+        "cuda:linux",
+        "rocm:linux",
+    ],
+    custom_gpu_libs: [],
+    custom_zipalign: None,
+}
