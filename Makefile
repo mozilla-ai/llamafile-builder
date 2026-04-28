@@ -1,10 +1,11 @@
 # llamafile-builder build system
 #
-# Prerequisites (macOS):
-#   brew install zig
-#   cargo install cargo-zigbuild
-#   rustup target add x86_64-apple-darwin x86_64-unknown-linux-gnu \
-#     aarch64-unknown-linux-gnu x86_64-pc-windows-gnu
+# Prerequisites:
+#   Rust toolchain (https://rustup.rs)
+#
+# Run `make setup` once to install zig, cargo-zigbuild, and the cross-compile
+# Rust targets. Works on macOS (via Homebrew) and Linux (downloads zig from
+# ziglang.org into $$HOME/.local/bin — make sure that is on your PATH).
 #
 # Usage:
 #   make              # build for current platform (debug)
@@ -20,6 +21,10 @@ TARGETS := \
 	x86_64-unknown-linux-gnu \
 	aarch64-unknown-linux-gnu \
 	x86_64-pc-windows-gnu
+
+# Pinned zig version installed by `make setup` on Linux. Bump when
+# cargo-zigbuild requires a newer toolchain.
+ZIG_VERSION := 0.13.0
 
 CRATES := -p llamafile-builder -p llamafile-builder-tui
 
@@ -100,15 +105,49 @@ check-deps:
 		}; \
 	done
 
-# Install all build dependencies (macOS)
+# Install all build dependencies (macOS via Homebrew, Linux via direct download).
 .PHONY: setup
-setup:
-	@echo "Installing build dependencies..."
+setup: setup-zig
 	@command -v rustup >/dev/null 2>&1 || { echo "Install Rust first: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"; exit 1; }
-	@command -v brew >/dev/null 2>&1 && brew install zig || echo "Warning: brew not found, install zig manually"
-	cargo install cargo-zigbuild
+	@command -v cargo-zigbuild >/dev/null 2>&1 || cargo install cargo-zigbuild
 	rustup target add $(TARGETS)
 	@echo "Done. Run 'make all' to build."
+
+# Install zig if not already on PATH. macOS uses Homebrew; Linux downloads
+# the official tarball from ziglang.org into $$HOME/.local/bin.
+.PHONY: setup-zig
+setup-zig:
+	@if command -v zig >/dev/null 2>&1; then \
+		echo "zig already installed: $$(zig version)"; \
+	else \
+		uname_s=$$(uname -s); \
+		if [ "$$uname_s" = "Darwin" ]; then \
+			command -v brew >/dev/null 2>&1 || { echo "Install Homebrew first: https://brew.sh"; exit 1; }; \
+			brew install zig; \
+		elif [ "$$uname_s" = "Linux" ]; then \
+			arch=$$(uname -m); \
+			case "$$arch" in \
+				x86_64) zig_arch=x86_64 ;; \
+				aarch64|arm64) zig_arch=aarch64 ;; \
+				*) echo "Unsupported Linux arch: $$arch"; exit 1 ;; \
+			esac; \
+			dir="zig-linux-$$zig_arch-$(ZIG_VERSION)"; \
+			url="https://ziglang.org/download/$(ZIG_VERSION)/$$dir.tar.xz"; \
+			echo "Downloading $$url"; \
+			mkdir -p $$HOME/.local/share $$HOME/.local/bin; \
+			tmp=$$(mktemp -d); \
+			curl -fsSL "$$url" -o "$$tmp/zig.tar.xz"; \
+			tar -xf "$$tmp/zig.tar.xz" -C "$$tmp"; \
+			rm -rf "$$HOME/.local/share/zig-$(ZIG_VERSION)"; \
+			mv "$$tmp/$$dir" "$$HOME/.local/share/zig-$(ZIG_VERSION)"; \
+			ln -sf "$$HOME/.local/share/zig-$(ZIG_VERSION)/zig" "$$HOME/.local/bin/zig"; \
+			rm -rf "$$tmp"; \
+			echo "Installed zig to $$HOME/.local/bin/zig"; \
+			case ":$$PATH:" in *":$$HOME/.local/bin:"*) ;; *) echo "WARNING: $$HOME/.local/bin is not on PATH — add it before running 'make all'." ;; esac; \
+		else \
+			echo "Unsupported OS: $$uname_s — install zig manually."; exit 1; \
+		fi; \
+	fi
 
 .PHONY: clean
 clean:
