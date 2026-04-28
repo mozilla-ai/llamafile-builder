@@ -25,6 +25,7 @@ url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 fs4 = "0.13"
+insta = { version = "1", features = ["filters"] }
 
 [profile.release]
 panic = "abort"

@@ -10,6 +10,68 @@ use crate::state::BuildState;
 use crate::validation::{self, ValidationMessage};
 
 // ============================================================================
+// Build phases
+// ============================================================================
+
+/// A coarse-grained phase of the build pipeline. Emitted as a structured
+/// `phase` field on tracing events at the start of each phase, so observers
+/// (TUIs, dashboards) can drive a progress display without parsing log
+/// message text.
+///
+/// All emit-on-entry phases below fire at most once per build, in the
+/// order listed. `PreparingGpuLibs` is conditional: it fires only when
+/// the user has selected at least one GPU library. New phases must be
+/// added explicitly; do not infer phase from message strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BuildPhase {
+    PreparingZipalign,
+    PreparingRuntime,
+    PreparingModel,
+    WritingArgs,
+    PreparingGpuLibs,
+    Assembling,
+}
+
+impl BuildPhase {
+    /// Stable kebab-case identifier for this phase. Used as the value of
+    /// the `phase` tracing field via the `%` (Display) formatter.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BuildPhase::PreparingZipalign => "preparing-zipalign",
+            BuildPhase::PreparingRuntime => "preparing-runtime",
+            BuildPhase::PreparingModel => "preparing-model",
+            BuildPhase::WritingArgs => "writing-args",
+            BuildPhase::PreparingGpuLibs => "preparing-gpu-libs",
+            BuildPhase::Assembling => "assembling",
+        }
+    }
+
+    /// Parse a phase identifier emitted by [`BuildPhase::as_str`]. The
+    /// kebab-case Display form is the *only* canonical wire format —
+    /// emit sites must use `%` (Display), not `?` (Debug). An emit site
+    /// using `?` produces a value `from_str` can't map; the consume-side
+    /// visitor sees `None` and the `log_layer_integration` tests would
+    /// catch that on the next run.
+    pub fn from_str(s: &str) -> Option<Self> {
+        Some(match s {
+            "preparing-zipalign" => BuildPhase::PreparingZipalign,
+            "preparing-runtime" => BuildPhase::PreparingRuntime,
+            "preparing-model" => BuildPhase::PreparingModel,
+            "writing-args" => BuildPhase::WritingArgs,
+            "preparing-gpu-libs" => BuildPhase::PreparingGpuLibs,
+            "assembling" => BuildPhase::Assembling,
+            _ => return None,
+        })
+    }
+}
+
+impl std::fmt::Display for BuildPhase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+// ============================================================================
 // GPU library selection
 // ============================================================================
 
@@ -431,21 +493,21 @@ impl Builder {
 
         // Phase 1: Ensure zipalign (prerequisite for everything)
         let zipalign_path = {
-            tracing::info!("preparing zipalign");
+            tracing::info!(phase = %BuildPhase::PreparingZipalign, "preparing zipalign");
             self.ensure_zipalign().await?
         };
         self.check_cancelled()?;
 
         // Phase 2: Ensure runtime
         let runtime_path = {
-            tracing::info!("preparing runtime binary");
+            tracing::info!(phase = %BuildPhase::PreparingRuntime, "preparing runtime binary");
             self.ensure_runtime().await?
         };
         self.check_cancelled()?;
 
         // Phase 3: Ensure model files
         let (weights_path, mmproj_path) = {
-            tracing::info!("preparing model files");
+            tracing::info!(phase = %BuildPhase::PreparingModel, "preparing model files");
             self.ensure_model_files().await?
         };
         self.check_cancelled()?;
@@ -453,7 +515,11 @@ impl Builder {
         // Phase 4: Write .args
         let args_path = {
             let args_content = self.resolved_args();
-            tracing::debug!(content_length = args_content.len(), "writing .args configuration");
+            tracing::info!(
+                phase = %BuildPhase::WritingArgs,
+                content_length = args_content.len(),
+                "writing .args configuration"
+            );
             tracing::debug!(content = %args_content, ".args content");
             crate::file_ops::write_temp_file(&args_content, ".args")
                 .await
@@ -771,6 +837,12 @@ impl Builder {
             return paths;
         }
 
+        tracing::info!(
+            phase = %BuildPhase::PreparingGpuLibs,
+            count = self.gpu_libs.len(),
+            "preparing GPU libraries"
+        );
+
         for lib in &self.gpu_libs {
             let accel_name = gpu_accel_name(lib.accel);
             tracing::info!(accel = accel_name, os = ?lib.os, "preparing GPU library");
@@ -806,6 +878,12 @@ impl Builder {
         gpu_lib_paths: &[PathBuf],
     ) -> crate::Result<PathBuf> {
         let output_path = PathBuf::from(&self.state.output_path);
+
+        tracing::info!(
+            phase = %BuildPhase::Assembling,
+            output = %output_path.display(),
+            "assembling executable"
+        );
 
         // Copy runtime to output
         tracing::debug!(
@@ -917,24 +995,7 @@ impl Builder {
 mod tests {
     use super::*;
 
-    fn test_config() -> BuilderConfig {
-        BuilderConfig {
-            versions: crate::config_manager::parse_config_data(
-                include_str!("../../../data/versions.json"),
-            )
-            .unwrap(),
-            models: crate::config_manager::parse_config_data(
-                include_str!("../../../data/models.json"),
-            )
-            .unwrap(),
-            config_schema: crate::config_manager::parse_config_data(
-                include_str!("../../../data/config.json"),
-            )
-            .unwrap(),
-            config_version: 1,
-            min_builder_version: None,
-        }
-    }
+    use crate::test_utils::test_config;
 
     fn test_cache() -> Cache {
         Cache::new(PathBuf::from("/tmp/llamafile-test-cache"))

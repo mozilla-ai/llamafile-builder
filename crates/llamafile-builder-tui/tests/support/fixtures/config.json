@@ -1,0 +1,32 @@
+{
+  "config_version": 1,
+  "min_builder_version": "0.1.0",
+  "data": [
+    { "type": "text", "key": "model_path", "label": "Model path", "description": "Path to model weights", "default": "/zip/${MODEL_FILENAME}", "value_type": "string", "flag": "-m", "hidden": true, "required": true },
+    { "type": "text", "key": "mmproj_path", "label": "MMProj path", "description": "Path to mmproj weights", "default": "/zip/${MMPROJ_FILENAME}", "value_type": "string", "flag": "--mmproj", "hidden": true, "conditional": "has_mmproj" },
+    { "type": "text", "key": "gpu_mode", "label": "GPU Mode", "description": "GPU acceleration mode (set to DISABLE for CPU-only)", "default": "", "value_type": "string", "flag": "--gpu", "hidden": true },
+
+    {
+      "type": "section",
+      "label": "Inference",
+      "description": "Set up inference parameters",
+      "items": [
+        { "type": "dropdown", "key": "context_length", "label": "Context Length", "description": "Maximum context window size (0 for model max)", "default": 0, "options": [0, 2048, 4096, 8192, 16384, 32768, 65536, 131072], "flag": "--ctx-size" },
+        { "type": "slider", "key": "temperature", "label": "Temperature", "description": "Sampling temperature for generation", "default": 0.8, "min": 0, "max": 2, "step": 0.1, "flag": "--temp" }
+      ]
+    },
+
+    {
+      "type": "section",
+      "label": "HTTP Server",
+      "description": "Run as an HTTP server with OpenAI-compatible API",
+      "default": true,
+      "items": [
+        { "type": "text", "key": "host", "label": "Listen Host", "description": "Network interface to bind to", "default": "127.0.0.1", "value_type": "string", "flag": "--host" },
+        { "type": "text", "key": "port", "label": "Port", "description": "HTTP server port", "default": 8080, "value_type": "number", "flag": "--port" },
+        { "type": "bool", "key": "server_enabled", "label": "Run standalone", "description": "Run the server only, with no terminal chat UI", "default": false, "flag": "--server" },
+        { "type": "bool", "key": "disable_web_ui", "label": "Disable Web UI", "description": "Run the OpenAI API endpoint, with no Web UI", "default": false, "flag": "--no-webui" }
+      ]
+    }
+  ]
+}

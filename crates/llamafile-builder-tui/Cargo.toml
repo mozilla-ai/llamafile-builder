@@ -23,4 +23,6 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
+llamafile-builder-core = { path = "../llamafile-builder-core", features = ["test-utils"] }
 tempfile = "3"
+insta = { workspace = true }

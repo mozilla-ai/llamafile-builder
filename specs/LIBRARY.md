@@ -127,11 +127,17 @@ Build selections. **Sparse** during interactive use (only user overrides; defaul
 | `custom_runtime` | `Option<String>` | custom binary path |
 | `model_id` | `Option<String>` | HF repo ID |
 | `custom_model_file` | `Option<String>` | custom .gguf path |
-| `quantizations` | `HashMap<String, String>` | role -> quant name |
+| `ollama_model` | `Option<OllamaModel>` | model picked from a local Ollama install |
+| `lmstudio_model` | `Option<LMStudioModel>` | model picked from a local LM Studio install |
+| `quantizations` | `HashMap<String, String>` | role → quant name |
 | `config_values` | `HashMap<String, Value>` | schema-driven config |
 | `args_file` | `Option<String>` | custom .args path |
+| `args_override` | `Option<String>` | inline raw .args content; takes precedence over `args_file` |
+| `mmproj_disabled` | `bool` | drop the vision adapter even if the model offers one |
 | `output_path` | `Option<String>` | output .llamafile path |
-| `gpu_libs` | `Vec<String>` | GPU specs ("cuda", "rocm:linux") |
+| `gpu_libs` | `Vec<String>` | registry GPU specs (`"cuda"`, `"rocm:linux"`); see [`parse_gpu_spec`](#parse_gpu_spec) |
+| `custom_gpu_libs` | `Vec<CustomGpuLib>` | GPU libraries supplied as local file paths instead of from the version catalog |
+| `custom_companion_files` | `HashMap<String, String>` | extra files to bundle alongside a `custom_model_file` (role → path), e.g. mmproj for a local multimodal model |
 | `custom_zipalign` | `Option<String>` | custom zipalign path |
 
 ### Lifecycle
@@ -141,6 +147,35 @@ Build selections. **Sparse** during interactive use (only user overrides; defaul
 - **Saving**: when the user names a recipe (or at the end of a successful build), `state.resolve_defaults(config)` is called to capture a full snapshot — all defaults frozen at that moment
 - **After build**: unnamed recipes (working drafts) are deleted. User is prompted to name/keep
 - **Named recipes**: persist until explicitly deleted
+
+### `apply_saved_state` / `build_from_state`
+
+The single canonical `SavedState → Builder` converter shared by every
+interface (TUI, CLI, JSON-RPC, HTTP). Per CLAUDE.md "rebuilds always
+construct a fresh `Builder` from `SavedState`" — this is the only path.
+
+```rust
+pub fn apply_saved_state(builder: &mut Builder, state: &SavedState) -> Result<(), String>
+pub fn build_from_state(state: &SavedState, config: BuilderConfig, cache: Cache) -> Result<Builder, String>
+```
+
+Errors are surfaced (not swallowed) for: unknown registry version,
+unknown registry model, unknown quantization, unreadable args file.
+Defaults are applied for slots the state leaves unset (no version →
+default version, no model → default model, etc.). Version-only
+recipes (no group) substring-match across all groups so
+`recipe set-version 0.10.0` works without the user knowing the group.
+
+### <a name="parse_gpu_spec"></a>`parse_gpu_spec`
+
+```rust
+pub fn parse_gpu_spec(spec: &str) -> Result<(GpuAccel, Vec<Os>), String>
+```
+
+Parses `<accel>[:<os>]` strings used in `SavedState::gpu_libs` and on
+the CLI / HTTP / JSON-RPC surfaces. `accel` is `cuda` | `rocm` |
+`vulkan`; `os` is `linux` | `windows` | `all` (expands to both).
+Omitted `os` falls back to the host platform.
 
 
 ## Builder
@@ -252,6 +287,35 @@ Build phases (all observable via tracing):
 4. `write_config` -- generate .args from schema or override
 5. `ensure_gpu_libs` -- download GPU libraries (non-fatal on failure)
 6. `create_executable` -- copy runtime, run zipalign to bundle everything
+
+### `BuildPhase` (tracing field)
+
+Each phase emits a `tracing::info!` event whose `phase` field is a
+`BuildPhase` variant — the wire contract observers (TUI, planned HTTP
+SSE) use to drive progress. Edit message strings freely; extend the
+enum to add a phase.
+
+```rust
+pub enum BuildPhase {
+    PreparingZipalign,    // phase = "preparing-zipalign"
+    PreparingRuntime,     // phase = "preparing-runtime"
+    PreparingModel,       // phase = "preparing-model"
+    WritingArgs,          // phase = "writing-args"
+    PreparingGpuLibs,     // phase = "preparing-gpu-libs" — only when libs selected
+    Assembling,           // phase = "assembling"
+}
+```
+
+`BuildPhase::as_str` returns the kebab-case identifier used as the
+field value with the `%` (Display) formatter:
+
+```rust
+tracing::info!(phase = %BuildPhase::PreparingZipalign, "preparing zipalign");
+```
+
+`BuildPhase::from_str` is strict: it accepts only the kebab-case Display
+form. Emit sites must use `%`; `?` produces a value `from_str` rejects so
+that drift surfaces immediately in the consume-side tests.
 
 
 ## Component model

@@ -1,8 +1,4 @@
-mod app;
-mod config_ui;
-mod events;
-mod log_layer;
-mod ui;
+use llamafile_builder_tui::{app, events, log_layer, ui};
 
 use std::io;
 use std::path::PathBuf;
@@ -23,16 +19,10 @@ use tracing_subscriber::util::SubscriberInitExt;
 use llamafile_builder_core::config_manager::ConfigManager;
 use llamafile_builder_core::config_store::ConfigStore;
 
-use app::{App, BuildStatus, LogEntry, LogLevel};
-
-/// Result sent back from the build task.
-enum BuildResult {
-    Complete { path: String, size: u64 },
-    /// User-initiated cancellation. Distinct from `Failed` so the UI can show
-    /// a notice instead of an error popup.
-    Cancelled,
-    Failed { error: String },
-}
+use app::{
+    apply_build_result, apply_build_task_terminated, build_from_state, App, BuildResult,
+    BuildStatus, LogEntry, LogLevel,
+};
 
 fn get_config_dir() -> PathBuf {
     directories::BaseDirs::new()
@@ -105,69 +95,42 @@ async fn run_app(
     let cancel_flag = Arc::new(AtomicBool::new(false));
 
     loop {
-        // Drain any pending log messages from the tracing layer
-        // Also update download/build state from each new entry as it arrives
+        // Drain any pending log messages from the tracing layer.
+        // BuildSignals on each entry are populated by TuiLogLayer from
+        // structured tracing fields (`phase`, `bytes_downloaded`, …) — never
+        // by parsing message text here.
         while let Ok(entry) = log_rx.try_recv() {
-            let msg = &entry.message;
-
-            // Track download state
-            if msg.contains("download started") {
-                let filename = extract_str_field(msg, "filename=")
-                    .unwrap_or_else(|| "file".to_string());
-                let total = extract_field(msg, "bytes_total=").unwrap_or(0);
-                app.download_info = Some(app::DownloadInfo {
-                    filename,
-                    bytes_downloaded: 0,
-                    bytes_total: total,
-                    percentage: 0.0,
-                });
-            } else if msg.contains("bytes_downloaded=") && msg.contains("bytes_total=") {
-                // Our own downloader (reliable single-stream progress)
-                if let (Some(dl), Some(total)) = (
-                    extract_field(msg, "bytes_downloaded="),
-                    extract_field(msg, "bytes_total="),
-                ) {
-                    let is_forward = app.download_info.as_ref()
-                        .map(|prev| dl >= prev.bytes_downloaded)
-                        .unwrap_or(true);
-                    if is_forward {
-                        let filename = extract_str_field(msg, "filename=")
-                            .unwrap_or_else(|| "file".to_string());
-                        let pct = if total > 0 { (dl as f32 / total as f32) * 100.0 } else { 0.0 };
-                        app.download_info = Some(app::DownloadInfo {
-                            filename,
-                            bytes_downloaded: dl,
-                            bytes_total: total,
-                            percentage: pct,
-                        });
-                    }
-                }
-            } else if msg.contains("download complete") || msg.contains("already cached")
-                || msg.contains("already in HF cache")
-            {
+            // Download finish takes precedence over progress: the
+            // "download complete" event from `download.rs` carries both
+            // the final bytes and the finish marker, and we want it to
+            // clear the bar (not stamp 100% and stick).
+            if entry.signals.download_finished {
                 app.download_info = None;
+            } else if let Some(ref dl) = entry.signals.download {
+                let is_forward = app.download_info.as_ref()
+                    .map(|prev| dl.bytes_downloaded >= prev.bytes_downloaded)
+                    .unwrap_or(true);
+                if is_forward {
+                    let pct = if dl.bytes_total > 0 {
+                        (dl.bytes_downloaded as f32 / dl.bytes_total as f32) * 100.0
+                    } else {
+                        0.0
+                    };
+                    app.download_info = Some(app::DownloadInfo {
+                        filename: dl.filename.clone().unwrap_or_else(|| "file".to_string()),
+                        bytes_downloaded: dl.bytes_downloaded,
+                        bytes_total: dl.bytes_total,
+                        percentage: pct,
+                    });
+                }
             }
 
-            // Update build phase from INFO events
-            if matches!(entry.level, app::LogLevel::Info) && build_result_rx.is_some() {
-                let new_phase = if msg.contains("preparing zipalign") {
-                    Some(("preparing zipalign", 0.05))
-                } else if msg.contains("preparing runtime") {
-                    Some(("preparing runtime", 0.1))
-                } else if msg.contains("download started") || msg.contains("downloading from") || msg.contains("registry file") {
-                    Some(("downloading", 0.3))
-                } else if msg.contains("writing .args") {
-                    Some(("writing config", 0.7))
-                } else if msg.contains("GPU lib") {
-                    Some(("preparing GPU libs", 0.8))
-                } else if msg.contains("bundling") || msg.contains("zipalign -j0") || msg.contains("copying runtime") {
-                    Some(("assembling", 0.9))
-                } else {
-                    None
-                };
-                if let Some((phase, progress)) = new_phase {
+            // Build phase
+            if let Some(phase) = entry.signals.phase {
+                if build_result_rx.is_some() {
+                    let (label, progress) = phase_display(phase);
                     app.build_status = BuildStatus::Building {
-                        phase: phase.to_string(),
+                        phase: label.to_string(),
                         progress,
                     };
                 }
@@ -176,45 +139,21 @@ async fn run_app(
             app.logs.push(entry);
         }
 
-        // Check if a build task finished
+        // Check if a build task finished. The state-transition logic
+        // lives in `app::apply_build_result` / `apply_build_task_terminated`
+        // so it's testable without spawning a real build.
         if let Some(ref mut rx) = build_result_rx {
             match rx.try_recv() {
-                Ok(BuildResult::Complete { path, size }) => {
-                    app.build_status = BuildStatus::Complete { path: path.clone(), size };
-                    app.add_log(LogLevel::Info, format!(
-                        "Build complete: {} ({})",
-                        path,
-                        llamafile_builder_core::models::format_size(size)
-                    ));
-                    build_result_rx = None;
-                }
-                Ok(BuildResult::Cancelled) => {
-                    app.build_status = BuildStatus::Failed {
-                        error: "Cancelled".to_string(),
-                    };
-                    app.add_log(LogLevel::Warn, "Build cancelled".to_string());
-                    build_result_rx = None;
-                }
-                Ok(BuildResult::Failed { error }) => {
-                    app.build_status = BuildStatus::Failed { error: error.clone() };
-                    app.add_log(LogLevel::Error, format!("Build failed: {}", error));
-                    if matches!(app.popup, app::Popup::None) {
-                        app.popup = app::Popup::BuildError { message: error.clone() };
-                    }
+                Ok(result) => {
+                    apply_build_result(app, result);
                     build_result_rx = None;
                 }
                 Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
-                    // Build still running -- state is updated incrementally
-                    // from the log drain above, nothing to do here
+                    // Build still running — state is updated incrementally
+                    // from the log drain above; nothing to do here.
                 }
                 Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
-                    // Task panicked or was dropped
-                    let msg = "Build task terminated unexpectedly".to_string();
-                    app.build_status = BuildStatus::Failed { error: msg.clone() };
-                    app.add_log(LogLevel::Error, msg.clone());
-                    if matches!(app.popup, app::Popup::None) {
-                        app.popup = app::Popup::BuildError { message: msg };
-                    }
+                    apply_build_task_terminated(app);
                     build_result_rx = None;
                 }
             }
@@ -240,92 +179,26 @@ async fn run_app(
                     build_result_rx = Some(rx);
                     cancel_flag.store(false, Ordering::Relaxed);
 
-                    // Capture everything needed to reconstruct the builder in the task
-                    let shared_cancel = cancel_flag.clone();
+                    // Snapshot the user's selections; the build task rebuilds
+                    // a Builder from this on a Send-compatible thread.
+                    let prepared = app.to_saved_state();
                     let config = app.config.clone();
                     let cache_dir = app.cache_dir.clone();
-                    let version_group = app.version_group.clone();
-                    let version = app.version.clone();
-                    let custom_runtime = app.custom_runtime.clone();
-                    let model_id = app.model_id.clone();
-                    let custom_model_file = app.custom_model_file.clone();
-                    let ollama_model = app.ollama_model.clone();
-                    let lmstudio_model = app.lmstudio_model.clone();
-                    let quantizations = app.quantizations.clone();
-                    let config_values = app.config_values.clone();
-                    let output_path = app.output_path.clone();
-                    let gpu_libs = app.gpu_libs.clone();
-                    let custom_zipalign = app.custom_zipalign.clone();
-                    let args_file = app.args_file.clone();
-                    let args_override = app.args_override.clone();
-                    let mmproj_disabled = app.mmproj_disabled;
+                    let shared_cancel = cancel_flag.clone();
 
                     tokio::spawn(async move {
-                        // Reconstruct builder inside the task (on a Send-compatible thread)
-                        let cache = llamafile_builder_core::cache::Cache::new(cache_dir);
-                        let mut builder = llamafile_builder_core::Builder::new(config, cache);
+                        // build_from_state can fail (unknown version, model,
+                        // quant, …) but `make_builder` ran the same path
+                        // synchronously above and succeeded. The fallback
+                        // is just defence in depth — surface as Failed.
+                        let mut builder = match build_from_state(config, cache_dir, &prepared) {
+                            Ok(b) => b,
+                            Err(e) => {
+                                let _ = tx.send(BuildResult::Failed { error: e });
+                                return;
+                            }
+                        };
                         builder.set_cancel_flag(shared_cancel);
-
-                        // Apply state
-                        if let Some(ref rt) = custom_runtime {
-                            builder.use_custom_runtime(std::path::Path::new(rt));
-                        } else if let (Some(ref g), Some(ref v)) = (&version_group, &version) {
-                            builder.select_version(g, v);
-                        } else {
-                            builder.select_default_version();
-                        }
-
-                        if let Some(ref path) = custom_model_file {
-                            builder.select_custom_model(std::path::Path::new(path));
-                        } else if let Some(ref model) = ollama_model {
-                            builder.select_ollama_model(model.clone());
-                        } else if let Some(ref model) = lmstudio_model {
-                            builder.select_lmstudio_model(model.clone());
-                        } else if let Some(ref id) = model_id {
-                            builder.select_registry_model(id);
-                        } else {
-                            builder.select_default_model();
-                        }
-
-                        for (role, name) in &quantizations {
-                            if let Some(mid) = builder.state().selected_model_id.clone() {
-                                if let Some(model) = builder.config().models.iter().find(|m| m.id == mid) {
-                                    if let Some(file) = model.files.iter().find(|f| f.role == *role) {
-                                        if let Some(idx) = file.quantizations.iter().position(|q| q.name.eq_ignore_ascii_case(name)) {
-                                            builder.select_quantization(role, idx);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        for (key, value) in &config_values {
-                            builder.set_config_value(key, value.clone());
-                        }
-
-                        if let Some(ref path) = output_path {
-                            builder.set_output_path(std::path::Path::new(path));
-                        }
-
-                        for &(accel, os) in &gpu_libs {
-                            builder.add_gpu_lib(accel, os);
-                        }
-
-                        if let Some(ref path) = custom_zipalign {
-                            builder.use_custom_zipalign(std::path::Path::new(path));
-                        }
-
-                        if let Some(ref content) = args_override {
-                            builder.set_args_override(content);
-                        } else if let Some(ref path) = args_file {
-                            if let Ok(content) = std::fs::read_to_string(path) {
-                                builder.set_args_override(&content);
-                            }
-                        }
-
-                        if mmproj_disabled {
-                            builder.disable_file_role("mmproj");
-                        }
 
                         match builder.build().await {
                             Ok(path) => {
@@ -399,24 +272,19 @@ fn is_user_cancellation(error: &llamafile_builder_core::Error) -> bool {
     )
 }
 
-/// Extract a u64 field value from a log message like "bytes_downloaded=12345"
-fn extract_field(msg: &str, key: &str) -> Option<u64> {
-    let start = msg.find(key)? + key.len();
-    let rest = &msg[start..];
-    let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
-    rest[..end].parse().ok()
-}
-
-/// Extract a string field value from a log message like "filename=model.gguf"
-fn extract_str_field(msg: &str, key: &str) -> Option<String> {
-    let start = msg.find(key)? + key.len();
-    let rest = &msg[start..];
-    if rest.starts_with('"') {
-        let end = rest[1..].find('"').map(|i| i + 1)?;
-        Some(rest[1..end].to_string())
-    } else {
-        let end = rest.find(|c: char| c == ' ' || c == ',').unwrap_or(rest.len());
-        Some(rest[..end].to_string())
+/// Map a `BuildPhase` to its UI label and the progress fraction the dashboard
+/// shows. Progress fractions are TUI-only — the core enum carries no
+/// presentational meaning. Each phase fires exactly once, so progress is
+/// monotonic.
+fn phase_display(phase: llamafile_builder_core::BuildPhase) -> (&'static str, f32) {
+    use llamafile_builder_core::BuildPhase;
+    match phase {
+        BuildPhase::PreparingZipalign => ("preparing zipalign", 0.05),
+        BuildPhase::PreparingRuntime => ("preparing runtime", 0.1),
+        BuildPhase::PreparingModel => ("downloading", 0.3),
+        BuildPhase::WritingArgs => ("writing config", 0.7),
+        BuildPhase::PreparingGpuLibs => ("preparing GPU libs", 0.8),
+        BuildPhase::Assembling => ("assembling", 0.9),
     }
 }
 

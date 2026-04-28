@@ -28,6 +28,7 @@ utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 
 [dev-dependencies]
+llamafile-builder-core = { path = "../llamafile-builder-core", features = ["test-utils"] }
 tempfile = "3"
 temp-env = { version = "0.3", features = ["async_closure"] }
 http-body-util = "0.1"

@@ -1,0 +1,29 @@
+---
+source: crates/llamafile-builder-tui/tests/flow_08_args_override.rs
+assertion_line: 44
+expression: frame
+---
+┌───────────────────────────── llamafile builder ──────────────────────────────┐
+│   Version    llamafile 0.10 / 0.10.1_alpha                                   │
+│                                                                              │
+│   Model      Qwen3 0.6B (0.6B)                                               │
+│   Weights    Q8_0 (default) (609.8 MiB)                                      │
+│                                                                              │
+│   Output     /tmp/test.llamafile                                             │
+│                                                                              │
+│   Config     manually overridden, check .args                                │
+│   GPU        (none)                                                          │
+│                                                                              │
+│   Ready to build                                                             │
+│                                                                              │
+│   [ Build ]   [ Show .args ]   [ Quit ]                                      │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+ Preview the .args file that will be bundled  │  Enter=preview  │  ^S=save  ^L=l
+┌ Logs < INFO > l=expand ──────────────────────────────────────────────────────┐
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘

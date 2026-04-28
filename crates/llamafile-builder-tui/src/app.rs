@@ -3,10 +3,10 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use llamafile_builder_core::config_manager::BuilderConfig;
-use llamafile_builder_core::config_store::{BuildRecipe, ConfigStore, SavedState};
+use llamafile_builder_core::config_store::{BuildRecipe, ConfigStore, CustomGpuLib, SavedState};
 use llamafile_builder_core::models::*;
 use llamafile_builder_core::cache::Cache;
-use llamafile_builder_core::Builder;
+use llamafile_builder_core::{Builder, BuildPhase};
 
 /// An available GPU library from the selected release.
 #[derive(Debug, Clone)]
@@ -205,6 +205,22 @@ pub enum BuildStatus {
     Failed { error: String },
 }
 
+/// Outcome of a spawned build task. Sent from the background task back to
+/// `run_app` over a `oneshot` channel.
+///
+/// Lives on `App` (not in `main.rs`) so that `apply_build_result` is
+/// callable from tests — without this, the only way to verify "the
+/// `Failed` branch raises a `BuildError` popup with the right message"
+/// is to spawn a real build, which the L3 boundary explicitly skips.
+#[derive(Debug, Clone)]
+pub enum BuildResult {
+    Complete { path: String, size: u64 },
+    /// User-initiated cancellation. Distinct from `Failed` so the UI
+    /// shows a notice instead of an error popup.
+    Cancelled,
+    Failed { error: String },
+}
+
 /// Current download progress, parsed from tracing events.
 #[derive(Debug, Clone)]
 pub struct DownloadInfo {
@@ -252,11 +268,36 @@ impl LogLevel {
     }
 }
 
+/// Structured download-progress fields extracted from a tracing event.
+/// Populated when an event carries `bytes_downloaded` + `bytes_total`.
+#[derive(Debug, Clone)]
+pub struct DownloadFields {
+    pub filename: Option<String>,
+    pub bytes_downloaded: u64,
+    pub bytes_total: u64,
+}
+
+/// What kind of build-pipeline signal a tracing event carries, if any.
+/// Set by `TuiLogLayer` from structured fields — never by parsing message
+/// text. Multiple signals can fire on the same event.
+#[derive(Debug, Default, Clone)]
+pub struct BuildSignals {
+    pub phase: Option<BuildPhase>,
+    pub download: Option<DownloadFields>,
+    /// True when the event indicates a download has finished or was already
+    /// cached (i.e. clear any in-flight `DownloadInfo`).
+    pub download_finished: bool,
+}
+
 /// A log entry with its level, for filtering.
 #[derive(Debug, Clone)]
 pub struct LogEntry {
     pub level: LogLevel,
     pub message: String,
+    /// Build-pipeline signals extracted from structured fields. The TUI's
+    /// main loop reads these to update `BuildStatus` and `DownloadInfo`
+    /// without re-parsing `message`.
+    pub signals: BuildSignals,
 }
 
 /// The full TUI application state.
@@ -279,10 +320,27 @@ pub struct App {
     pub config_values: HashMap<String, serde_json::Value>,
     pub output_path: Option<String>,
     pub gpu_libs: Vec<(GpuAccel, Os)>,
+    /// GPU libraries specified by local file path (not from the version
+    /// catalog). The TUI doesn't currently expose a UI to set these, but
+    /// it must round-trip them through save/load — recipes created via
+    /// the HTTP server's `POST /state/custom-gpu` populate this field
+    /// and the TUI would silently drop them otherwise.
+    pub custom_gpu_libs: Vec<CustomGpuLib>,
+    /// Extra files to bundle alongside a custom model file (role → path).
+    /// Same round-trip rationale as `custom_gpu_libs`.
+    pub custom_companion_files: HashMap<String, String>,
     pub custom_zipalign: Option<String>,
     pub args_file: Option<String>,
     pub args_override: Option<String>,
     pub mmproj_disabled: bool,
+
+    /// Ollama install root override. Tests point this at a fake `~/.ollama`
+    /// scaffolding so the Model Select Ollama tab is reproducible without
+    /// depending on the developer's machine. `None` (production default)
+    /// means use `dirs::home_dir().join(".ollama")`.
+    pub ollama_dir: Option<String>,
+    /// LM Studio models root override. Same purpose as `ollama_dir`.
+    pub lmstudio_dir: Option<String>,
 
     // UI state
     pub focus: Focus,
@@ -316,10 +374,14 @@ impl App {
             config_values: HashMap::new(),
             output_path: None,
             gpu_libs: Vec::new(),
+            custom_gpu_libs: Vec::new(),
+            custom_companion_files: HashMap::new(),
             custom_zipalign: None,
             args_file: None,
             args_override: None,
             mmproj_disabled: false,
+            ollama_dir: None,
+            lmstudio_dir: None,
             focus: Focus::Version,
             popup: Popup::None,
             build_status: BuildStatus::Idle,
@@ -466,81 +528,14 @@ impl App {
         parts.join("  ")
     }
 
-    /// Build a Builder from the current state.
+    /// Build a Builder from the current state. Errors on unknown
+    /// version / model / quantization or unreadable args file.
     pub fn make_builder(&self) -> Result<Builder, String> {
-        let cache = Cache::new(self.cache_dir.clone());
-        let mut builder = Builder::new(self.config.clone(), cache);
-
-        // Version
-        if let Some(ref runtime) = self.custom_runtime {
-            builder.use_custom_runtime(std::path::Path::new(runtime));
-        } else if let (Some(ref g), Some(ref v)) = (&self.version_group, &self.version) {
-            builder.select_version(g, v);
-        } else {
-            builder.select_default_version();
-        }
-
-        // Model
-        if let Some(ref path) = self.custom_model_file {
-            builder.select_custom_model(std::path::Path::new(path));
-        } else if let Some(ref model) = self.ollama_model {
-            builder.select_ollama_model(model.clone());
-        } else if let Some(ref model) = self.lmstudio_model {
-            builder.select_lmstudio_model(model.clone());
-        } else if let Some(ref id) = self.model_id {
-            builder.select_registry_model(id);
-        } else {
-            builder.select_default_model();
-        }
-
-        // Quantizations
-        for (role, name) in &self.quantizations {
-            if let Some(model_id) = builder.state().selected_model_id.clone() {
-                if let Some(model) = builder.config().models.iter().find(|m| m.id == model_id) {
-                    if let Some(file) = model.files.iter().find(|f| f.role == *role) {
-                        if let Some(idx) = file.quantizations.iter().position(|q| q.name.eq_ignore_ascii_case(name)) {
-                            builder.select_quantization(role, idx);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Config values
-        for (key, value) in &self.config_values {
-            builder.set_config_value(key, value.clone());
-        }
-
-        // Output
-        if let Some(ref path) = self.output_path {
-            builder.set_output_path(std::path::Path::new(path));
-        }
-
-        // GPU
-        for &(accel, os) in &self.gpu_libs {
-            builder.add_gpu_lib(accel, os);
-        }
-
-        // Custom zipalign
-        if let Some(ref path) = self.custom_zipalign {
-            builder.use_custom_zipalign(std::path::Path::new(path));
-        }
-
-        // Disable mmproj if user toggled it off
-        if self.mmproj_disabled {
-            builder.disable_file_role("mmproj");
-        }
-
-        // Args override (from manual editing or file)
-        if let Some(ref content) = self.args_override {
-            builder.set_args_override(content);
-        } else if let Some(ref path) = self.args_file {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                builder.set_args_override(&content);
-            }
-        }
-
-        Ok(builder)
+        build_from_state(
+            self.config.clone(),
+            self.cache_dir.clone(),
+            &self.to_saved_state(),
+        )
     }
 
     /// Get the currently selected release.
@@ -580,7 +575,11 @@ impl App {
     }
 
     pub fn add_log(&mut self, level: LogLevel, msg: String) {
-        self.logs.push(LogEntry { level, message: msg });
+        self.logs.push(LogEntry {
+            level,
+            message: msg,
+            signals: BuildSignals::default(),
+        });
         // Keep last 1000 entries
         if self.logs.len() > 1000 {
             self.logs.drain(0..self.logs.len() - 1000);
@@ -637,13 +636,20 @@ impl App {
             quantizations: self.quantizations.clone(),
             config_values: self.config_values.clone(),
             args_file: self.args_file.clone(),
+            args_override: self.args_override.clone(),
+            mmproj_disabled: self.mmproj_disabled,
             output_path: self.output_path.clone(),
             gpu_libs,
-            custom_gpu_libs: vec![],
-            custom_companion_files: Default::default(),
+            custom_gpu_libs: self.custom_gpu_libs.clone(),
+            custom_companion_files: self.custom_companion_files.clone(),
             custom_zipalign: self.custom_zipalign.clone(),
         }
     }
+
+    // `prepare_build` was a one-line alias the spec named for clarity in
+    // §4.1; `to_saved_state` is the actual surface and the only one
+    // worth keeping. Tests and the main loop call `to_saved_state`
+    // directly.
 
     /// Load App fields from a BuildRecipe.
     pub fn load_from_recipe(&mut self, recipe: &BuildRecipe) {
@@ -660,8 +666,10 @@ impl App {
         self.args_file = s.args_file.clone();
         self.output_path = s.output_path.clone();
         self.custom_zipalign = s.custom_zipalign.clone();
-        self.args_override = None;
-        self.mmproj_disabled = false;
+        self.args_override = s.args_override.clone();
+        self.mmproj_disabled = s.mmproj_disabled;
+        self.custom_gpu_libs = s.custom_gpu_libs.clone();
+        self.custom_companion_files = s.custom_companion_files.clone();
 
         // Convert string gpu specs to typed tuples
         self.gpu_libs = s.gpu_libs.iter().filter_map(|spec| {
@@ -721,26 +729,87 @@ impl App {
     }
 }
 
+/// Apply a build result to the App state. Called by `run_app`'s loop
+/// when the background build task signals completion (or failure, or
+/// cancellation) over its `oneshot` channel.
+///
+/// Splitting this out of `main.rs::run_app` makes the App-side state
+/// transitions testable without spawning a real build. Each match arm
+/// is covered by a unit test below, including the "popup is not
+/// raised when one is already open" rule (`Failed` arm) — a subtle
+/// invariant that's easy to break.
+pub fn apply_build_result(app: &mut App, result: BuildResult) {
+    match result {
+        BuildResult::Complete { path, size } => {
+            app.build_status = BuildStatus::Complete {
+                path: path.clone(),
+                size,
+            };
+            app.add_log(
+                LogLevel::Info,
+                format!(
+                    "Build complete: {} ({})",
+                    path,
+                    llamafile_builder_core::models::format_size(size)
+                ),
+            );
+        }
+        BuildResult::Cancelled => {
+            app.build_status = BuildStatus::Failed {
+                error: "Cancelled".to_string(),
+            };
+            app.add_log(LogLevel::Warn, "Build cancelled".to_string());
+        }
+        BuildResult::Failed { error } => {
+            app.build_status = BuildStatus::Failed {
+                error: error.clone(),
+            };
+            app.add_log(LogLevel::Error, format!("Build failed: {}", error));
+            // Don't stomp an existing popup — e.g. the user already
+            // hit Ctrl+C and is looking at the cancel-confirm modal.
+            if matches!(app.popup, Popup::None) {
+                app.popup = Popup::BuildError { message: error };
+            }
+        }
+    }
+}
+
+/// Apply the "build task terminated unexpectedly" path — i.e. the
+/// `oneshot` sender was dropped without sending a result. Routes
+/// through `apply_build_result` so the popup-guard rule lives in one
+/// place: a Confirm popup that's already open (e.g. cancel-confirm)
+/// must survive the unexpected termination.
+pub fn apply_build_task_terminated(app: &mut App) {
+    apply_build_result(
+        app,
+        BuildResult::Failed {
+            error: "Build task terminated unexpectedly".to_string(),
+        },
+    );
+}
+
+/// Construct a fully configured `Builder` from a `SavedState`.
+///
+/// Thin wrapper around `llamafile_builder_core::config_store::build_from_state`
+/// — the single canonical SavedState → Builder converter shared with the
+/// CLI, JSON-RPC, and HTTP interfaces. Kept here because the TUI passes
+/// `cache_dir` rather than a `Cache` and that shape is convenient for
+/// the spawn body.
+pub fn build_from_state(
+    config: BuilderConfig,
+    cache_dir: PathBuf,
+    state: &SavedState,
+) -> Result<Builder, String> {
+    let cache = Cache::new(cache_dir);
+    llamafile_builder_core::config_store::build_from_state(state, config, cache)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    fn test_config() -> BuilderConfig {
-        BuilderConfig {
-            versions: llamafile_builder_core::config_manager::parse_config_data(
-                include_str!("../../../data/versions.json"),
-            ).unwrap(),
-            models: llamafile_builder_core::config_manager::parse_config_data(
-                include_str!("../../../data/models.json"),
-            ).unwrap(),
-            config_schema: llamafile_builder_core::config_manager::parse_config_data(
-                include_str!("../../../data/config.json"),
-            ).unwrap(),
-            config_version: 1,
-            min_builder_version: None,
-        }
-    }
+    use llamafile_builder_core::test_utils::test_config;
 
     fn test_app() -> App {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -933,5 +1002,118 @@ mod tests {
         }
         assert_eq!(app.logs.len(), 1000);
         assert!(app.logs.last().unwrap().message.contains("1099"));
+    }
+
+    // ── apply_build_result ──
+    //
+    // These cover the four BuildResult dispatch paths that used to live
+    // inline in `main.rs::run_app`'s match-on-oneshot. Without them, a
+    // change like "BuildResult::Failed silently stops setting the popup"
+    // would not be caught by any test — flow_10's render snapshot
+    // pre-stamped the popup directly.
+
+    #[test]
+    fn apply_build_result_complete_sets_status_and_logs() {
+        let mut app = test_app();
+        app.build_status = BuildStatus::Building {
+            phase: "assembling".to_string(),
+            progress: 0.9,
+        };
+        apply_build_result(
+            &mut app,
+            BuildResult::Complete {
+                path: "/tmp/out.llamafile".to_string(),
+                size: 1024 * 1024,
+            },
+        );
+        assert!(matches!(
+            app.build_status,
+            BuildStatus::Complete { ref path, size: 1048576 } if path == "/tmp/out.llamafile"
+        ));
+        assert!(matches!(app.popup, Popup::None), "complete must not raise a popup");
+        let last = app.logs.last().expect("complete should log");
+        assert_eq!(last.level, LogLevel::Info);
+        assert!(last.message.contains("Build complete"));
+        assert!(last.message.contains("/tmp/out.llamafile"));
+    }
+
+    #[test]
+    fn apply_build_result_cancelled_sets_failed_status_and_warns() {
+        let mut app = test_app();
+        app.build_status = BuildStatus::Building {
+            phase: "downloading".to_string(),
+            progress: 0.3,
+        };
+        apply_build_result(&mut app, BuildResult::Cancelled);
+        assert!(matches!(
+            app.build_status,
+            BuildStatus::Failed { ref error } if error == "Cancelled"
+        ));
+        assert!(
+            matches!(app.popup, Popup::None),
+            "cancellation is user-initiated; never raise the BuildError popup",
+        );
+        let last = app.logs.last().expect("cancellation should log");
+        assert_eq!(last.level, LogLevel::Warn);
+    }
+
+    #[test]
+    fn apply_build_result_failed_raises_build_error_popup() {
+        let mut app = test_app();
+        apply_build_result(
+            &mut app,
+            BuildResult::Failed { error: "disk full at /tmp".to_string() },
+        );
+        match &app.popup {
+            Popup::BuildError { message } => {
+                assert_eq!(message, "disk full at /tmp");
+            }
+            other => panic!("expected BuildError popup, got {:?}", other),
+        }
+        assert!(matches!(
+            app.build_status,
+            BuildStatus::Failed { ref error } if error == "disk full at /tmp"
+        ));
+    }
+
+    #[test]
+    fn apply_build_result_failed_does_not_stomp_existing_popup() {
+        // If the user already opened a popup (e.g. they hit Ctrl+C and
+        // are looking at the cancel-confirm modal) and Failed arrives
+        // afterwards, the existing popup must survive — otherwise the
+        // user's interactive state is wiped from under them.
+        let mut app = test_app();
+        app.popup = Popup::Confirm {
+            message: "Cancel build?".to_string(),
+            action: ConfirmAction::CancelBuildAndQuit,
+        };
+        apply_build_result(
+            &mut app,
+            BuildResult::Failed { error: "network unreachable".to_string() },
+        );
+        assert!(
+            matches!(app.popup, Popup::Confirm { .. }),
+            "BuildError must not stomp an existing popup; got {:?}",
+            app.popup,
+        );
+        // The status still updates to Failed even though the popup is
+        // suppressed — the user will see the error in the log pane.
+        assert!(matches!(app.build_status, BuildStatus::Failed { .. }));
+    }
+
+    #[test]
+    fn apply_build_task_terminated_sets_failed_and_raises_popup() {
+        let mut app = test_app();
+        apply_build_task_terminated(&mut app);
+        match &app.popup {
+            Popup::BuildError { message } => {
+                assert!(message.contains("terminated"));
+            }
+            other => panic!("expected BuildError popup, got {:?}", other),
+        }
+        match &app.build_status {
+            BuildStatus::Failed { error } => assert!(error.contains("terminated")),
+            other => panic!("expected Failed status, got {:?}", other),
+        }
     }
 }

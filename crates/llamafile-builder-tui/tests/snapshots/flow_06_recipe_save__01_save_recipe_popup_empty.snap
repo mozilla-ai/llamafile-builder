@@ -1,0 +1,29 @@
+---
+source: crates/llamafile-builder-tui/tests/flow_06_recipe_save.rs
+assertion_line: 34
+expression: frame
+---
+┌───────────────────────────── llamafile builder ──────────────────────────────┐
+│   Version    llamafile 0.10 / 0.10.1_alpha                                   │
+│                                                                              │
+│   Model      Qwen3 0.6B (0.6B)                                               │
+│   Weights    Q8_0 (default) (609.8 MiB)                                      │
+│                                                                              │
+│   Output     /tmp/test.llamafile                                             │
+│                                                                              │
+│   Config     mode=Combined  context_length=0  temperature=0.8                │
+│ > GPU     ┌ Save Recipe ────────────────────────────────────────┐            │
+│           │ Name: _                                             │            │
+│   Ready to│                                                     │            │
+│           │                                                     │            │
+│   [ Build └ Enter=save  Esc=cancel ─────────────────────────────┘            │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+ Add or remove GPU acceleration libraries  │  Enter=change  ↑↓=navigate  │  ^S=s
+┌ Logs < INFO > l=expand ──────────────────────────────────────────────────────┐
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘

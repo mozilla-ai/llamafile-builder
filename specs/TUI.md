@@ -86,7 +86,7 @@ A `tui-textarea` multi-line editor showing the generated `.args` content. Editin
 3. The main loop detects the "starting" phase and spawns a `tokio::spawn` task that reconstructs a `Builder` from cloned app state.
 4. The build task runs the full pipeline (zipalign → runtime → model → config → GPU → assemble).
 5. Progress is communicated solely through tracing events: the main loop drains a `mpsc` channel of `LogEntry` values captured by a custom `tracing::Layer`.
-6. Build phase and download progress are extracted from log message content as they arrive.
+6. Build phase and download progress are extracted from structured tracing fields (`phase = BuildPhase::…`, `bytes_downloaded`, `bytes_total`, `filename`) by `TuiLogLayer` and attached to each `LogEntry` as `BuildSignals` — never by parsing message text.
 7. On completion, a `oneshot` channel delivers the result (path + size, or error).
 
 The build can be cancelled by quitting the app (sets a shared `Arc<AtomicBool>` cancel flag).
@@ -97,8 +97,9 @@ The TUI does not use any UI-facing progress types from the core library. Instead
 
 - A custom `TuiLogLayer` implements `tracing_subscriber::Layer` and forwards events to an `mpsc::Sender<LogEntry>`.
 - The main loop drains the receiver on each tick and pushes entries into `app.logs`.
-- Download progress is detected by matching structured fields in log messages (`bytes_downloaded`, `bytes_total`, `filename`).
-- Build phase transitions are detected by matching INFO-level messages containing keywords (`preparing runtime`, `downloading`, `writing config`, `assembling`, etc.).
+- Each `LogEntry` carries `BuildSignals { phase, download, download_finished }` extracted by the layer's field visitor — the main loop drives `BuildStatus` and `DownloadInfo` from those fields, not from message text.
+- Build phase transitions are emitted by the core library as structured `phase = BuildPhase::…` fields on INFO events; new phases are added by extending the enum, not by tweaking log copy.
+- Download progress is read from the structured `bytes_downloaded`, `bytes_total`, and `filename` fields on download events.
 - The log pane filters entries by the user-selected log level.
 - Noisy targets (`hyper`, `reqwest`, `rustls`) and connection pool messages are filtered out in the layer.
 

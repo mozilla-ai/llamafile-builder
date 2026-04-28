@@ -1,0 +1,29 @@
+---
+source: crates/llamafile-builder-tui/tests/flow_05_gpu_build.rs
+assertion_line: 23
+expression: frame
+---
+┌───────────────────────────── llamafile builder ──────────────────────────────┐
+│   Version    llamafile 0.10 / 0.10.1_alpha                                   │
+│                                                                              │
+│   Model      Qwen3 0.6B (0.6B)                                               │
+│   Weights    Q8_0 (default) (609.8 MiB)                                      │
+│                                                                              │
+│   Output     /tmp/test.llamafile                                             │
+│           ┌ GPU Libraries ──────────────────────────────────────┐            │
+│   Config  │  [ ] CUDA — NVIDIA GPUs — Linux (.so) — 795.8 MiB   │            │
+│ > GPU     │  [ ] CUDA — NVIDIA GPUs — Windows (.dll) — 788.5 MiB│            │
+│           │  [ ] ROCm — AMD GPUs — Linux (.so) — 540.3 MiB      │            │
+│   Ready to│  [ ] ROCm — AMD GPUs — Windows (.dll) — 550.3 MiB   │            │
+│           │  [ ] Vulkan — Linux (.so) — 32.9 MiB                │            │
+│   [ Build │  [ ] Vulkan — Windows (.dll) — 30.8 MiB             │            │
+│           │                                                     │            │
+│           │                                                     │            │
+│           └ Space=toggle  ↑↓=navigate  Esc=close ───────────────┘            │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+ Add or remove GPU acceleration libraries  │  Enter=change  ↑↓=navigate  │  ^S=s
+┌ Logs < INFO > l=expand ──────────────────────────────────────────────────────┐
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘

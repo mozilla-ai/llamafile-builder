@@ -365,16 +365,30 @@ pub enum CacheStatus {
 - **TUI**: custom `tracing::Layer` forwarding events to an `mpsc` channel, drained by the render loop.
 - **HTTP server** (planned): tracing events bridged to SSE stream.
 
-Key events emitted during a build (all at INFO level unless noted):
-- `build started` with `output` field
-- `preparing zipalign` / `preparing runtime` / `preparing model files`
-- `already cached` (cache hit) or `download started` / `downloading` (with `bytes_downloaded`, `bytes_total`, `percentage`, `filename` fields)
+Key events emitted during a build (all at INFO level unless noted) carry
+a structured `phase` field whose value is a `BuildPhase` variant — frontends
+read the field directly via the tracing visitor rather than matching on
+message text:
+
+- `build started` with `output` field (no `phase`; this is the prologue)
+- `preparing zipalign` (`phase = preparing-zipalign`)
+- `preparing runtime binary` (`phase = preparing-runtime`)
+- `preparing model files` (`phase = preparing-model`)
+- `already cached` (cache hit) or `download started` / `downloading` (with
+  `bytes_downloaded`, `bytes_total`, `filename` fields)
 - `download complete` or `already in HF cache`
-- `writing .args configuration` (DEBUG)
+- `writing .args configuration` (`phase = writing-args`)
+- `preparing GPU libraries` (`phase = preparing-gpu-libs`; only when the
+  user has selected at least one GPU lib)
+- `assembling executable` (`phase = assembling`)
 - `bundling` / `copying runtime` / `running zipalign` (DEBUG)
 - `build complete` with `path` and `size_human` fields (DEBUG)
 
-Download progress events are emitted at DEBUG level (~2/sec) with INFO at 10% milestones. This keeps INFO-level output clean while giving frontends fine-grained progress when they subscribe to DEBUG.
+Download progress events are emitted at DEBUG level (~2/sec) with INFO at
+10% milestones. This keeps INFO-level output clean while giving frontends
+fine-grained progress when they subscribe to DEBUG. The `BuildPhase` enum
+is the wire contract: extending it is a deliberate change, while message
+strings can be edited without breaking observers.
 
 Important constraint: async functions in the core library must not use `#[tracing::instrument]` or hold `EnteredSpan` across `.await` points, as this makes futures `!Send` and prevents `tokio::spawn`.
 

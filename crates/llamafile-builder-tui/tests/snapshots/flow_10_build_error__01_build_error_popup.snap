@@ -1,0 +1,29 @@
+---
+source: crates/llamafile-builder-tui/tests/flow_10_build_error.rs
+assertion_line: 43
+expression: frame
+---
+┌───────────────────────────── llamafile builder ──────────────────────────────┐
+│ > Version    llamafile 0.10 / 0.10.1_alpha                                   │
+│                                                                              │
+│   Model      Qwen3 0.6B (0.6B)                                               │
+│   Weights    Q8_0 (default) (609.8 MiB)                                      │
+│                                                                              │
+│   O┌ Build failed ──────────────────────────────────────────────────────┐    │
+│    │Insufficient disk space at /tmp: need 6.4 GiB, have 1.2 GiB         │    │
+│   C│available                                                           │    │
+│   G│                                                                    │    │
+│    │                                                                    │    │
+│   F│                                                                    │ila.│
+│    │                                                                    │    │
+│   [│                                                                    │    │
+│    │                                                                    │    │
+│    │                                                                    │    │
+│    │                                                                    │    │
+│    └ press any key to dismiss ──────────────────────────────────────────┘    │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+ Select the llamafile runtime version to use  │  Enter=change  ↑↓=navigate  │  ^
+┌ Logs < INFO > l=expand ──────────────────────────────────────────────────────┐
+│ Build failed: Insufficient disk space at /tmp: need 6.4 GiB, have 1.2 GiB ava│
+└──────────────────────────────────────────────────────────────────────────────┘

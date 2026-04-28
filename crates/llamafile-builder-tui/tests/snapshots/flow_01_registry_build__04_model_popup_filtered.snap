@@ -1,0 +1,29 @@
+---
+source: crates/llamafile-builder-tui/tests/flow_01_registry_build.rs
+assertion_line: 40
+expression: frame
+---
+┌───────────────────────────── llamafile builder ──────────────────────────────┐
+│   ┌ Select Model ────────────────────────────────────────────────────────┐   │
+│   │ Registry    Ollama    LM Studio                                      │   │
+│ > │ Search: ministral_                                                   │   │
+│   │   Ministral 3 3B Instruct — 3.3B 2.8 GiB [vision, chat]              │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+└───│                                                                      │───┘
+ Cho│                                                                      │ate
+┌ Lo│                                                                      │───┐
+│   └ ←→=source  ↑↓=navigate  Enter=select  Esc=cancel ────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────────────┘

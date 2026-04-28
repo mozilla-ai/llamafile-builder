@@ -1,0 +1,29 @@
+---
+source: crates/llamafile-builder-tui/tests/flow_01_registry_build.rs
+assertion_line: 49
+expression: frame
+---
+┌───────────────────────────── llamafile builder ──────────────────────────────┐
+│   Version    llamafile 0.10 / 0.10.1_alpha                                   │
+│                                                                              │
+│   Model      Ministral 3 3B Instruct (3.3B)                                  │
+│ > Weights    Q4_K_M (default) (2.0 GiB)                                      │
+│   Mmproj     [x] BF16 (default)                                              │
+│                                                                              │
+│   Output     /tmp/test.llamafile                                             │
+│                                                                              │
+│   Config     mo┌ Select weights Quantization ──────────────┐8                │
+│   GPU        (n│ * Q4_K_M                                  │                 │
+│                │   BF16                                    │                 │
+│   Ready to buil│                                           │                 │
+│                │                                           │                 │
+│   [ Build ]   [└ ↑↓=navigate  Enter=select  Esc=cancel ────┘                 │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+ Select quantization level for model weights  │  Enter=change  ↑↓=navigate  │  ^
+┌ Logs < INFO > l=expand ──────────────────────────────────────────────────────┐
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘

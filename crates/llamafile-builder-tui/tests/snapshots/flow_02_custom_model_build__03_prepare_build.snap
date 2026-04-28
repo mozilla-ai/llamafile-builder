@@ -1,0 +1,32 @@
+---
+source: crates/llamafile-builder-tui/tests/flow_02_custom_model_build.rs
+assertion_line: 83
+expression: saved
+---
+SavedState {
+    version_group: Some(
+        "llamafile 0.10",
+    ),
+    version: Some(
+        "0.10.1_alpha",
+    ),
+    custom_runtime: None,
+    model_id: None,
+    custom_model_file: Some(
+        "/path/to/local/model.gguf",
+    ),
+    ollama_model: None,
+    lmstudio_model: None,
+    quantizations: {},
+    config_values: {},
+    args_file: None,
+    args_override: None,
+    mmproj_disabled: false,
+    output_path: Some(
+        "/tmp/custom.llamafile",
+    ),
+    custom_companion_files: {},
+    gpu_libs: [],
+    custom_gpu_libs: [],
+    custom_zipalign: None,
+}

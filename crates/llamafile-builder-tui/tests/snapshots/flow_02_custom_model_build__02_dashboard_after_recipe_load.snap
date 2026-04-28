@@ -1,0 +1,29 @@
+---
+source: crates/llamafile-builder-tui/tests/flow_02_custom_model_build.rs
+assertion_line: 65
+expression: frame
+---
+┌───────────────────────────── llamafile builder ──────────────────────────────┐
+│ > Version    llamafile 0.10 / 0.10.1_alpha                                   │
+│                                                                              │
+│   Model      (none)                                                          │
+│   Weights    (none) ()                                                       │
+│                                                                              │
+│   Output     /tmp/custom.llamafile                                           │
+│                                                                              │
+│   Config     mode=Combined  context_length=0  temperature=0.8                │
+│   GPU        (none)                                                          │
+│                                                                              │
+│   Ready to build                                                             │
+│                                                                              │
+│   [ Build ]   [ Show .args ]   [ Quit ]                                      │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+ Select the llamafile runtime version to use  │  Enter=change  ↑↓=navigate  │  ^
+┌ Logs < INFO > l=expand ──────────────────────────────────────────────────────┐
+│ Loaded recipe 'custom-build'                                                 │
+└──────────────────────────────────────────────────────────────────────────────┘

@@ -10,8 +10,13 @@ pub fn handle_key(app: &mut App, key: event::KeyEvent) -> bool {
         return true;
     }
 
-    // Log pane toggle
-    if matches!(key.code, KeyCode::Char('l')) && matches!(app.popup, Popup::None) {
+    // Bare `l` toggles the log pane. Modified variants (Ctrl+L for Load
+    // Recipe, Shift+L if we ever bind it) must fall through to the
+    // dashboard handler.
+    if matches!(key.code, KeyCode::Char('l'))
+        && key.modifiers.is_empty()
+        && matches!(app.popup, Popup::None)
+    {
         app.log_expanded = !app.log_expanded;
         return true;
     }
@@ -124,8 +129,12 @@ fn handle_dashboard_key(app: &mut App, key: event::KeyEvent) -> bool {
                 }
                 Focus::Model => {
                     // Scan local model sources
-                    let ollama_models = llamafile_builder_core::ollama::get_ollama_models(None);
-                    let lmstudio_models = llamafile_builder_core::lmstudio::get_lmstudio_models(None);
+                    let ollama_models = llamafile_builder_core::ollama::get_ollama_models(
+                        app.ollama_dir.as_deref(),
+                    );
+                    let lmstudio_models = llamafile_builder_core::lmstudio::get_lmstudio_models(
+                        app.lmstudio_dir.as_deref(),
+                    );
 
                     // Determine initial tab and cursor from current selection
                     let tab = app.model_source;
@@ -792,28 +801,9 @@ fn request_quit(app: &mut App) {
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use llamafile_builder_core::config_manager::BuilderConfig;
     use llamafile_builder_core::config_store::ConfigStore;
+    use llamafile_builder_core::test_utils::test_config;
     use std::path::PathBuf;
-
-    fn test_config() -> BuilderConfig {
-        BuilderConfig {
-            versions: llamafile_builder_core::config_manager::parse_config_data(
-                include_str!("../../../data/versions.json"),
-            )
-            .unwrap(),
-            models: llamafile_builder_core::config_manager::parse_config_data(
-                include_str!("../../../data/models.json"),
-            )
-            .unwrap(),
-            config_schema: llamafile_builder_core::config_manager::parse_config_data(
-                include_str!("../../../data/config.json"),
-            )
-            .unwrap(),
-            config_version: 1,
-            min_builder_version: None,
-        }
-    }
 
     fn test_app() -> App {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -922,5 +912,33 @@ mod tests {
         };
         handle_key(&mut app, key(KeyCode::Esc));
         assert!(matches!(app.popup, Popup::None));
+    }
+
+    /// Regression: bare `l` toggles the log pane; `Ctrl+L` opens the Load
+    /// Recipe popup. The two share a key letter but have different
+    /// intents. An earlier version of `handle_key` matched on
+    /// `Char('l')` ignoring modifiers, so `Ctrl+L` toggled the log pane
+    /// and never reached the dashboard's Ctrl+L handler — failure mode A
+    /// (intent misread) per `specs/TUI_TESTING.md` §2.
+    #[test]
+    fn bare_l_toggles_log_pane_not_load_recipe() {
+        let mut app = test_app();
+        assert!(!app.log_expanded);
+        handle_key(&mut app, key(KeyCode::Char('l')));
+        assert!(app.log_expanded);
+        assert!(matches!(app.popup, Popup::None));
+    }
+
+    #[test]
+    fn ctrl_l_opens_load_recipe_popup_not_log_toggle() {
+        let mut app = test_app();
+        let log_before = app.log_expanded;
+        handle_key(&mut app, ctrl(KeyCode::Char('l')));
+        assert!(
+            matches!(app.popup, Popup::LoadRecipe { .. }),
+            "expected LoadRecipe popup, got {:?}",
+            app.popup,
+        );
+        assert_eq!(app.log_expanded, log_before, "log pane state must not change");
     }
 }
