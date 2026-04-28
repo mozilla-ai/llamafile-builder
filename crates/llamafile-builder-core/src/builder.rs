@@ -10,6 +10,61 @@ use crate::state::BuildState;
 use crate::validation::{self, ValidationMessage};
 
 // ============================================================================
+// Build phases
+// ============================================================================
+
+/// A coarse-grained phase of the build pipeline. Emitted as a structured
+/// `phase` field on tracing events at the start of each phase, so observers
+/// (TUIs, dashboards) can drive a progress display without parsing log
+/// message text.
+///
+/// Each variant fires exactly once per build, in the order listed below. New
+/// phases must be added explicitly; do not infer phase from message strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BuildPhase {
+    PreparingZipalign,
+    PreparingRuntime,
+    PreparingModel,
+    WritingArgs,
+    PreparingGpuLibs,
+    Assembling,
+}
+
+impl BuildPhase {
+    /// Stable string identifier for this phase. Used as the value of the
+    /// `phase` tracing field and parsed back via [`BuildPhase::from_str`].
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BuildPhase::PreparingZipalign => "preparing-zipalign",
+            BuildPhase::PreparingRuntime => "preparing-runtime",
+            BuildPhase::PreparingModel => "preparing-model",
+            BuildPhase::WritingArgs => "writing-args",
+            BuildPhase::PreparingGpuLibs => "preparing-gpu-libs",
+            BuildPhase::Assembling => "assembling",
+        }
+    }
+
+    /// Parse a phase identifier emitted by [`BuildPhase::as_str`].
+    pub fn from_str(s: &str) -> Option<Self> {
+        Some(match s {
+            "preparing-zipalign" => BuildPhase::PreparingZipalign,
+            "preparing-runtime" => BuildPhase::PreparingRuntime,
+            "preparing-model" => BuildPhase::PreparingModel,
+            "writing-args" => BuildPhase::WritingArgs,
+            "preparing-gpu-libs" => BuildPhase::PreparingGpuLibs,
+            "assembling" => BuildPhase::Assembling,
+            _ => return None,
+        })
+    }
+}
+
+impl std::fmt::Display for BuildPhase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+// ============================================================================
 // GPU library selection
 // ============================================================================
 
@@ -431,21 +486,21 @@ impl Builder {
 
         // Phase 1: Ensure zipalign (prerequisite for everything)
         let zipalign_path = {
-            tracing::info!("preparing zipalign");
+            tracing::info!(phase = %BuildPhase::PreparingZipalign, "preparing zipalign");
             self.ensure_zipalign().await?
         };
         self.check_cancelled()?;
 
         // Phase 2: Ensure runtime
         let runtime_path = {
-            tracing::info!("preparing runtime binary");
+            tracing::info!(phase = %BuildPhase::PreparingRuntime, "preparing runtime binary");
             self.ensure_runtime().await?
         };
         self.check_cancelled()?;
 
         // Phase 3: Ensure model files
         let (weights_path, mmproj_path) = {
-            tracing::info!("preparing model files");
+            tracing::info!(phase = %BuildPhase::PreparingModel, "preparing model files");
             self.ensure_model_files().await?
         };
         self.check_cancelled()?;
@@ -453,7 +508,11 @@ impl Builder {
         // Phase 4: Write .args
         let args_path = {
             let args_content = self.resolved_args();
-            tracing::debug!(content_length = args_content.len(), "writing .args configuration");
+            tracing::info!(
+                phase = %BuildPhase::WritingArgs,
+                content_length = args_content.len(),
+                "writing .args configuration"
+            );
             tracing::debug!(content = %args_content, ".args content");
             crate::file_ops::write_temp_file(&args_content, ".args")
                 .await
@@ -771,6 +830,12 @@ impl Builder {
             return paths;
         }
 
+        tracing::info!(
+            phase = %BuildPhase::PreparingGpuLibs,
+            count = self.gpu_libs.len(),
+            "preparing GPU libraries"
+        );
+
         for lib in &self.gpu_libs {
             let accel_name = gpu_accel_name(lib.accel);
             tracing::info!(accel = accel_name, os = ?lib.os, "preparing GPU library");
@@ -806,6 +871,12 @@ impl Builder {
         gpu_lib_paths: &[PathBuf],
     ) -> crate::Result<PathBuf> {
         let output_path = PathBuf::from(&self.state.output_path);
+
+        tracing::info!(
+            phase = %BuildPhase::Assembling,
+            output = %output_path.display(),
+            "assembling executable"
+        );
 
         // Copy runtime to output
         tracing::debug!(

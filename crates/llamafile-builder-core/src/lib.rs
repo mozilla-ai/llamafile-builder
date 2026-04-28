@@ -17,7 +17,7 @@ pub mod validation;
 pub mod zipalign;
 
 // Primary API
-pub use builder::Builder;
+pub use builder::{Builder, BuildPhase};
 pub use cache::{Cache, CacheStatus};
 pub use config_manager::{BuilderConfig, ConfigManager, UpdateMode, UpdateStatus};
 pub use config_store::{BuildRecipe, ConfigStore, SavedState};

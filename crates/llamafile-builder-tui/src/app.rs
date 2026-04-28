@@ -6,7 +6,7 @@ use llamafile_builder_core::config_manager::BuilderConfig;
 use llamafile_builder_core::config_store::{BuildRecipe, ConfigStore, SavedState};
 use llamafile_builder_core::models::*;
 use llamafile_builder_core::cache::Cache;
-use llamafile_builder_core::Builder;
+use llamafile_builder_core::{Builder, BuildPhase};
 
 /// An available GPU library from the selected release.
 #[derive(Debug, Clone)]
@@ -252,11 +252,36 @@ impl LogLevel {
     }
 }
 
+/// Structured download-progress fields extracted from a tracing event.
+/// Populated when an event carries `bytes_downloaded` + `bytes_total`.
+#[derive(Debug, Clone)]
+pub struct DownloadFields {
+    pub filename: Option<String>,
+    pub bytes_downloaded: u64,
+    pub bytes_total: u64,
+}
+
+/// What kind of build-pipeline signal a tracing event carries, if any.
+/// Set by `TuiLogLayer` from structured fields — never by parsing message
+/// text. Multiple signals can fire on the same event.
+#[derive(Debug, Default, Clone)]
+pub struct BuildSignals {
+    pub phase: Option<BuildPhase>,
+    pub download: Option<DownloadFields>,
+    /// True when the event indicates a download has finished or was already
+    /// cached (i.e. clear any in-flight `DownloadInfo`).
+    pub download_finished: bool,
+}
+
 /// A log entry with its level, for filtering.
 #[derive(Debug, Clone)]
 pub struct LogEntry {
     pub level: LogLevel,
     pub message: String,
+    /// Build-pipeline signals extracted from structured fields. The TUI's
+    /// main loop reads these to update `BuildStatus` and `DownloadInfo`
+    /// without re-parsing `message`.
+    pub signals: BuildSignals,
 }
 
 /// The full TUI application state.
@@ -512,7 +537,11 @@ impl App {
     }
 
     pub fn add_log(&mut self, level: LogLevel, msg: String) {
-        self.logs.push(LogEntry { level, message: msg });
+        self.logs.push(LogEntry {
+            level,
+            message: msg,
+            signals: BuildSignals::default(),
+        });
         // Keep last 1000 entries
         if self.logs.len() > 1000 {
             self.logs.drain(0..self.logs.len() - 1000);

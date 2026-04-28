@@ -105,69 +105,39 @@ async fn run_app(
     let cancel_flag = Arc::new(AtomicBool::new(false));
 
     loop {
-        // Drain any pending log messages from the tracing layer
-        // Also update download/build state from each new entry as it arrives
+        // Drain any pending log messages from the tracing layer.
+        // BuildSignals on each entry are populated by TuiLogLayer from
+        // structured tracing fields (`phase`, `bytes_downloaded`, …) — never
+        // by parsing message text here.
         while let Ok(entry) = log_rx.try_recv() {
-            let msg = &entry.message;
-
-            // Track download state
-            if msg.contains("download started") {
-                let filename = extract_str_field(msg, "filename=")
-                    .unwrap_or_else(|| "file".to_string());
-                let total = extract_field(msg, "bytes_total=").unwrap_or(0);
-                app.download_info = Some(app::DownloadInfo {
-                    filename,
-                    bytes_downloaded: 0,
-                    bytes_total: total,
-                    percentage: 0.0,
-                });
-            } else if msg.contains("bytes_downloaded=") && msg.contains("bytes_total=") {
-                // Our own downloader (reliable single-stream progress)
-                if let (Some(dl), Some(total)) = (
-                    extract_field(msg, "bytes_downloaded="),
-                    extract_field(msg, "bytes_total="),
-                ) {
-                    let is_forward = app.download_info.as_ref()
-                        .map(|prev| dl >= prev.bytes_downloaded)
-                        .unwrap_or(true);
-                    if is_forward {
-                        let filename = extract_str_field(msg, "filename=")
-                            .unwrap_or_else(|| "file".to_string());
-                        let pct = if total > 0 { (dl as f32 / total as f32) * 100.0 } else { 0.0 };
-                        app.download_info = Some(app::DownloadInfo {
-                            filename,
-                            bytes_downloaded: dl,
-                            bytes_total: total,
-                            percentage: pct,
-                        });
-                    }
+            // Download progress
+            if let Some(ref dl) = entry.signals.download {
+                let is_forward = app.download_info.as_ref()
+                    .map(|prev| dl.bytes_downloaded >= prev.bytes_downloaded)
+                    .unwrap_or(true);
+                if is_forward {
+                    let pct = if dl.bytes_total > 0 {
+                        (dl.bytes_downloaded as f32 / dl.bytes_total as f32) * 100.0
+                    } else {
+                        0.0
+                    };
+                    app.download_info = Some(app::DownloadInfo {
+                        filename: dl.filename.clone().unwrap_or_else(|| "file".to_string()),
+                        bytes_downloaded: dl.bytes_downloaded,
+                        bytes_total: dl.bytes_total,
+                        percentage: pct,
+                    });
                 }
-            } else if msg.contains("download complete") || msg.contains("already cached")
-                || msg.contains("already in HF cache")
-            {
+            } else if entry.signals.download_finished {
                 app.download_info = None;
             }
 
-            // Update build phase from INFO events
-            if matches!(entry.level, app::LogLevel::Info) && build_result_rx.is_some() {
-                let new_phase = if msg.contains("preparing zipalign") {
-                    Some(("preparing zipalign", 0.05))
-                } else if msg.contains("preparing runtime") {
-                    Some(("preparing runtime", 0.1))
-                } else if msg.contains("download started") || msg.contains("downloading from") || msg.contains("registry file") {
-                    Some(("downloading", 0.3))
-                } else if msg.contains("writing .args") {
-                    Some(("writing config", 0.7))
-                } else if msg.contains("GPU lib") {
-                    Some(("preparing GPU libs", 0.8))
-                } else if msg.contains("bundling") || msg.contains("zipalign -j0") || msg.contains("copying runtime") {
-                    Some(("assembling", 0.9))
-                } else {
-                    None
-                };
-                if let Some((phase, progress)) = new_phase {
+            // Build phase
+            if let Some(phase) = entry.signals.phase {
+                if build_result_rx.is_some() {
+                    let (label, progress) = phase_display(phase);
                     app.build_status = BuildStatus::Building {
-                        phase: phase.to_string(),
+                        phase: label.to_string(),
                         progress,
                     };
                 }
@@ -323,24 +293,19 @@ fn is_user_cancellation(error: &llamafile_builder_core::Error) -> bool {
     )
 }
 
-/// Extract a u64 field value from a log message like "bytes_downloaded=12345"
-fn extract_field(msg: &str, key: &str) -> Option<u64> {
-    let start = msg.find(key)? + key.len();
-    let rest = &msg[start..];
-    let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
-    rest[..end].parse().ok()
-}
-
-/// Extract a string field value from a log message like "filename=model.gguf"
-fn extract_str_field(msg: &str, key: &str) -> Option<String> {
-    let start = msg.find(key)? + key.len();
-    let rest = &msg[start..];
-    if rest.starts_with('"') {
-        let end = rest[1..].find('"').map(|i| i + 1)?;
-        Some(rest[1..end].to_string())
-    } else {
-        let end = rest.find(|c: char| c == ' ' || c == ',').unwrap_or(rest.len());
-        Some(rest[..end].to_string())
+/// Map a `BuildPhase` to its UI label and the progress fraction the dashboard
+/// shows. Progress fractions are TUI-only — the core enum carries no
+/// presentational meaning. Each phase fires exactly once, so progress is
+/// monotonic.
+fn phase_display(phase: llamafile_builder_core::BuildPhase) -> (&'static str, f32) {
+    use llamafile_builder_core::BuildPhase;
+    match phase {
+        BuildPhase::PreparingZipalign => ("preparing zipalign", 0.05),
+        BuildPhase::PreparingRuntime => ("preparing runtime", 0.1),
+        BuildPhase::PreparingModel => ("downloading", 0.3),
+        BuildPhase::WritingArgs => ("writing config", 0.7),
+        BuildPhase::PreparingGpuLibs => ("preparing GPU libs", 0.8),
+        BuildPhase::Assembling => ("assembling", 0.9),
     }
 }
 

@@ -4,10 +4,17 @@ use tracing::Subscriber;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::Layer;
 
-use crate::app::{LogEntry, LogLevel};
+use llamafile_builder_core::BuildPhase;
 
-/// A tracing layer that sends log entries to a channel.
-/// The TUI main loop reads from the receiver and adds entries to the app's log buffer.
+use crate::app::{BuildSignals, DownloadFields, LogEntry, LogLevel};
+
+/// A tracing layer that forwards events to the TUI as `LogEntry` values.
+///
+/// In addition to formatting the message, the layer extracts well-known
+/// structured fields (`phase`, `bytes_downloaded`, `bytes_total`,
+/// `filename`) from the tracing event and attaches them to the entry as
+/// `BuildSignals`. The main loop reads those signals to drive build/download
+/// status — never the message text.
 pub struct TuiLogLayer {
     sender: mpsc::Sender<LogEntry>,
 }
@@ -75,7 +82,8 @@ impl<S: Subscriber> Layer<S> for TuiLogLayer {
         };
 
         let message = format!("[{:5}] {}", level.as_str(), msg);
-        let _ = self.sender.send(LogEntry { level, message });
+        let signals = visitor.into_signals();
+        let _ = self.sender.send(LogEntry { level, message, signals });
     }
 }
 
@@ -101,6 +109,41 @@ impl Visit for PeekVisitor {
 struct MessageVisitor {
     message: String,
     fields: Vec<(String, String)>,
+    // Structured signal extraction
+    phase: Option<BuildPhase>,
+    bytes_downloaded: Option<u64>,
+    bytes_total: Option<u64>,
+    filename: Option<String>,
+    download_finished: bool,
+}
+
+impl MessageVisitor {
+    fn into_signals(self) -> BuildSignals {
+        let download = match (self.bytes_downloaded, self.bytes_total) {
+            (Some(d), Some(t)) => Some(DownloadFields {
+                filename: self.filename,
+                bytes_downloaded: d,
+                bytes_total: t,
+            }),
+            _ => None,
+        };
+        BuildSignals {
+            phase: self.phase,
+            download,
+            download_finished: self.download_finished,
+        }
+    }
+
+    fn note_message_for_finish(&mut self, msg: &str) {
+        // The cache and download layers don't yet emit a structured
+        // "download terminated" field. Until they do, recognise the small
+        // closed set of messages that mean the same thing. Limited to known
+        // exact phrases (no substring sniffing) so message tweaks elsewhere
+        // can't accidentally clear the progress display.
+        if msg == "download complete" || msg == "already cached" || msg == "already in HF cache" {
+            self.download_finished = true;
+        }
+    }
 }
 
 impl Visit for MessageVisitor {
@@ -112,6 +155,7 @@ impl Visit for MessageVisitor {
             if self.message.starts_with('"') && self.message.ends_with('"') {
                 self.message = self.message[1..self.message.len() - 1].to_string();
             }
+            self.note_message_for_finish(&self.message.clone());
         } else if !name.starts_with("log.") {
             self.fields
                 .push((name.to_string(), format!("{:?}", value)));
@@ -120,17 +164,38 @@ impl Visit for MessageVisitor {
 
     fn record_str(&mut self, field: &Field, value: &str) {
         let name = field.name();
-        if name == "message" {
-            self.message = value.to_string();
-        } else if !name.starts_with("log.") {
-            self.fields
-                .push((name.to_string(), value.to_string()));
+        match name {
+            "message" => {
+                self.message = value.to_string();
+                self.note_message_for_finish(value);
+            }
+            "phase" => {
+                if let Some(p) = BuildPhase::from_str(value) {
+                    self.phase = Some(p);
+                }
+                self.fields.push((name.to_string(), value.to_string()));
+            }
+            "filename" => {
+                self.filename = Some(value.to_string());
+                self.fields.push((name.to_string(), value.to_string()));
+            }
+            _ if name.starts_with("log.") => {}
+            _ => {
+                self.fields
+                    .push((name.to_string(), value.to_string()));
+            }
         }
     }
 
     fn record_u64(&mut self, field: &Field, value: u64) {
+        let name = field.name();
+        match name {
+            "bytes_downloaded" => self.bytes_downloaded = Some(value),
+            "bytes_total" => self.bytes_total = Some(value),
+            _ => {}
+        }
         self.fields
-            .push((field.name().to_string(), value.to_string()));
+            .push((name.to_string(), value.to_string()));
     }
 
     fn record_i64(&mut self, field: &Field, value: i64) {
