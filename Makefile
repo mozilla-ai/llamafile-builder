@@ -24,7 +24,7 @@ TARGETS := \
 
 # Pinned zig version installed by `make setup` on Linux. Bump when
 # cargo-zigbuild requires a newer toolchain.
-ZIG_VERSION := 0.13.0
+ZIG_VERSION := 0.16.0
 
 CRATES := -p llamafile-builder -p llamafile-builder-tui
 
@@ -131,7 +131,7 @@ setup-zig:
 				aarch64|arm64) zig_arch=aarch64 ;; \
 				*) echo "Unsupported Linux arch: $$arch"; exit 1 ;; \
 			esac; \
-			dir="zig-linux-$$zig_arch-$(ZIG_VERSION)"; \
+			dir="zig-$$zig_arch-linux-$(ZIG_VERSION)"; \
 			url="https://ziglang.org/download/$(ZIG_VERSION)/$$dir.tar.xz"; \
 			echo "Downloading $$url"; \
 			mkdir -p $$HOME/.local/share $$HOME/.local/bin; \
