@@ -98,7 +98,7 @@ Only Rust (stable, 1.70+) is required for native builds.
 
 ### Cross-compilation
 
-All five supported targets are cross-compilable from a single host using [`cargo-zigbuild`](https://github.com/rust-cross/cargo-zigbuild) and [Zig](https://ziglang.org/) as a drop-in C cross-compiler. No Docker, no VMs.
+All five supported targets are cross-compilable from a single host. The Linux and Windows targets use [`cargo-zigbuild`](https://github.com/rust-cross/cargo-zigbuild) and [Zig](https://ziglang.org/) as a drop-in C cross-compiler; macOS targets are built with the native Apple toolchain when the host is itself macOS. No Docker, no VMs.
 
 ```bash
 make setup    # one-time: installs zig, cargo-zigbuild, and required Rust targets
