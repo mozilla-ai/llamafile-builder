@@ -47,15 +47,23 @@ fn percent_display_phase_field_populates_signals_phase() {
 }
 
 #[test]
-fn debug_format_phase_field_also_populates() {
-    // `?BuildPhase::X` is what the spec example used; the production
-    // emit sites use `%`. Both must be accepted so a future contributor
-    // following the spec literally doesn't silently drop the phase.
+fn debug_format_phase_field_is_not_canonical_and_is_dropped() {
+    // The wire contract is the kebab-case Display form (`%`). An emit
+    // site that uses `?` (Debug) instead produces "PreparingZipalign"
+    // rather than "preparing-zipalign", which `BuildPhase::from_str`
+    // rejects. We keep the test so the strictness is intentional — if
+    // someone later "fixes" `from_str` to accept Debug, this test
+    // surfaces the choice. (The production emit sites all use `%`; if
+    // a new one used `?` instead, the assertion is straightforward:
+    // the `phase` signal goes missing on the consumer side.)
     let rx = with_layer(|| {
         tracing::info!(phase = ?BuildPhase::Assembling, "assembling");
     });
     let entry = rx.try_recv().expect("event should reach the channel");
-    assert_eq!(entry.signals.phase, Some(BuildPhase::Assembling));
+    assert_eq!(
+        entry.signals.phase, None,
+        "Debug-formatted phase must NOT parse — `%` is the only contract",
+    );
 }
 
 #[test]

@@ -46,19 +46,20 @@ impl BuildPhase {
         }
     }
 
-    /// Parse a phase identifier from either the `%` (Display, kebab-case)
-    /// form produced by [`BuildPhase::as_str`] or the `?` (Debug,
-    /// PascalCase) form produced by the derived `Debug` impl. Accepting
-    /// both keeps the wire contract forgiving against emit-site mistakes
-    /// — the visitor never sees a "phase" field it can't map.
+    /// Parse a phase identifier emitted by [`BuildPhase::as_str`]. The
+    /// kebab-case Display form is the *only* canonical wire format —
+    /// emit sites must use `%` (Display), not `?` (Debug). An emit site
+    /// using `?` produces a value `from_str` can't map; the consume-side
+    /// visitor sees `None` and the `log_layer_integration` tests would
+    /// catch that on the next run.
     pub fn from_str(s: &str) -> Option<Self> {
         Some(match s {
-            "preparing-zipalign" | "PreparingZipalign" => BuildPhase::PreparingZipalign,
-            "preparing-runtime" | "PreparingRuntime" => BuildPhase::PreparingRuntime,
-            "preparing-model" | "PreparingModel" => BuildPhase::PreparingModel,
-            "writing-args" | "WritingArgs" => BuildPhase::WritingArgs,
-            "preparing-gpu-libs" | "PreparingGpuLibs" => BuildPhase::PreparingGpuLibs,
-            "assembling" | "Assembling" => BuildPhase::Assembling,
+            "preparing-zipalign" => BuildPhase::PreparingZipalign,
+            "preparing-runtime" => BuildPhase::PreparingRuntime,
+            "preparing-model" => BuildPhase::PreparingModel,
+            "writing-args" => BuildPhase::WritingArgs,
+            "preparing-gpu-libs" => BuildPhase::PreparingGpuLibs,
+            "assembling" => BuildPhase::Assembling,
             _ => return None,
         })
     }

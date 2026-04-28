@@ -280,8 +280,9 @@ field value with the `%` (Display) formatter:
 tracing::info!(phase = %BuildPhase::PreparingZipalign, "preparing zipalign");
 ```
 
-`BuildPhase::from_str` accepts both the kebab-case Display form and the
-PascalCase Debug form, so emit sites using `?` parse correctly too.
+`BuildPhase::from_str` is strict: it accepts only the kebab-case Display
+form. Emit sites must use `%`; `?` produces a value `from_str` rejects so
+that drift surfaces immediately in the consume-side tests.
 
 
 ## Component model

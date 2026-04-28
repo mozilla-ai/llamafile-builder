@@ -67,10 +67,13 @@ tracing::info!(phase = %BuildPhase::PreparingModel, filename = %name, "downloadi
 field visitor, never the message text. **Crucial implementation detail**:
 `%`-formatted values (`DisplayValue<T>`) land in `Visit::record_debug`, not
 `record_str` — the visitor's debug arm is the one that must extract the
-`phase` and `filename` fields. `BuildPhase::from_str` accepts both the
-kebab-case Display form and the PascalCase Debug form, so a future emit
-site that uses `?` instead of `%` still parses correctly. Same for
-`bytes_downloaded` / `bytes_total` — already candidates for structured
+`phase` and `filename` fields. The kebab-case Display form is the *only*
+canonical wire format: `BuildPhase::from_str` strictly parses it and
+nothing else. An emit site that mistakenly uses `?` (Debug) produces a
+PascalCase value that `from_str` rejects, so the `phase` signal goes
+missing on the consumer side and the `log_layer_integration` tests fail
+on the next run — drift surfaced early instead of silently widened. Same
+for `bytes_downloaded` / `bytes_total` — already candidates for structured
 fields, just not enforced.
 
 This is the contract surface for failure mode E.
