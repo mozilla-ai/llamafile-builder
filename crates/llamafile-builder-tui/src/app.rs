@@ -309,6 +309,14 @@ pub struct App {
     pub args_override: Option<String>,
     pub mmproj_disabled: bool,
 
+    /// Ollama install root override. Tests point this at a fake `~/.ollama`
+    /// scaffolding so the Model Select Ollama tab is reproducible without
+    /// depending on the developer's machine. `None` (production default)
+    /// means use `dirs::home_dir().join(".ollama")`.
+    pub ollama_dir: Option<String>,
+    /// LM Studio models root override. Same purpose as `ollama_dir`.
+    pub lmstudio_dir: Option<String>,
+
     // UI state
     pub focus: Focus,
     pub popup: Popup,
@@ -345,6 +353,8 @@ impl App {
             args_file: None,
             args_override: None,
             mmproj_disabled: false,
+            ollama_dir: None,
+            lmstudio_dir: None,
             focus: Focus::Version,
             popup: Popup::None,
             build_status: BuildStatus::Idle,

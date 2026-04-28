@@ -1,0 +1,45 @@
+---
+source: crates/llamafile-builder-tui/tests/flow_04_lmstudio_build.rs
+assertion_line: 53
+expression: app.prepare_build()
+---
+SavedState {
+    version_group: Some(
+        "llamafile 0.10",
+    ),
+    version: Some(
+        "0.10.1_alpha",
+    ),
+    custom_runtime: None,
+    model_id: None,
+    custom_model_file: None,
+    ollama_model: None,
+    lmstudio_model: Some(
+        LMStudioModel {
+            dir_name: "TestModel-7B-GGUF",
+            display_name: "TestModel-7B-GGUF",
+            dir_path: "<TEMPDIR>/models/lmstudio-community/TestModel-7B-GGUF",
+            files: [
+                LMStudioFile {
+                    filename: "TestModel-7B-Q4_K_M.gguf",
+                    path: "<TEMPDIR>/models/lmstudio-community/TestModel-7B-GGUF/TestModel-7B-Q4_K_M.gguf",
+                    size_bytes: 14,
+                    role: "weights",
+                },
+            ],
+            total_size_bytes: 14,
+        },
+    ),
+    quantizations: {},
+    config_values: {},
+    args_file: None,
+    args_override: None,
+    mmproj_disabled: false,
+    output_path: Some(
+        "/tmp/test.llamafile",
+    ),
+    custom_companion_files: {},
+    gpu_libs: [],
+    custom_gpu_libs: [],
+    custom_zipalign: None,
+}

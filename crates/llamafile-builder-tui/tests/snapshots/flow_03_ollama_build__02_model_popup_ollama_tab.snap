@@ -1,0 +1,29 @@
+---
+source: crates/llamafile-builder-tui/tests/flow_03_ollama_build.rs
+assertion_line: 47
+expression: frame
+---
+┌───────────────────────────── llamafile builder ──────────────────────────────┐
+│   ┌ Select Model ────────────────────────────────────────────────────────┐   │
+│   │ Registry    Ollama    LM Studio                                      │   │
+│ > │                                                                      │   │
+│   │   llama3:70b — 15 B                                                  │   │
+│   │   llama3:8b — 15 B                                                   │   │
+│   │   phi3:mini — 15 B                                                   │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+│   │                                                                      │   │
+└───│                                                                      │───┘
+ Cho│                                                                      │ate
+┌ Lo│                                                                      │───┐
+│   └ ←→=source  ↑↓=navigate  Enter=select  Esc=cancel ────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────────────┘

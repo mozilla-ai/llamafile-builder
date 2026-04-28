@@ -11,6 +11,9 @@
 #![allow(dead_code)]
 
 pub mod app;
+pub mod dispatch;
 pub mod fixtures;
 pub mod keys;
+pub mod local_sources;
 pub mod render;
+pub mod snapshots;

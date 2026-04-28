@@ -1,0 +1,38 @@
+---
+source: crates/llamafile-builder-tui/tests/flow_03_ollama_build.rs
+assertion_line: 61
+expression: app.prepare_build()
+---
+SavedState {
+    version_group: Some(
+        "llamafile 0.10",
+    ),
+    version: Some(
+        "0.10.1_alpha",
+    ),
+    custom_runtime: None,
+    model_id: None,
+    custom_model_file: None,
+    ollama_model: Some(
+        OllamaModel {
+            model_name: "llama3",
+            tag: "8b",
+            display_name: "llama3:8b",
+            weights_path: "<TEMPDIR>/models/blobs/sha256-deadbeef01",
+            size_bytes: 15,
+        },
+    ),
+    lmstudio_model: None,
+    quantizations: {},
+    config_values: {},
+    args_file: None,
+    args_override: None,
+    mmproj_disabled: false,
+    output_path: Some(
+        "/tmp/test.llamafile",
+    ),
+    custom_companion_files: {},
+    gpu_libs: [],
+    custom_gpu_libs: [],
+    custom_zipalign: None,
+}
