@@ -1,0 +1,29 @@
+---
+source: crates/llamafile-builder-tui/tests/smoke.rs
+assertion_line: 15
+expression: frame
+---
+┌───────────────────────────── llamafile builder ──────────────────────────────┐
+│ > Version    llamafile 0.10 / 0.10.1_alpha                                   │
+│                                                                              │
+│   Model      Qwen3 0.6B (0.6B)                                               │
+│   Weights    Q8_0 (default) (609.8 MiB)                                      │
+│                                                                              │
+│   Output     /tmp/test.llamafile                                             │
+│                                                                              │
+│   Config     mode=Combined  context_length=0  temperature=0.8                │
+│   GPU        (none)                                                          │
+│                                                                              │
+│   Ready to build                                                             │
+│                                                                              │
+│   [ Build ]   [ Show .args ]   [ Quit ]                                      │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+ Select the llamafile runtime version to use  │  Enter=change  ↑↓=navigate  │  ^
+┌ Logs < INFO > l=expand ──────────────────────────────────────────────────────┐
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘

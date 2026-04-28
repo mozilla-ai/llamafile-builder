@@ -1,8 +1,4 @@
-mod app;
-mod config_ui;
-mod events;
-mod log_layer;
-mod ui;
+use llamafile_builder_tui::{app, events, log_layer, ui};
 
 use std::io;
 use std::path::PathBuf;
