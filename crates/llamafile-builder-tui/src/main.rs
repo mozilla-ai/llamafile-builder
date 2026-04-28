@@ -23,7 +23,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use llamafile_builder_core::config_manager::ConfigManager;
 use llamafile_builder_core::config_store::ConfigStore;
 
-use app::{App, BuildStatus, LogEntry, LogLevel};
+use app::{build_from_state, App, BuildStatus, LogEntry, LogLevel};
 
 /// Result sent back from the build task.
 enum BuildResult {
@@ -240,92 +240,16 @@ async fn run_app(
                     build_result_rx = Some(rx);
                     cancel_flag.store(false, Ordering::Relaxed);
 
-                    // Capture everything needed to reconstruct the builder in the task
-                    let shared_cancel = cancel_flag.clone();
+                    // Snapshot the user's selections; the build task rebuilds
+                    // a Builder from this on a Send-compatible thread.
+                    let prepared = app.prepare_build();
                     let config = app.config.clone();
                     let cache_dir = app.cache_dir.clone();
-                    let version_group = app.version_group.clone();
-                    let version = app.version.clone();
-                    let custom_runtime = app.custom_runtime.clone();
-                    let model_id = app.model_id.clone();
-                    let custom_model_file = app.custom_model_file.clone();
-                    let ollama_model = app.ollama_model.clone();
-                    let lmstudio_model = app.lmstudio_model.clone();
-                    let quantizations = app.quantizations.clone();
-                    let config_values = app.config_values.clone();
-                    let output_path = app.output_path.clone();
-                    let gpu_libs = app.gpu_libs.clone();
-                    let custom_zipalign = app.custom_zipalign.clone();
-                    let args_file = app.args_file.clone();
-                    let args_override = app.args_override.clone();
-                    let mmproj_disabled = app.mmproj_disabled;
+                    let shared_cancel = cancel_flag.clone();
 
                     tokio::spawn(async move {
-                        // Reconstruct builder inside the task (on a Send-compatible thread)
-                        let cache = llamafile_builder_core::cache::Cache::new(cache_dir);
-                        let mut builder = llamafile_builder_core::Builder::new(config, cache);
+                        let mut builder = build_from_state(config, cache_dir, &prepared);
                         builder.set_cancel_flag(shared_cancel);
-
-                        // Apply state
-                        if let Some(ref rt) = custom_runtime {
-                            builder.use_custom_runtime(std::path::Path::new(rt));
-                        } else if let (Some(ref g), Some(ref v)) = (&version_group, &version) {
-                            builder.select_version(g, v);
-                        } else {
-                            builder.select_default_version();
-                        }
-
-                        if let Some(ref path) = custom_model_file {
-                            builder.select_custom_model(std::path::Path::new(path));
-                        } else if let Some(ref model) = ollama_model {
-                            builder.select_ollama_model(model.clone());
-                        } else if let Some(ref model) = lmstudio_model {
-                            builder.select_lmstudio_model(model.clone());
-                        } else if let Some(ref id) = model_id {
-                            builder.select_registry_model(id);
-                        } else {
-                            builder.select_default_model();
-                        }
-
-                        for (role, name) in &quantizations {
-                            if let Some(mid) = builder.state().selected_model_id.clone() {
-                                if let Some(model) = builder.config().models.iter().find(|m| m.id == mid) {
-                                    if let Some(file) = model.files.iter().find(|f| f.role == *role) {
-                                        if let Some(idx) = file.quantizations.iter().position(|q| q.name.eq_ignore_ascii_case(name)) {
-                                            builder.select_quantization(role, idx);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        for (key, value) in &config_values {
-                            builder.set_config_value(key, value.clone());
-                        }
-
-                        if let Some(ref path) = output_path {
-                            builder.set_output_path(std::path::Path::new(path));
-                        }
-
-                        for &(accel, os) in &gpu_libs {
-                            builder.add_gpu_lib(accel, os);
-                        }
-
-                        if let Some(ref path) = custom_zipalign {
-                            builder.use_custom_zipalign(std::path::Path::new(path));
-                        }
-
-                        if let Some(ref content) = args_override {
-                            builder.set_args_override(content);
-                        } else if let Some(ref path) = args_file {
-                            if let Ok(content) = std::fs::read_to_string(path) {
-                                builder.set_args_override(&content);
-                            }
-                        }
-
-                        if mmproj_disabled {
-                            builder.disable_file_role("mmproj");
-                        }
 
                         match builder.build().await {
                             Ok(path) => {

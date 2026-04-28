@@ -468,79 +468,11 @@ impl App {
 
     /// Build a Builder from the current state.
     pub fn make_builder(&self) -> Result<Builder, String> {
-        let cache = Cache::new(self.cache_dir.clone());
-        let mut builder = Builder::new(self.config.clone(), cache);
-
-        // Version
-        if let Some(ref runtime) = self.custom_runtime {
-            builder.use_custom_runtime(std::path::Path::new(runtime));
-        } else if let (Some(ref g), Some(ref v)) = (&self.version_group, &self.version) {
-            builder.select_version(g, v);
-        } else {
-            builder.select_default_version();
-        }
-
-        // Model
-        if let Some(ref path) = self.custom_model_file {
-            builder.select_custom_model(std::path::Path::new(path));
-        } else if let Some(ref model) = self.ollama_model {
-            builder.select_ollama_model(model.clone());
-        } else if let Some(ref model) = self.lmstudio_model {
-            builder.select_lmstudio_model(model.clone());
-        } else if let Some(ref id) = self.model_id {
-            builder.select_registry_model(id);
-        } else {
-            builder.select_default_model();
-        }
-
-        // Quantizations
-        for (role, name) in &self.quantizations {
-            if let Some(model_id) = builder.state().selected_model_id.clone() {
-                if let Some(model) = builder.config().models.iter().find(|m| m.id == model_id) {
-                    if let Some(file) = model.files.iter().find(|f| f.role == *role) {
-                        if let Some(idx) = file.quantizations.iter().position(|q| q.name.eq_ignore_ascii_case(name)) {
-                            builder.select_quantization(role, idx);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Config values
-        for (key, value) in &self.config_values {
-            builder.set_config_value(key, value.clone());
-        }
-
-        // Output
-        if let Some(ref path) = self.output_path {
-            builder.set_output_path(std::path::Path::new(path));
-        }
-
-        // GPU
-        for &(accel, os) in &self.gpu_libs {
-            builder.add_gpu_lib(accel, os);
-        }
-
-        // Custom zipalign
-        if let Some(ref path) = self.custom_zipalign {
-            builder.use_custom_zipalign(std::path::Path::new(path));
-        }
-
-        // Disable mmproj if user toggled it off
-        if self.mmproj_disabled {
-            builder.disable_file_role("mmproj");
-        }
-
-        // Args override (from manual editing or file)
-        if let Some(ref content) = self.args_override {
-            builder.set_args_override(content);
-        } else if let Some(ref path) = self.args_file {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                builder.set_args_override(&content);
-            }
-        }
-
-        Ok(builder)
+        Ok(build_from_state(
+            self.config.clone(),
+            self.cache_dir.clone(),
+            &self.prepare_build(),
+        ))
     }
 
     /// Get the currently selected release.
@@ -637,12 +569,25 @@ impl App {
             quantizations: self.quantizations.clone(),
             config_values: self.config_values.clone(),
             args_file: self.args_file.clone(),
+            args_override: self.args_override.clone(),
+            mmproj_disabled: self.mmproj_disabled,
             output_path: self.output_path.clone(),
             gpu_libs,
             custom_gpu_libs: vec![],
             custom_companion_files: Default::default(),
             custom_zipalign: self.custom_zipalign.clone(),
         }
+    }
+
+    /// Snapshot the current selections into the form a `Builder` would be
+    /// constructed from. The TUI main loop calls this when the user triggers
+    /// a build, then hands the snapshot to a background task.
+    ///
+    /// This is the assertion point flow tests use to verify that the build
+    /// invocation matches the configured state — see `specs/TUI_TESTING.md`
+    /// §4.1 / §9.
+    pub fn prepare_build(&self) -> SavedState {
+        self.to_saved_state()
     }
 
     /// Load App fields from a BuildRecipe.
@@ -660,8 +605,8 @@ impl App {
         self.args_file = s.args_file.clone();
         self.output_path = s.output_path.clone();
         self.custom_zipalign = s.custom_zipalign.clone();
-        self.args_override = None;
-        self.mmproj_disabled = false;
+        self.args_override = s.args_override.clone();
+        self.mmproj_disabled = s.mmproj_disabled;
 
         // Convert string gpu specs to typed tuples
         self.gpu_libs = s.gpu_libs.iter().filter_map(|spec| {
@@ -719,6 +664,108 @@ impl App {
     pub fn list_recipes(&self) -> Vec<BuildRecipe> {
         self.store.list().unwrap_or_default()
     }
+}
+
+/// Construct a fully configured `Builder` from a `SavedState`.
+///
+/// This is the single place where SavedState is applied to a Builder. Both
+/// `App::make_builder()` (for validation and `.args` preview) and the
+/// background build task use it, so the TUI's interactive state and its build
+/// invocation cannot drift apart.
+pub fn build_from_state(
+    config: BuilderConfig,
+    cache_dir: PathBuf,
+    state: &SavedState,
+) -> Builder {
+    let cache = Cache::new(cache_dir);
+    let mut builder = Builder::new(config, cache);
+
+    // Version
+    if let Some(ref runtime) = state.custom_runtime {
+        builder.use_custom_runtime(std::path::Path::new(runtime));
+    } else if let (Some(ref g), Some(ref v)) = (&state.version_group, &state.version) {
+        builder.select_version(g, v);
+    } else {
+        builder.select_default_version();
+    }
+
+    // Model
+    if let Some(ref path) = state.custom_model_file {
+        builder.select_custom_model(std::path::Path::new(path));
+    } else if let Some(ref model) = state.ollama_model {
+        builder.select_ollama_model(model.clone());
+    } else if let Some(ref model) = state.lmstudio_model {
+        builder.select_lmstudio_model(model.clone());
+    } else if let Some(ref id) = state.model_id {
+        builder.select_registry_model(id);
+    } else {
+        builder.select_default_model();
+    }
+
+    // Quantizations
+    for (role, name) in &state.quantizations {
+        if let Some(model_id) = builder.state().selected_model_id.clone() {
+            if let Some(model) = builder.config().models.iter().find(|m| m.id == model_id) {
+                if let Some(file) = model.files.iter().find(|f| f.role == *role) {
+                    if let Some(idx) = file
+                        .quantizations
+                        .iter()
+                        .position(|q| q.name.eq_ignore_ascii_case(name))
+                    {
+                        builder.select_quantization(role, idx);
+                    }
+                }
+            }
+        }
+    }
+
+    // Config values
+    for (key, value) in &state.config_values {
+        builder.set_config_value(key, value.clone());
+    }
+
+    // Output
+    if let Some(ref path) = state.output_path {
+        builder.set_output_path(std::path::Path::new(path));
+    }
+
+    // GPU libraries (specs of the form "accel:os")
+    for spec in &state.gpu_libs {
+        let mut parts = spec.splitn(2, ':');
+        let accel = match parts.next() {
+            Some("cuda") => GpuAccel::Cuda,
+            Some("rocm") => GpuAccel::Rocm,
+            Some("vulkan") => GpuAccel::Vulkan,
+            _ => continue,
+        };
+        let os = match parts.next() {
+            Some("linux") | None => Os::Linux,
+            Some("windows") => Os::Windows,
+            _ => continue,
+        };
+        builder.add_gpu_lib(accel, os);
+    }
+
+    // Custom zipalign
+    if let Some(ref path) = state.custom_zipalign {
+        builder.use_custom_zipalign(std::path::Path::new(path));
+    }
+
+    // Disable mmproj if user toggled it off
+    if state.mmproj_disabled {
+        builder.disable_file_role("mmproj");
+    }
+
+    // Args override (raw content takes precedence over args_file)
+    if let Some(ref content) = state.args_override {
+        builder.set_args_override(content);
+    } else if let Some(ref path) = state.args_file {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            builder.set_args_override(&content);
+        }
+    }
+
+    builder
 }
 
 #[cfg(test)]

@@ -8,6 +8,10 @@ use uuid::Uuid;
 use crate::config_manager::BuilderConfig;
 use crate::error::Error;
 
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 /// A GPU library specified by a local file path (for custom/development builds).
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct CustomGpuLib {
@@ -44,6 +48,15 @@ pub struct SavedState {
     pub config_values: HashMap<String, serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub args_file: Option<String>,
+    /// Raw `.args` content overriding both schema-driven generation and any
+    /// `args_file`. Set when the user manually edits the args via the TUI's
+    /// .args editor or by other interfaces wanting to bypass the schema.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub args_override: Option<String>,
+    /// When true, drop the mmproj file role from the build even if the
+    /// selected model offers one. Lets the user opt out of the vision adapter.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub mmproj_disabled: bool,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_path: Option<String>,
