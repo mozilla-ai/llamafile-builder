@@ -11,7 +11,10 @@ permissions:
 jobs:
   build:
     name: Build cross-platform binaries
-    runs-on: ubuntu-latest
+    # macos-latest is required because zigbuild needs the macOS SDK to link
+    # the *-apple-darwin targets (reqwest pulls in SystemConfiguration etc.).
+    # On a macOS runner all 5 cross-compile targets build cleanly via zig.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
