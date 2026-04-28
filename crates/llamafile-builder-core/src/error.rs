@@ -26,6 +26,9 @@ pub enum Error {
 
     #[error("Cancelled")]
     Cancelled,
+
+    #[error(transparent)]
+    DiskSpace(#[from] crate::disk_space::DiskSpaceError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

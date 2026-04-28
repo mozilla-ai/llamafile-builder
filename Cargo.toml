@@ -24,6 +24,7 @@ hf-hub = { version = "0.4", default-features = false, features = ["tokio", "rust
 url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+fs4 = "0.13"
 
 [profile.release]
 panic = "abort"

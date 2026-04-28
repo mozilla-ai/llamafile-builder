@@ -165,6 +165,8 @@ pub enum RecipeCmd {
     Show,
     /// Preview the .args file content
     ShowArgs,
+    /// Preview disk-space requirements (cache, HuggingFace cache, output)
+    DiskRequirements,
     /// Reset current recipe state
     Reset,
     /// Create a new build recipe

@@ -183,11 +183,17 @@ pub enum Popup {
     SaveRecipe { input: String },
     LoadRecipe { recipes: Vec<BuildRecipe>, selected: usize },
     Confirm { message: String, action: ConfirmAction },
+    /// Modal shown when a build fails. Displays the error text with a single
+    /// dismiss key. The full error is also written to the log pane.
+    BuildError { message: String },
 }
 
 #[derive(Debug, Clone)]
 pub enum ConfirmAction {
-    Quit,
+    /// Cancel the running build, then quit. Sets the cancel flag so download
+    /// tasks tear down cleanly. (Quitting while idle goes through
+    /// `should_quit` directly without a confirmation.)
+    CancelBuildAndQuit,
 }
 
 /// Build status.

@@ -18,6 +18,7 @@ use utoipa::OpenApi;
 use llamafile_builder_core::cache::Cache;
 use llamafile_builder_core::config_manager::BuilderConfig;
 use llamafile_builder_core::config_store::{ConfigStore, CustomGpuLib, SavedState};
+use llamafile_builder_core::{DownloadError, Error};
 
 use crate::log_forwarder;
 
@@ -41,7 +42,7 @@ use crate::state_file;
         set_quantization, set_config, set_output, set_args_file,
         modify_gpu, modify_custom_gpu, modify_companion_file,
         set_runtime, set_zipalign, reset_state,
-        get_args, get_validate, get_components, get_resolved_state,
+        get_args, get_validate, get_components, get_disk_requirements, get_resolved_state,
         set_args_content, file_dialog,
         start_build, cancel_build,
     ),
@@ -117,6 +118,7 @@ fn build_router(config: BuilderConfig, store: ConfigStore, recipes_dir: PathBuf)
         .route("/api/recipes/{id}/state/resolved", get(get_resolved_state))
         .route("/api/recipes/{id}/state/validate", get(get_validate))
         .route("/api/recipes/{id}/state/components", get(get_components))
+        .route("/api/recipes/{id}/state/disk-requirements", get(get_disk_requirements))
         .route("/api/recipes/{id}/state/custom-gpu", post(modify_custom_gpu))
         .route("/api/recipes/{id}/state/companion-file", post(modify_companion_file))
         // File picker
@@ -550,6 +552,27 @@ async fn get_components(State(st): State<Arc<AppState>>, Path(id): Path<String>)
     Ok(Json(Value::Array(comps)))
 }
 
+#[utoipa::path(get, path = "/api/recipes/{id}/state/disk-requirements", tag = "State",
+    summary = "Pre-flight disk-space requirements (cache, hf cache, output)",
+    params(("id" = String, Path)))]
+async fn get_disk_requirements(
+    State(st): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> ApiResult {
+    let uuid = parse_uuid(&id)?;
+    let recipe = st.store.get(uuid).map_err(|e| api_err(StatusCode::NOT_FOUND, format!("{e}")))?;
+    let builder = make_builder(&st.config, &recipe.state)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let reqs: Vec<Value> = builder.estimate_disk_requirements().iter().map(|r| {
+        json!({
+            "destination": r.destination.to_string_lossy(),
+            "bytes": r.bytes,
+            "purpose": r.purpose.label(),
+        })
+    }).collect();
+    Ok(Json(Value::Array(reqs)))
+}
+
 // ============================================================================
 // New derived-state endpoints
 // ============================================================================
@@ -781,6 +804,9 @@ async fn start_build(
             Ok(path) => {
                 let size = tokio::fs::metadata(&path).await.map(|m| m.len()).unwrap_or(0);
                 let _ = tx.send(json!({"stage": "complete", "path": path.to_string_lossy(), "size": size}).to_string());
+            }
+            Err(e) if matches!(e, Error::Cancelled | Error::Download(DownloadError::Cancelled)) => {
+                let _ = tx.send(json!({"stage": "cancelled"}).to_string());
             }
             Err(e) => {
                 let _ = tx.send(json!({"stage": "error", "message": format!("{e}")}).to_string());
@@ -1033,6 +1059,56 @@ mod tests {
         let roles: Vec<&str> = comps.as_array().unwrap().iter()
             .filter_map(|c| c["role"].as_str()).collect();
         assert!(roles.contains(&"Weights"));
+    }
+
+    #[tokio::test]
+    async fn disk_requirements_returns_per_destination_buckets() {
+        // Isolate the HuggingFace cache to a fresh empty dir so the test
+        // doesn't depend on whether the developer's machine already has the
+        // model weights cached locally. Without this, a cached model would
+        // remove the huggingface_cache bucket from the response.
+        let hf_tmp = tempfile::TempDir::new().unwrap();
+        temp_env::async_with_vars(
+            [
+                ("HF_HOME", Some(hf_tmp.path().to_string_lossy().to_string())),
+                ("HUGGINGFACE_HUB_CACHE", None),
+            ],
+            async {
+                let (router, _) = app();
+                let id = create(&router).await;
+                post_json(
+                    &router,
+                    &format!("/api/recipes/{id}/state/model"),
+                    json!({"id": "Qwen/Qwen3-0.6B-GGUF"}),
+                )
+                .await;
+
+                let (s, reqs) = get_json(
+                    &router,
+                    &format!("/api/recipes/{id}/state/disk-requirements"),
+                )
+                .await;
+                assert_eq!(s, StatusCode::OK);
+                let arr = reqs.as_array().unwrap();
+                let purposes: Vec<&str> =
+                    arr.iter().filter_map(|r| r["purpose"].as_str()).collect();
+                assert!(
+                    purposes.iter().any(|p| *p == "huggingface cache"),
+                    "expected huggingface cache requirement, got {:?}",
+                    purposes
+                );
+                assert!(
+                    purposes.iter().any(|p| *p == "output"),
+                    "expected output requirement, got {:?}",
+                    purposes
+                );
+                for r in arr {
+                    assert!(r["bytes"].as_u64().unwrap_or(0) > 0);
+                    assert!(r["destination"].as_str().is_some());
+                }
+            },
+        )
+        .await;
     }
 
     #[tokio::test]

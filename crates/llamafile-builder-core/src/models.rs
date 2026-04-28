@@ -465,13 +465,20 @@ pub fn get_default_output_dir() -> String {
         .unwrap_or_else(|| ".".to_string())
 }
 
+/// Format a byte count in binary IEC units (`KiB`/`MiB`/`GiB`). Matches the
+/// numbers `du -h`, `ls -lh`, and most filesystem/system tools display, which
+/// is the reference users have when checking sizes against local files.
 pub fn format_size(bytes: u64) -> String {
-    if bytes >= 1_000_000_000 {
-        format!("{:.1} GB", bytes as f64 / 1_000_000_000.0)
-    } else if bytes >= 1_000_000 {
-        format!("{:.1} MB", bytes as f64 / 1_000_000.0)
-    } else if bytes >= 1_000 {
-        format!("{:.1} KB", bytes as f64 / 1_000.0)
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    let b = bytes as f64;
+    if b >= GIB {
+        format!("{:.1} GiB", b / GIB)
+    } else if b >= MIB {
+        format!("{:.1} MiB", b / MIB)
+    } else if b >= KIB {
+        format!("{:.1} KiB", b / KIB)
     } else {
         format!("{} B", bytes)
     }

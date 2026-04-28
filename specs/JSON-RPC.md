@@ -231,6 +231,12 @@ Returns array of `{ level: "warning"|"error", message: "..." }`. Empty array mea
 ```
 Returns array of `{ role, source, zip_path }` -- what `build` would assemble.
 
+#### disk_requirements
+```json
+{"jsonrpc":"2.0","id":1,"method":"disk_requirements"}
+```
+Returns array of `{ destination, bytes, purpose }` describing the per-destination disk-space requirements computed by the same pre-flight check `build` runs. `purpose` is one of `"cache"`, `"huggingface cache"`, `"output"`. Components already cached and `Local`/`Generated` sources contribute zero bytes.
+
 
 ### Build
 

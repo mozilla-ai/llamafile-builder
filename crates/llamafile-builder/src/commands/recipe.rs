@@ -3,6 +3,7 @@ use std::path::Path;
 use llamafile_builder_core::cache::Cache;
 use llamafile_builder_core::config_manager::BuilderConfig;
 use llamafile_builder_core::config_store::{ConfigStore, SavedState};
+use llamafile_builder_core::models::format_size;
 use llamafile_builder_core::Builder;
 
 use crate::cli::RecipeCmd;
@@ -197,6 +198,12 @@ pub fn run(
             println!("{}", builder.resolved_args());
             return Ok(());
         }
+        RecipeCmd::DiskRequirements => {
+            let cache = Cache::new(crate::get_cache_dir());
+            let builder = state_file::build_from_state(&recipe.state, config.clone(), cache)?;
+            show_disk_requirements(&builder, json);
+            return Ok(());
+        }
         RecipeCmd::Reset => {
             recipe.state = SavedState::default();
             tracing::info!("recipe state reset");
@@ -350,4 +357,45 @@ fn show_recipe(
     }
 
     Ok(())
+}
+
+fn show_disk_requirements(builder: &Builder, json: bool) {
+    let reqs = builder.estimate_disk_requirements();
+
+    if json {
+        let items: Vec<serde_json::Value> = reqs
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "destination": r.destination.to_string_lossy(),
+                    "bytes": r.bytes,
+                    "purpose": r.purpose.label(),
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&items).unwrap());
+        return;
+    }
+
+    if reqs.is_empty() {
+        println!("No disk space required: nothing to download and no output bytes to write.");
+        return;
+    }
+
+    println!("Disk-space requirements (pre-flight estimate):");
+    println!();
+    let mut total: u64 = 0;
+    for r in &reqs {
+        println!(
+            "  {:<20} {:>14}  {}",
+            r.purpose.label(),
+            format_size(r.bytes),
+            r.destination.display()
+        );
+        total = total.saturating_add(r.bytes);
+    }
+    println!();
+    println!("  {:<20} {:>14}", "total", format_size(total));
+    println!();
+    println!("Note: components already cached and Local/Generated sources contribute 0 bytes.");
 }

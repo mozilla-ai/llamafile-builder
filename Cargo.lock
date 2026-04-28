@@ -570,6 +570,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs4"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8640e34b88f7652208ce9e88b1a37a2ae95227d84abec377ccd3c5cfeb141ed4"
+dependencies = [
+ "rustix 1.1.4",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "futures"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1208,6 +1218,7 @@ dependencies = [
  "open",
  "serde",
  "serde_json",
+ "temp-env",
  "tempfile",
  "tokio",
  "tokio-stream",
@@ -1227,6 +1238,7 @@ dependencies = [
  "chrono",
  "directories",
  "dirs",
+ "fs4",
  "futures-util",
  "hex",
  "hf-hub",
@@ -2136,6 +2148,7 @@ version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96374855068f47402c3121c6eed88d29cb1de8f3ab27090e273e420bdabcf050"
 dependencies = [
+ "futures",
  "parking_lot",
 ]
 

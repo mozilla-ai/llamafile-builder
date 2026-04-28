@@ -321,6 +321,8 @@ Note: hf-hub's `download_with_progress()` does not check its own cache — it al
 
 **Local files** (`ComponentSource::Local`) need no downloading. The builder verifies they exist and optionally checks SHA256 if provided.
 
+**Disk-space pre-check**: before any phase runs, `Builder::build()` calls `disk_space::estimate()` to compute per-destination requirements (cache, HF cache, output) and `disk_space::check()` to compare against `fs4::available_space()`. Insufficient space aborts the build with a typed error before any bytes are downloaded. Components already cached, `Local`/`Generated` sources, and components without `expected_size` contribute zero bytes, so an offline rebuild from a populated cache passes the check trivially.
+
 ```rust
 pub struct Cache {
     base_dir: PathBuf,          // e.g. ~/.llamafile-builder/cache/
@@ -483,6 +485,7 @@ POST /api/recipes/:id/state/reset
 GET  /api/recipes/:id/state/args           -> preview .args
 GET  /api/recipes/:id/state/validate       -> validation messages
 GET  /api/recipes/:id/state/components     -> resolved components
+GET  /api/recipes/:id/state/disk-requirements -> [{ destination, bytes, purpose }]
 
 # Build execution (scoped by recipe UUID)
 POST /api/recipes/:id/build                -> SSE stream
