@@ -96,7 +96,7 @@ make release  # release build for current platform
 
 ### Cross-compilation
 
-All 5 supported targets can be cross-compiled from a Mac using `cargo-zigbuild` and Zig as a drop-in C cross-compiler. No Docker needed.
+All 5 supported targets can be cross-compiled from a Mac. The Linux and Windows targets go through `cargo-zigbuild` and Zig as a drop-in C cross-compiler; the two `*-apple-darwin` targets are built with the native Apple toolchain. No Docker needed.
 
 **One-time setup:**
 

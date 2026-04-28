@@ -11,9 +11,11 @@ permissions:
 jobs:
   build:
     name: Build cross-platform binaries
-    # macos-latest is required because zigbuild needs the macOS SDK to link
-    # the *-apple-darwin targets (reqwest pulls in SystemConfiguration etc.).
-    # On a macOS runner all 5 cross-compile targets build cleanly via zig.
+    # macos-latest gives us Apple's native toolchain for the *-apple-darwin
+    # targets — Linux runners can't supply the macOS SDK that linking
+    # reqwest's SystemConfiguration dep requires. The Makefile builds darwin
+    # natively here and uses zigbuild only for the linux-gnu / windows-gnu
+    # cross-targets.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4

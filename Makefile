@@ -43,12 +43,21 @@ release:
 test:
 	cargo test --workspace
 
-# Cross-compile all targets (release)
+# Cross-compile all targets (release).
+# On macOS, *-apple-darwin targets are built with the native Apple toolchain
+# (`cargo build`) — zig's `ar` wrapper has shown spurious archive-creation
+# failures with `ring` on some macOS versions, and Apple's clang+ld handle
+# both arm64 and x86_64 darwin natively. zigbuild is still used for the
+# linux-gnu and windows-gnu targets, where it is the whole reason this works.
 .PHONY: all
 all: check-deps
 	@for target in $(TARGETS); do \
 		echo "=== Building $$target ==="; \
-		cargo zigbuild --release --target $$target $(CRATES) || exit 1; \
+		if [ "$$(uname -s)" = "Darwin" ] && echo "$$target" | grep -q apple-darwin; then \
+			cargo build --release --target $$target $(CRATES) || exit 1; \
+		else \
+			cargo zigbuild --release --target $$target $(CRATES) || exit 1; \
+		fi; \
 	done
 	@echo ""
 	@echo "All targets built successfully."
@@ -57,7 +66,11 @@ all: check-deps
 # Build a single target: make target T=x86_64-unknown-linux-gnu
 .PHONY: target
 target: check-deps
-	cargo zigbuild --release --target $(T) $(CRATES)
+	@if [ "$$(uname -s)" = "Darwin" ] && echo "$(T)" | grep -q apple-darwin; then \
+		cargo build --release --target $(T) $(CRATES); \
+	else \
+		cargo zigbuild --release --target $(T) $(CRATES); \
+	fi
 
 # Copy all release binaries to dist/
 .PHONY: dist
