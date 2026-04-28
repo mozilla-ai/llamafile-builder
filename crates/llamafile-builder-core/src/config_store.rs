@@ -153,6 +153,163 @@ impl SavedState {
     }
 }
 
+/// Construct a fully configured `Builder` from a `SavedState`.
+///
+/// This is the **single canonical** SavedState → Builder converter.
+/// Every interface (TUI, CLI, JSON-RPC, HTTP) goes through here so
+/// they cannot drift on which fields they honour, how version-only
+/// recipes resolve, how unknown quants/models surface, or how GPU
+/// specs parse. CLAUDE.md's "rebuilds always construct a fresh
+/// Builder from SavedState" depends on this being the only path.
+///
+/// Returns the populated builder ready for `set_cancel_flag` + `build`.
+pub fn build_from_state(
+    state: &SavedState,
+    config: crate::config_manager::BuilderConfig,
+    cache: crate::cache::Cache,
+) -> Result<crate::builder::Builder, String> {
+    let mut builder = crate::builder::Builder::new(config, cache);
+    apply_saved_state(&mut builder, state)?;
+    Ok(builder)
+}
+
+/// Apply a `SavedState` to an already-constructed `Builder`. Errors are
+/// surfaced for: unknown registry version, unknown registry model, and
+/// unknown quantization name. Defaults are applied when the state
+/// leaves a slot unset (no version → first default version, no model →
+/// default model, etc.).
+pub fn apply_saved_state(
+    builder: &mut crate::builder::Builder,
+    state: &SavedState,
+) -> Result<(), String> {
+    use std::path::Path;
+
+    // Version
+    if let Some(ref runtime) = state.custom_runtime {
+        builder.use_custom_runtime(Path::new(runtime));
+    } else if let (Some(ref group), Some(ref version)) =
+        (&state.version_group, &state.version)
+    {
+        builder.select_version(group, version);
+    } else if let Some(ref version) = state.version {
+        // Version-only (no group): substring-search every group's
+        // releases. Lets `recipe set-version 0.10.0` work without the
+        // user knowing which group it lives in.
+        let found = builder.config().versions.iter().find_map(|g| {
+            g.releases
+                .iter()
+                .find(|r| r.version.contains(version.as_str()))
+                .map(|r| (g.name.clone(), r.version.clone()))
+        });
+        if let Some((group, ver)) = found {
+            builder.select_version(&group, &ver);
+        } else {
+            return Err(format!(
+                "Version '{}' not found. Use 'versions' to list available versions.",
+                version
+            ));
+        }
+    } else {
+        builder.select_default_version();
+    }
+
+    // Model
+    if let Some(ref path) = state.custom_model_file {
+        builder.select_custom_model(Path::new(path));
+        // Companion files (e.g. mmproj for multimodal local models)
+        for (role, companion_path) in &state.custom_companion_files {
+            builder.add_custom_companion_file(role, Path::new(companion_path));
+        }
+    } else if let Some(ref model) = state.ollama_model {
+        builder.select_ollama_model(model.clone());
+    } else if let Some(ref model) = state.lmstudio_model {
+        builder.select_lmstudio_model(model.clone());
+    } else if let Some(ref id) = state.model_id {
+        builder.select_registry_model(id);
+        if builder.state().selected_model_id.is_none() {
+            return Err(format!("Model '{}' not found in registry", id));
+        }
+    } else {
+        builder.select_default_model();
+    }
+
+    // Quantizations — per-role. Errors when the model has the role but
+    // no matching quant; silently no-ops when the model has no such role
+    // (recipe carries a stale quant for a now-removed file role).
+    for (role, quant_name) in &state.quantizations {
+        if let Some(model_id) = builder.state().selected_model_id.clone() {
+            if let Some(model) = builder.config().models.iter().find(|m| m.id == model_id) {
+                if let Some(file) = model.files.iter().find(|f| f.role == *role) {
+                    if let Some(idx) = file
+                        .quantizations
+                        .iter()
+                        .position(|q| q.name.eq_ignore_ascii_case(quant_name))
+                    {
+                        builder.select_quantization(role, idx);
+                    } else {
+                        return Err(format!(
+                            "Quantization '{}' not found for role '{}'",
+                            quant_name, role
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // Config values
+    for (key, value) in &state.config_values {
+        builder.set_config_value(key, value.clone());
+    }
+
+    // Args override: an inline `args_override` (e.g. set via the TUI's
+    // .args editor and saved into a recipe) takes precedence over a
+    // file path. Either way the builder ends up with the raw content.
+    if let Some(ref content) = state.args_override {
+        builder.set_args_override(content);
+    } else if let Some(ref args_file) = state.args_file {
+        let content = std::fs::read_to_string(args_file)
+            .map_err(|e| format!("Failed to read args file '{}': {e}", args_file))?;
+        builder.set_args_override(&content);
+    }
+
+    // Output path
+    if let Some(ref path) = state.output_path {
+        builder.set_output_path(Path::new(path));
+    }
+
+    // mmproj_disabled: drop the vision adapter even if the selected
+    // model offers one.
+    if state.mmproj_disabled {
+        builder.disable_file_role("mmproj");
+    }
+
+    // GPU libs (registry-resolved, "<accel>[:<os>]" specs)
+    for spec in &state.gpu_libs {
+        let (accel, os_list) = crate::models::parse_gpu_spec(spec)?;
+        for os in os_list {
+            builder.add_gpu_lib(accel, os);
+        }
+    }
+
+    // Custom GPU libs (local file paths)
+    for lib in &state.custom_gpu_libs {
+        let path = Path::new(&lib.path);
+        let (accel, os_list) =
+            crate::models::parse_gpu_spec(&format!("{}:{}", lib.accel, lib.os))?;
+        for os in os_list {
+            builder.add_custom_gpu_lib(path, accel, os);
+        }
+    }
+
+    // Custom binaries
+    if let Some(ref path) = state.custom_zipalign {
+        builder.use_custom_zipalign(Path::new(path));
+    }
+
+    Ok(())
+}
+
 /// A named build recipe with identity and metadata.
 /// The `state` field is a full snapshot (all defaults resolved) when
 /// persisted, so the recipe is self-contained and reproducible.
@@ -504,5 +661,160 @@ mod tests {
         assert_eq!(loaded.quantizations, state.quantizations);
         assert_eq!(loaded.config_values.len(), state.config_values.len());
         assert_eq!(loaded.output_path, state.output_path);
+    }
+
+    // ── build_from_state / apply_saved_state ──
+    //
+    // These cover the canonical SavedState → Builder converter shared by
+    // every interface (TUI, CLI, JSON-RPC, HTTP). Coverage lives here so
+    // it stays close to the implementation; interface-specific tests
+    // (CLI's recipe pointer, TUI's flow tests) don't duplicate the wiring.
+
+    fn test_cache() -> crate::cache::Cache {
+        crate::cache::Cache::new(std::path::PathBuf::from("/tmp/test-cache"))
+    }
+
+    #[test]
+    fn build_from_state_with_explicit_config() {
+        let saved = SavedState {
+            version_group: Some("llamafile 0.10".to_string()),
+            version: Some("0.10.0".to_string()),
+            model_id: Some("Qwen/Qwen3-0.6B-GGUF".to_string()),
+            output_path: Some("/tmp/test.llamafile".to_string()),
+            config_values: {
+                let mut m = HashMap::new();
+                m.insert("context_length".to_string(), serde_json::json!(16384));
+                m
+            },
+            ..Default::default()
+        };
+        let builder = build_from_state(&saved, test_config(), test_cache()).unwrap();
+        assert!(builder.state().selected_model_id.is_some());
+        assert!(builder.state().resolved_llamafile_path.is_some());
+        assert!(builder.can_build());
+    }
+
+    #[test]
+    fn build_from_state_empty_uses_defaults() {
+        let saved = SavedState::default();
+        let builder = build_from_state(&saved, test_config(), test_cache()).unwrap();
+        assert!(builder.state().selected_version_group.is_some());
+        assert!(builder.state().selected_model_id.is_some());
+        assert!(builder.can_build());
+    }
+
+    /// Regression: a recipe saved with `args_override` (e.g. from the
+    /// TUI's .args editor) must build with that override applied.
+    /// Earlier CLI code only honoured `args_file`, so the override
+    /// was silently dropped.
+    #[test]
+    fn build_from_state_applies_args_override() {
+        let saved = SavedState {
+            args_override: Some("# custom\n-m\n/zip/x.gguf\n".to_string()),
+            ..Default::default()
+        };
+        let builder = build_from_state(&saved, test_config(), test_cache()).unwrap();
+        assert_eq!(builder.resolved_args(), "# custom\n-m\n/zip/x.gguf\n");
+    }
+
+    /// Regression: `mmproj_disabled` must drop the vision adapter even
+    /// when the selected model offers one.
+    #[test]
+    fn build_from_state_honours_mmproj_disabled() {
+        let saved = SavedState {
+            model_id: Some("mistralai/Ministral-3-3B-Instruct-2512-GGUF".to_string()),
+            mmproj_disabled: true,
+            ..Default::default()
+        };
+        let builder = build_from_state(&saved, test_config(), test_cache()).unwrap();
+        let has_mmproj = builder
+            .resolved_components()
+            .iter()
+            .any(|c| matches!(c.role, crate::ComponentRole::MmprojWeights));
+        assert!(
+            !has_mmproj,
+            "mmproj_disabled should drop the vision-adapter component, got {:?}",
+            builder.resolved_components(),
+        );
+    }
+
+    /// Regression for the TUI/CLI drift the previous review surfaced:
+    /// the TUI used to silently ignore `custom_companion_files`. Now
+    /// that the converter is shared, both paths bundle the companion.
+    #[test]
+    fn build_from_state_applies_custom_companion_files() {
+        let mut companions = HashMap::new();
+        companions.insert("mmproj".to_string(), "/tmp/companion-mmproj.gguf".to_string());
+        let saved = SavedState {
+            custom_model_file: Some("/tmp/local-weights.gguf".to_string()),
+            custom_companion_files: companions,
+            ..Default::default()
+        };
+        let builder = build_from_state(&saved, test_config(), test_cache()).unwrap();
+        assert_eq!(
+            builder.state().resolved_mmproj_path.as_deref(),
+            Some("/tmp/companion-mmproj.gguf"),
+            "companion file must be applied to the build state",
+        );
+    }
+
+    /// Regression: version-only recipes (no group) must locate the
+    /// release across all groups, not fall back to the default.
+    #[test]
+    fn build_from_state_resolves_version_only_recipe() {
+        let saved = SavedState {
+            version: Some("0.10.0".to_string()),
+            ..Default::default()
+        };
+        let builder = build_from_state(&saved, test_config(), test_cache()).unwrap();
+        assert_eq!(
+            builder.state().selected_release_version.as_deref(),
+            Some("0.10.0"),
+            "version-only recipe must pick the matching release across groups",
+        );
+    }
+
+    /// Regression: an unknown version-only recipe must error, not
+    /// silently fall through to the default.
+    #[test]
+    fn build_from_state_unknown_version_errors() {
+        let saved = SavedState {
+            version: Some("99.99.99".to_string()),
+            ..Default::default()
+        };
+        let err = build_from_state(&saved, test_config(), test_cache())
+            .err()
+            .expect("expected error");
+        assert!(err.contains("Version '99.99.99' not found"), "got: {err}");
+    }
+
+    /// Regression: an unknown model id must error.
+    #[test]
+    fn build_from_state_unknown_model_errors() {
+        let saved = SavedState {
+            model_id: Some("not/a-real-model".to_string()),
+            ..Default::default()
+        };
+        let err = build_from_state(&saved, test_config(), test_cache())
+            .err()
+            .expect("expected error");
+        assert!(err.contains("not/a-real-model"), "got: {err}");
+    }
+
+    /// Regression: an unknown quantization name on a known role must
+    /// error rather than silently falling back to the model default.
+    #[test]
+    fn build_from_state_unknown_quantization_errors() {
+        let mut quants = HashMap::new();
+        quants.insert("weights".to_string(), "Q99_XYZ".to_string());
+        let saved = SavedState {
+            model_id: Some("Qwen/Qwen3-0.6B-GGUF".to_string()),
+            quantizations: quants,
+            ..Default::default()
+        };
+        let err = build_from_state(&saved, test_config(), test_cache())
+            .err()
+            .expect("expected error");
+        assert!(err.contains("Q99_XYZ"), "got: {err}");
     }
 }

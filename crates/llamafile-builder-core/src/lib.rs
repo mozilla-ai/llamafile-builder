@@ -38,5 +38,5 @@ pub use models::{
 };
 
 // Query functions
-pub use models::search_models;
+pub use models::{parse_gpu_spec, search_models};
 pub use system_info::system_info;

@@ -1,6 +1,5 @@
 use llamafile_builder_core::cache::Cache;
 use llamafile_builder_core::config_manager::BuilderConfig;
-use llamafile_builder_core::models::{GpuAccel, Os};
 
 use crate::cli::BuildArgs;
 use crate::state_file::{self, SavedState};
@@ -143,39 +142,7 @@ fn merge_cli_overrides(saved: &mut SavedState, args: &BuildArgs) -> Result<(), S
     Ok(())
 }
 
-pub fn parse_gpu_spec(spec: &str) -> Result<(GpuAccel, Vec<Os>), String> {
-    let parts: Vec<&str> = spec.split(':').collect();
-    let accel = match parts[0].to_lowercase().as_str() {
-        "cuda" => GpuAccel::Cuda,
-        "rocm" => GpuAccel::Rocm,
-        "vulkan" => GpuAccel::Vulkan,
-        other => {
-            return Err(format!(
-                "Unknown GPU type: '{}'. Use cuda, rocm, or vulkan.",
-                other
-            ))
-        }
-    };
-
-    let os_list = if parts.len() > 1 {
-        match parts[1].to_lowercase().as_str() {
-            "linux" => vec![Os::Linux],
-            "windows" => vec![Os::Windows],
-            "all" => vec![Os::Linux, Os::Windows],
-            other => {
-                return Err(format!(
-                    "Unknown OS: '{}'. Use linux, windows, or all.",
-                    other
-                ))
-            }
-        }
-    } else if cfg!(target_os = "linux") {
-        vec![Os::Linux]
-    } else if cfg!(target_os = "windows") {
-        vec![Os::Windows]
-    } else {
-        vec![Os::Linux]
-    };
-
-    Ok((accel, os_list))
-}
+// Re-export the canonical GPU spec parser from core. Recipe persistence,
+// HTTP server requests, JSON-RPC params, and CLI flags must all parse
+// `<accel>[:<os>]` strings the same way.
+pub use llamafile_builder_core::parse_gpu_spec;

@@ -187,7 +187,17 @@ async fn run_app(
                     let shared_cancel = cancel_flag.clone();
 
                     tokio::spawn(async move {
-                        let mut builder = build_from_state(config, cache_dir, &prepared);
+                        // build_from_state can fail (unknown version, model,
+                        // quant, …) but `make_builder` ran the same path
+                        // synchronously above and succeeded. The fallback
+                        // is just defence in depth — surface as Failed.
+                        let mut builder = match build_from_state(config, cache_dir, &prepared) {
+                            Ok(b) => b,
+                            Err(e) => {
+                                let _ = tx.send(BuildResult::Failed { error: e });
+                                return;
+                            }
+                        };
                         builder.set_cancel_flag(shared_cancel);
 
                         match builder.build().await {

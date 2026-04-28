@@ -405,6 +405,53 @@ pub enum Os {
 // Helper functions
 // ============================================================================
 
+/// Parse a `"<accel>[:<os>]"` GPU library spec into the typed enum pair.
+///
+/// `accel` is `cuda`, `rocm`, or `vulkan`. `os` is `linux`, `windows`, or
+/// `all` (expands to both). Omitted `os` falls back to the host platform —
+/// `Linux` on non-Windows hosts. Returns the typed pair plus any expansion.
+///
+/// This is the single shared parser for `SavedState::gpu_libs` /
+/// `custom_gpu_libs` strings. Recipe persistence and every `Builder`
+/// construction path (TUI, CLI, JSON-RPC, HTTP) must agree on what those
+/// strings mean — having two parsers diverges silently.
+pub fn parse_gpu_spec(spec: &str) -> Result<(GpuAccel, Vec<Os>), String> {
+    let parts: Vec<&str> = spec.split(':').collect();
+    let accel = match parts[0].to_lowercase().as_str() {
+        "cuda" => GpuAccel::Cuda,
+        "rocm" => GpuAccel::Rocm,
+        "vulkan" => GpuAccel::Vulkan,
+        other => {
+            return Err(format!(
+                "Unknown GPU type: '{}'. Use cuda, rocm, or vulkan.",
+                other
+            ))
+        }
+    };
+
+    let os_list = if parts.len() > 1 {
+        match parts[1].to_lowercase().as_str() {
+            "linux" => vec![Os::Linux],
+            "windows" => vec![Os::Windows],
+            "all" => vec![Os::Linux, Os::Windows],
+            other => {
+                return Err(format!(
+                    "Unknown OS: '{}'. Use linux, windows, or all.",
+                    other
+                ))
+            }
+        }
+    } else if cfg!(target_os = "linux") {
+        vec![Os::Linux]
+    } else if cfg!(target_os = "windows") {
+        vec![Os::Windows]
+    } else {
+        vec![Os::Linux]
+    };
+
+    Ok((accel, os_list))
+}
+
 /// Search models by name, organization, or ID, with optional tag filter.
 pub fn search_models<'a>(
     models: &'a [Model],

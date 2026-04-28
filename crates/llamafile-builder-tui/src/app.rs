@@ -517,13 +517,14 @@ impl App {
         parts.join("  ")
     }
 
-    /// Build a Builder from the current state.
+    /// Build a Builder from the current state. Errors on unknown
+    /// version / model / quantization or unreadable args file.
     pub fn make_builder(&self) -> Result<Builder, String> {
-        Ok(build_from_state(
+        build_from_state(
             self.config.clone(),
             self.cache_dir.clone(),
             &self.prepare_build(),
-        ))
+        )
     }
 
     /// Get the currently selected release.
@@ -783,104 +784,18 @@ pub fn apply_build_task_terminated(app: &mut App) {
 
 /// Construct a fully configured `Builder` from a `SavedState`.
 ///
-/// This is the single place where SavedState is applied to a Builder. Both
-/// `App::make_builder()` (for validation and `.args` preview) and the
-/// background build task use it, so the TUI's interactive state and its build
-/// invocation cannot drift apart.
+/// Thin wrapper around `llamafile_builder_core::config_store::build_from_state`
+/// — the single canonical SavedState → Builder converter shared with the
+/// CLI, JSON-RPC, and HTTP interfaces. Kept here because the TUI passes
+/// `cache_dir` rather than a `Cache` and that shape is convenient for
+/// the spawn body.
 pub fn build_from_state(
     config: BuilderConfig,
     cache_dir: PathBuf,
     state: &SavedState,
-) -> Builder {
+) -> Result<Builder, String> {
     let cache = Cache::new(cache_dir);
-    let mut builder = Builder::new(config, cache);
-
-    // Version
-    if let Some(ref runtime) = state.custom_runtime {
-        builder.use_custom_runtime(std::path::Path::new(runtime));
-    } else if let (Some(ref g), Some(ref v)) = (&state.version_group, &state.version) {
-        builder.select_version(g, v);
-    } else {
-        builder.select_default_version();
-    }
-
-    // Model
-    if let Some(ref path) = state.custom_model_file {
-        builder.select_custom_model(std::path::Path::new(path));
-    } else if let Some(ref model) = state.ollama_model {
-        builder.select_ollama_model(model.clone());
-    } else if let Some(ref model) = state.lmstudio_model {
-        builder.select_lmstudio_model(model.clone());
-    } else if let Some(ref id) = state.model_id {
-        builder.select_registry_model(id);
-    } else {
-        builder.select_default_model();
-    }
-
-    // Quantizations
-    for (role, name) in &state.quantizations {
-        if let Some(model_id) = builder.state().selected_model_id.clone() {
-            if let Some(model) = builder.config().models.iter().find(|m| m.id == model_id) {
-                if let Some(file) = model.files.iter().find(|f| f.role == *role) {
-                    if let Some(idx) = file
-                        .quantizations
-                        .iter()
-                        .position(|q| q.name.eq_ignore_ascii_case(name))
-                    {
-                        builder.select_quantization(role, idx);
-                    }
-                }
-            }
-        }
-    }
-
-    // Config values
-    for (key, value) in &state.config_values {
-        builder.set_config_value(key, value.clone());
-    }
-
-    // Output
-    if let Some(ref path) = state.output_path {
-        builder.set_output_path(std::path::Path::new(path));
-    }
-
-    // GPU libraries (specs of the form "accel:os")
-    for spec in &state.gpu_libs {
-        let mut parts = spec.splitn(2, ':');
-        let accel = match parts.next() {
-            Some("cuda") => GpuAccel::Cuda,
-            Some("rocm") => GpuAccel::Rocm,
-            Some("vulkan") => GpuAccel::Vulkan,
-            _ => continue,
-        };
-        let os = match parts.next() {
-            Some("linux") | None => Os::Linux,
-            Some("windows") => Os::Windows,
-            _ => continue,
-        };
-        builder.add_gpu_lib(accel, os);
-    }
-
-    // Custom zipalign
-    if let Some(ref path) = state.custom_zipalign {
-        builder.use_custom_zipalign(std::path::Path::new(path));
-    }
-
-    // Disable mmproj if user toggled it off
-    if state.mmproj_disabled {
-        builder.disable_file_role("mmproj");
-    }
-
-    // Args override (raw content takes precedence over args_file)
-    if let Some(ref content) = state.args_override {
-        builder.set_args_override(content);
-    } else if let Some(ref path) = state.args_file {
-        if let Ok(content) = std::fs::read_to_string(path) {
-            builder.set_args_override(&content);
-        }
-    }
-
-    builder
+    llamafile_builder_core::config_store::build_from_state(state, config, cache)
 }
 
 #[cfg(test)]
