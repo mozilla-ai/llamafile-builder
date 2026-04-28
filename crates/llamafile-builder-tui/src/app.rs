@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use llamafile_builder_core::config_manager::BuilderConfig;
-use llamafile_builder_core::config_store::{BuildRecipe, ConfigStore, SavedState};
+use llamafile_builder_core::config_store::{BuildRecipe, ConfigStore, CustomGpuLib, SavedState};
 use llamafile_builder_core::models::*;
 use llamafile_builder_core::cache::Cache;
 use llamafile_builder_core::{Builder, BuildPhase};
@@ -320,6 +320,15 @@ pub struct App {
     pub config_values: HashMap<String, serde_json::Value>,
     pub output_path: Option<String>,
     pub gpu_libs: Vec<(GpuAccel, Os)>,
+    /// GPU libraries specified by local file path (not from the version
+    /// catalog). The TUI doesn't currently expose a UI to set these, but
+    /// it must round-trip them through save/load — recipes created via
+    /// the HTTP server's `POST /state/custom-gpu` populate this field
+    /// and the TUI would silently drop them otherwise.
+    pub custom_gpu_libs: Vec<CustomGpuLib>,
+    /// Extra files to bundle alongside a custom model file (role → path).
+    /// Same round-trip rationale as `custom_gpu_libs`.
+    pub custom_companion_files: HashMap<String, String>,
     pub custom_zipalign: Option<String>,
     pub args_file: Option<String>,
     pub args_override: Option<String>,
@@ -365,6 +374,8 @@ impl App {
             config_values: HashMap::new(),
             output_path: None,
             gpu_libs: Vec::new(),
+            custom_gpu_libs: Vec::new(),
+            custom_companion_files: HashMap::new(),
             custom_zipalign: None,
             args_file: None,
             args_override: None,
@@ -629,8 +640,8 @@ impl App {
             mmproj_disabled: self.mmproj_disabled,
             output_path: self.output_path.clone(),
             gpu_libs,
-            custom_gpu_libs: vec![],
-            custom_companion_files: Default::default(),
+            custom_gpu_libs: self.custom_gpu_libs.clone(),
+            custom_companion_files: self.custom_companion_files.clone(),
             custom_zipalign: self.custom_zipalign.clone(),
         }
     }
@@ -657,6 +668,8 @@ impl App {
         self.custom_zipalign = s.custom_zipalign.clone();
         self.args_override = s.args_override.clone();
         self.mmproj_disabled = s.mmproj_disabled;
+        self.custom_gpu_libs = s.custom_gpu_libs.clone();
+        self.custom_companion_files = s.custom_companion_files.clone();
 
         // Convert string gpu specs to typed tuples
         self.gpu_libs = s.gpu_libs.iter().filter_map(|spec| {

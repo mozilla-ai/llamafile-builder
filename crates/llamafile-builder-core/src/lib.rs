@@ -23,7 +23,7 @@ pub mod test_utils;
 pub use builder::{Builder, BuildPhase};
 pub use cache::{Cache, CacheStatus};
 pub use config_manager::{BuilderConfig, ConfigManager, UpdateMode, UpdateStatus};
-pub use config_store::{BuildRecipe, ConfigStore, SavedState};
+pub use config_store::{BuildRecipe, ConfigStore, CustomGpuLib, SavedState};
 pub use disk_space::{DiskRequirement, DiskSpaceError, DiskSpaceReport, Purpose as DiskPurpose};
 pub use error::{DownloadError, Error, Result};
 pub use validation::ValidationMessage;
