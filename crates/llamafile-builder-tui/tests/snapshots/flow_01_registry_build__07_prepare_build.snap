@@ -1,7 +1,7 @@
 ---
 source: crates/llamafile-builder-tui/tests/flow_01_registry_build.rs
 assertion_line: 58
-expression: app.prepare_build()
+expression: app.to_saved_state()
 ---
 SavedState {
     version_group: Some(
