@@ -43,16 +43,22 @@ fn args_edit_creates_override_and_locks_config_row() {
     let frame = render::draw(&mut term, &app);
     insta::assert_snapshot!("03_dashboard_with_override", frame);
 
-    // The Config row is now locked: navigation skips it. Walking from
-    // Output → next must land on Gpu (Config skipped).
-    let after_output = Focus::Output.next(/*has_mmproj=*/ false, /*args_overridden=*/ true, /*local_model=*/ false);
+    // The Config row is now locked: navigation skips it. Drive a real
+    // Down keypress through the dashboard handler — that's the path
+    // production uses, and it computes `args_overridden` from
+    // `app.args_override.is_some()` inline. Hardcoding the boolean
+    // bypasses exactly that computation, so a typo there
+    // (`args_file.is_some()` say) wouldn't fail the assertion.
+    dispatch::focus_on(&mut app, Focus::Output);
+    dispatch::keys(&mut app, &[down()]);
     assert_eq!(
-        after_output, Focus::Gpu,
-        "Config row must be skipped when args are overridden",
+        app.focus, Focus::Gpu,
+        "Down from Output must skip the locked Config row and land on Gpu; got {:?}",
+        app.focus,
     );
 
     // SavedState carries the override verbatim.
-    let saved = app.prepare_build();
+    let saved = app.to_saved_state();
     assert!(saved.args_override.as_deref().unwrap().starts_with("# CUSTOM"));
     insta::assert_debug_snapshot!(
         "04_prepare_build_override_field",

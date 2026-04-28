@@ -58,5 +58,18 @@ fn ollama_build_pick_llama3_8b() {
 
     // SavedState assertion: Ollama model populated, registry model_id
     // cleared, no quantizations set (Ollama models are pre-quantized).
-    insta::assert_debug_snapshot!("04_prepare_build", app.prepare_build());
+    let saved = app.to_saved_state();
+
+    // Hard asserts in addition to the snapshot — a regression in
+    // model_id clearing should fail this loudly, not just diff a
+    // snapshot a developer might rubber-stamp accept.
+    assert!(
+        saved.model_id.is_none(),
+        "selecting an Ollama model must clear the registry model_id; got {:?}",
+        saved.model_id,
+    );
+    assert!(saved.ollama_model.is_some(), "ollama_model must be populated");
+    assert!(saved.lmstudio_model.is_none(), "lmstudio_model must stay None");
+
+    insta::assert_debug_snapshot!("04_prepare_build", saved);
 }

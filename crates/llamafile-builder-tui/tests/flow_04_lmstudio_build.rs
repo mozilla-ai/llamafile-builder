@@ -50,5 +50,16 @@ fn lmstudio_build_pick_test_model() {
     let frame = render::draw(&mut term, &app);
     insta::assert_snapshot!("02_dashboard_after_lmstudio_select", frame);
 
-    insta::assert_debug_snapshot!("03_prepare_build", app.prepare_build());
+    // Hard asserts so a regression in model-source clearing fails
+    // loudly rather than just diffing a snapshot.
+    let saved = app.to_saved_state();
+    assert!(
+        saved.model_id.is_none(),
+        "selecting an LM Studio model must clear the registry model_id; got {:?}",
+        saved.model_id,
+    );
+    assert!(saved.lmstudio_model.is_some(), "lmstudio_model must be populated");
+    assert!(saved.ollama_model.is_none(), "ollama_model must stay None");
+
+    insta::assert_debug_snapshot!("03_prepare_build", saved);
 }
