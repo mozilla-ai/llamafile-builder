@@ -1,0 +1,15 @@
+---
+source: crates/llamafile-builder-tui/tests/flow_08_args_override.rs
+assertion_line: 57
+expression: "(saved.args_override.as_ref().map(|s| s.lines().take(3).collect::<Vec<_>>()),\nsaved.args_file,)"
+---
+(
+    Some(
+        [
+            "# CUSTOM-m",
+            "/zip/Qwen3-0.6B-Q8_0.gguf",
+            "...",
+        ],
+    ),
+    None,
+)

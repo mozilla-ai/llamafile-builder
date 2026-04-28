@@ -1,0 +1,29 @@
+---
+source: crates/llamafile-builder-tui/tests/flow_10_build_error.rs
+assertion_line: 65
+expression: frame
+---
+┌───────────────────────────── llamafile builder ──────────────────────────────┐
+│ > Version    llamafile 0.10 / 0.10.1_alpha                                   │
+│                                                                              │
+│   Model      Qwen3 0.6B (0.6B)                                               │
+│   Weights    Q8_0 (default) (609.8 MiB)                                      │
+│                                                                              │
+│   O┌ Build failed ──────────────────────────────────────────────────────┐    │
+│    │Build failed: network unreachable while resolving HuggingFace model │    │
+│   C│'mistralai/Ministral-3-3B-Instruct-2512-GGUF'. Check your connection│    │
+│   G│and retry. If you are behind a proxy, set HTTPS_PROXY before        │    │
+│    │launching.                                                          │    │
+│   R│                                                                    │    │
+│    │                                                                    │    │
+│   [│                                                                    │    │
+│    │                                                                    │    │
+│    │                                                                    │    │
+│    │                                                                    │    │
+│    └ press any key to dismiss ──────────────────────────────────────────┘    │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+ Select the llamafile runtime version to use  │  Enter=change  ↑↓=navigate  │  ^
+┌ Logs < INFO > l=expand ──────────────────────────────────────────────────────┐
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
