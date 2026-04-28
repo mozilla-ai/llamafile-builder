@@ -1059,35 +1059,52 @@ mod tests {
 
     #[tokio::test]
     async fn disk_requirements_returns_per_destination_buckets() {
-        let (router, _) = app();
-        let id = create(&router).await;
-        post_json(
-            &router,
-            &format!("/api/recipes/{id}/state/model"),
-            json!({"id": "Qwen/Qwen3-0.6B-GGUF"}),
+        // Isolate the HuggingFace cache to a fresh empty dir so the test
+        // doesn't depend on whether the developer's machine already has the
+        // model weights cached locally. Without this, a cached model would
+        // remove the huggingface_cache bucket from the response.
+        let hf_tmp = tempfile::TempDir::new().unwrap();
+        temp_env::async_with_vars(
+            [
+                ("HF_HOME", Some(hf_tmp.path().to_string_lossy().to_string())),
+                ("HUGGINGFACE_HUB_CACHE", None),
+            ],
+            async {
+                let (router, _) = app();
+                let id = create(&router).await;
+                post_json(
+                    &router,
+                    &format!("/api/recipes/{id}/state/model"),
+                    json!({"id": "Qwen/Qwen3-0.6B-GGUF"}),
+                )
+                .await;
+
+                let (s, reqs) = get_json(
+                    &router,
+                    &format!("/api/recipes/{id}/state/disk-requirements"),
+                )
+                .await;
+                assert_eq!(s, StatusCode::OK);
+                let arr = reqs.as_array().unwrap();
+                let purposes: Vec<&str> =
+                    arr.iter().filter_map(|r| r["purpose"].as_str()).collect();
+                assert!(
+                    purposes.iter().any(|p| *p == "huggingface cache"),
+                    "expected huggingface cache requirement, got {:?}",
+                    purposes
+                );
+                assert!(
+                    purposes.iter().any(|p| *p == "output"),
+                    "expected output requirement, got {:?}",
+                    purposes
+                );
+                for r in arr {
+                    assert!(r["bytes"].as_u64().unwrap_or(0) > 0);
+                    assert!(r["destination"].as_str().is_some());
+                }
+            },
         )
         .await;
-
-        let (s, reqs) =
-            get_json(&router, &format!("/api/recipes/{id}/state/disk-requirements")).await;
-        assert_eq!(s, StatusCode::OK);
-        let arr = reqs.as_array().unwrap();
-        let purposes: Vec<&str> = arr.iter().filter_map(|r| r["purpose"].as_str()).collect();
-        assert!(
-            purposes.iter().any(|p| *p == "huggingface cache"),
-            "expected huggingface cache requirement, got {:?}",
-            purposes
-        );
-        assert!(
-            purposes.iter().any(|p| *p == "output"),
-            "expected output requirement, got {:?}",
-            purposes
-        );
-        // Every bucket must report a positive byte count
-        for r in arr {
-            assert!(r["bytes"].as_u64().unwrap_or(0) > 0);
-            assert!(r["destination"].as_str().is_some());
-        }
     }
 
     #[tokio::test]

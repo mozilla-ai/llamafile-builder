@@ -227,7 +227,10 @@ pub fn check_with(
     requirements: &[DiskRequirement],
     available_space_fn: &dyn Fn(&Path) -> std::io::Result<u64>,
 ) -> Result<Vec<DiskSpaceReport>, DiskSpaceError> {
-    let mut grouped: Vec<DiskSpaceReport> = Vec::new();
+    // Each entry pairs the grouping key (filesystem id, with canonical path
+    // as fallback when the platform can't report a device id) with its
+    // accumulated report.
+    let mut grouped: Vec<(GroupKey, DiskSpaceReport)> = Vec::new();
 
     for req in requirements {
         let probe = nearest_existing_ancestor(&req.destination).ok_or_else(|| {
@@ -239,15 +242,10 @@ pub fn check_with(
                 ),
             }
         })?;
-
-        // Group by canonicalized probe path so two destinations resolving to
-        // the same filesystem accumulate.
         let canonical = std::fs::canonicalize(&probe).unwrap_or(probe.clone());
+        let key = group_key_for(&canonical);
 
-        if let Some(existing) = grouped
-            .iter_mut()
-            .find(|r| r.checked_path == canonical)
-        {
+        if let Some((_, existing)) = grouped.iter_mut().find(|(k, _)| *k == key) {
             existing.bytes_required = existing.bytes_required.saturating_add(req.bytes);
             if !existing.purposes.contains(&req.purpose) {
                 existing.purposes.push(req.purpose);
@@ -258,16 +256,19 @@ pub fn check_with(
                     path: canonical.clone(),
                     source: e,
                 })?;
-            grouped.push(DiskSpaceReport {
-                checked_path: canonical,
-                bytes_required: req.bytes,
-                bytes_available: available,
-                purposes: vec![req.purpose],
-            });
+            grouped.push((
+                key,
+                DiskSpaceReport {
+                    checked_path: canonical,
+                    bytes_required: req.bytes,
+                    bytes_available: available,
+                    purposes: vec![req.purpose],
+                },
+            ));
         }
     }
 
-    for report in &grouped {
+    for (_, report) in &grouped {
         if !report.is_sufficient() {
             return Err(DiskSpaceError::Insufficient {
                 path: report.checked_path.clone(),
@@ -282,7 +283,46 @@ pub fn check_with(
         }
     }
 
-    Ok(grouped)
+    Ok(grouped.into_iter().map(|(_, r)| r).collect())
+}
+
+/// Identity of the filesystem hosting a path. The first variant is preferred
+/// — `dev()` on Unix and `volume_serial_number()` on Windows return a stable
+/// id that's identical for any two paths on the same volume. The second is a
+/// fallback for platforms where neither is available (or the metadata call
+/// fails); in that case we degrade to canonical-path equality, which is the
+/// pre-fix behaviour.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum GroupKey {
+    Filesystem(u64),
+    CanonicalPath(PathBuf),
+}
+
+fn group_key_for(path: &Path) -> GroupKey {
+    match filesystem_id(path) {
+        Some(id) => GroupKey::Filesystem(id),
+        None => GroupKey::CanonicalPath(path.to_path_buf()),
+    }
+}
+
+#[cfg(unix)]
+fn filesystem_id(path: &Path) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).ok().map(|m| m.dev())
+}
+
+#[cfg(windows)]
+fn filesystem_id(path: &Path) -> Option<u64> {
+    use std::os::windows::fs::MetadataExt;
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|m| m.volume_serial_number())
+        .map(|v| v as u64)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn filesystem_id(_path: &Path) -> Option<u64> {
+    None
 }
 
 /// Walk up the path until we find a component that exists on disk. Used so
@@ -603,6 +643,76 @@ mod tests {
             }
             other => panic!("expected Insufficient (combined), got {:?}", other),
         }
+    }
+
+    /// Regression: prior to the fs-id grouping, two distinct paths that
+    /// happened to live on the same partition were each checked
+    /// independently and each saw the full available space, so a combined
+    /// requirement that overflowed the filesystem could pass the pre-check.
+    /// (This is the case the reviewer flagged: cache_dir vs. output dir,
+    /// which on a typical setup share `$HOME`'s filesystem.)
+    #[test]
+    #[cfg(any(unix, windows))]
+    fn check_with_groups_distinct_paths_on_same_filesystem() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cache_dir = tmp.path().join("cache");
+        let output_dir = tmp.path().join("out");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        std::fs::create_dir_all(&output_dir).unwrap();
+
+        // Distinct directories, same filesystem.
+        let reqs = vec![
+            DiskRequirement {
+                destination: cache_dir,
+                bytes: 600_000_000,
+                purpose: Purpose::Cache,
+            },
+            DiskRequirement {
+                destination: output_dir,
+                bytes: 600_000_000,
+                purpose: Purpose::Output,
+            },
+        ];
+
+        // 600M each fits in 1G; combined 1.2G does not.
+        let result = check_with(&reqs, &|_p| Ok(1_000_000_000));
+        match result {
+            Err(DiskSpaceError::Insufficient {
+                required,
+                available,
+                purposes,
+                ..
+            }) => {
+                assert_eq!(required, 1_200_000_000);
+                assert_eq!(available, 1_000_000_000);
+                assert!(purposes.contains(&"cache".to_string()));
+                assert!(purposes.contains(&"output".to_string()));
+            }
+            other => panic!("expected Insufficient (combined), got {:?}", other),
+        }
+    }
+
+    #[test]
+    #[cfg(any(unix, windows))]
+    fn check_with_returns_single_report_per_filesystem() {
+        // Three sibling subdirectories in one TempDir → all on the same fs →
+        // one report.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let a = tmp.path().join("a");
+        let b = tmp.path().join("b");
+        let c = tmp.path().join("c");
+        for p in [&a, &b, &c] {
+            std::fs::create_dir_all(p).unwrap();
+        }
+        let reqs = vec![
+            DiskRequirement { destination: a, bytes: 100, purpose: Purpose::Cache },
+            DiskRequirement { destination: b, bytes: 200, purpose: Purpose::HuggingFaceCache },
+            DiskRequirement { destination: c, bytes: 300, purpose: Purpose::Output },
+        ];
+        let reports = check_with(&reqs, &|_p| Ok(1_000_000)).unwrap();
+        assert_eq!(reports.len(), 1, "expected one fs report, got {:?}", reports);
+        assert_eq!(reports[0].bytes_required, 600);
+        assert_eq!(reports[0].purposes.len(), 3);
     }
 
     #[test]

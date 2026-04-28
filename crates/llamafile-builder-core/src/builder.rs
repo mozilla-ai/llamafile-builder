@@ -1200,31 +1200,50 @@ mod tests {
     fn estimate_disk_requirements_for_default_qwen_build() {
         // The default Qwen build pulls runtime + zipalign over HTTP and
         // weights from HuggingFace. The pre-check should report space at
-        // three destinations: cache, hf cache, and output.
-        let mut builder = configured_builder();
-        builder.set_output_path(Path::new("/tmp/test-out.llamafile"));
+        // three destinations: cache, hf cache, and output. Isolate the HF
+        // cache so the test doesn't false-pass when the developer's machine
+        // already has the model cached locally.
+        let hf_tmp = tempfile::TempDir::new().unwrap();
+        temp_env::with_vars(
+            [
+                ("HF_HOME", Some(hf_tmp.path().to_string_lossy().to_string())),
+                ("HUGGINGFACE_HUB_CACHE", None),
+            ],
+            || {
+                // Same isolation for the URL cache so existing cached
+                // runtime/zipalign don't make the Cache bucket disappear.
+                let cache_tmp = tempfile::TempDir::new().unwrap();
+                let config = test_config();
+                let group_name = config.versions[0].name.clone();
+                let release_version = config.versions[0].releases[0].version.clone();
+                let mut builder =
+                    Builder::new(config, Cache::new(cache_tmp.path().to_path_buf()));
+                builder.select_version(&group_name, &release_version);
+                builder.select_registry_model("Qwen/Qwen3-0.6B-GGUF");
+                builder.set_output_path(Path::new("/tmp/test-out.llamafile"));
 
-        let reqs = builder.estimate_disk_requirements();
-        let purposes: Vec<_> = reqs.iter().map(|r| r.purpose).collect();
-        assert!(
-            purposes.contains(&crate::disk_space::Purpose::Cache),
-            "expected Cache requirement, got {:?}",
-            purposes
+                let reqs = builder.estimate_disk_requirements();
+                let purposes: Vec<_> = reqs.iter().map(|r| r.purpose).collect();
+                assert!(
+                    purposes.contains(&crate::disk_space::Purpose::Cache),
+                    "expected Cache requirement, got {:?}",
+                    purposes
+                );
+                assert!(
+                    purposes.contains(&crate::disk_space::Purpose::HuggingFaceCache),
+                    "expected HuggingFaceCache requirement, got {:?}",
+                    purposes
+                );
+                assert!(
+                    purposes.contains(&crate::disk_space::Purpose::Output),
+                    "expected Output requirement, got {:?}",
+                    purposes
+                );
+                for r in &reqs {
+                    assert!(r.bytes > 0, "requirement {:?} had zero bytes", r);
+                }
+            },
         );
-        assert!(
-            purposes.contains(&crate::disk_space::Purpose::HuggingFaceCache),
-            "expected HuggingFaceCache requirement, got {:?}",
-            purposes
-        );
-        assert!(
-            purposes.contains(&crate::disk_space::Purpose::Output),
-            "expected Output requirement, got {:?}",
-            purposes
-        );
-        // Every reported requirement must be non-zero
-        for r in &reqs {
-            assert!(r.bytes > 0, "requirement {:?} had zero bytes", r);
-        }
     }
 
     #[test]

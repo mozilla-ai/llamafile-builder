@@ -1218,6 +1218,7 @@ dependencies = [
  "open",
  "serde",
  "serde_json",
+ "temp-env",
  "tempfile",
  "tokio",
  "tokio-stream",
@@ -2147,6 +2148,7 @@ version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96374855068f47402c3121c6eed88d29cb1de8f3ab27090e273e420bdabcf050"
 dependencies = [
+ "futures",
  "parking_lot",
 ]
 
