@@ -74,7 +74,7 @@ Description of the focused item is shown at the top.
 Multi-select checklist of GPU libraries available in the selected release. Each line shows the acceleration type (CUDA/ROCm), OS, and download size. Space toggles selection. Multiple libraries can be selected simultaneously.
 
 ### Build Error
-A modal that appears when a build fails (`BuildResult::Failed`). Shows the full error text wrapped over multiple lines. Any keypress dismisses. The same message is also written to the log pane. User-initiated cancellations (the "Cancelled" / "Download cancelled" strings from `Error::Cancelled` / `DownloadError::Cancelled`) do **not** open the popup — they're noted at WARN in the log only.
+A modal that appears when a build fails (`BuildResult::Failed`). Shows the full error text wrapped over multiple lines. Any keypress dismisses. The same message is also written to the log pane. User-initiated cancellations (`Error::Cancelled` and `Error::Download(DownloadError::Cancelled)`) take a separate code path — they fire `BuildResult::Cancelled` instead of `BuildResult::Failed`, so the popup is never shown; the log gets a WARN note.
 
 ### .args Editor
 A `tui-textarea` multi-line editor showing the generated `.args` content. Editing creates an override — the Config row becomes greyed out and unskippable in navigation. `Ctrl+R` resets to the auto-generated content. Esc saves and closes.

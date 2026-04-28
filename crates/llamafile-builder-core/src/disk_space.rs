@@ -138,23 +138,30 @@ pub fn estimate(
         }
 
         // Download size: only for not-yet-cached URL/HF sources with a known
-        // expected_size.
+        // expected_size. For partial URL downloads, only the remainder will
+        // be fetched (Cache::ensure resumes from the existing file).
         let Some(expected) = component.expected_size else {
             continue;
         };
         if expected == 0 {
             continue;
         }
-        let already_cached = matches!(cache.check(component), CacheStatus::Valid(_));
-        if already_cached {
+        let bytes_to_fetch = match cache.check(component) {
+            CacheStatus::Valid(_) => continue,
+            CacheStatus::Partial { bytes_downloaded, .. } => {
+                expected.saturating_sub(bytes_downloaded)
+            }
+            CacheStatus::Missing => expected,
+        };
+        if bytes_to_fetch == 0 {
             continue;
         }
         match &component.source {
             ComponentSource::Url(_) => {
-                cache_bytes = cache_bytes.saturating_add(expected);
+                cache_bytes = cache_bytes.saturating_add(bytes_to_fetch);
             }
             ComponentSource::HuggingFace { .. } => {
-                hf_bytes = hf_bytes.saturating_add(expected);
+                hf_bytes = hf_bytes.saturating_add(bytes_to_fetch);
             }
             ComponentSource::Local(_) | ComponentSource::Generated => {}
         }
@@ -197,13 +204,15 @@ fn component_size_for_output(component: &Component) -> Option<u64> {
     None
 }
 
-/// Resolve the HuggingFace shared cache directory. Mirrors `hf_hub::Cache::from_env`,
-/// honouring `HF_HOME` and `HUGGINGFACE_HUB_CACHE`, falling back to
-/// `~/.cache/huggingface/hub/`.
+/// Resolve the HuggingFace shared cache directory. Must match the directory
+/// that the actual download path (`Cache::download_hf` → `hf_hub::Cache::from_env`)
+/// will land bytes in, otherwise the pre-check probes a different filesystem
+/// than the download will.
+///
+/// hf-hub 0.4 only honours `HF_HOME`, falling back to
+/// `<home>/.cache/huggingface/hub/`. It does **not** look at
+/// `HUGGINGFACE_HUB_CACHE`; we mirror that here intentionally.
 fn hf_cache_dir() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("HUGGINGFACE_HUB_CACHE") {
-        return Some(PathBuf::from(p));
-    }
     if let Ok(p) = std::env::var("HF_HOME") {
         return Some(PathBuf::from(p).join("hub"));
     }
@@ -222,8 +231,9 @@ pub fn check(requirements: &[DiskRequirement]) -> Result<Vec<DiskSpaceReport>, D
 }
 
 /// Variant of [`check`] that takes a custom `available_space` function. Used
-/// by tests to simulate a tight filesystem without writing to real disks.
-pub fn check_with(
+/// by tests in this module to simulate a tight filesystem without writing to
+/// real disks. Not exposed publicly — callers should use [`check`].
+fn check_with(
     requirements: &[DiskRequirement],
     available_space_fn: &dyn Fn(&Path) -> std::io::Result<u64>,
 ) -> Result<Vec<DiskSpaceReport>, DiskSpaceError> {
@@ -450,6 +460,42 @@ mod tests {
         );
         // No URL component, no cache requirement
         assert!(reqs.iter().all(|r| r.purpose != Purpose::Cache));
+    }
+
+    #[test]
+    fn estimate_partial_url_component_charges_only_the_remainder() {
+        // A previously-interrupted runtime download leaves a partial file in
+        // the cache. Cache::ensure resumes and only fetches the missing
+        // bytes, so the pre-check must reserve only that remainder.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cache = Cache::new(tmp.path().to_path_buf());
+
+        let bin_dir = cache.runtime_dir();
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        // 200_000 of 1_000_000 already on disk
+        std::fs::write(bin_dir.join("file"), vec![0u8; 200_000]).unwrap();
+
+        let component = Component {
+            role: ComponentRole::Runtime,
+            source: ComponentSource::Url("https://example.com/file".to_string()),
+            zip_path: String::new(),
+            expected_size: Some(1_000_000),
+            expected_sha256: None,
+        };
+
+        let reqs = estimate(&[component], &cache, &tmp.path().join("out.llamafile"));
+        let cache_req = reqs
+            .iter()
+            .find(|r| r.purpose == Purpose::Cache)
+            .expect("partial download still needs cache space");
+        assert_eq!(
+            cache_req.bytes, 800_000,
+            "expected to reserve only the remainder, not the full size"
+        );
+        // Output still uses the full expected size (the bundled file is
+        // complete by the time output is written).
+        let out_req = reqs.iter().find(|r| r.purpose == Purpose::Output).unwrap();
+        assert_eq!(out_req.bytes, 1_000_000);
     }
 
     #[test]

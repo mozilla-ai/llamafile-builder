@@ -316,12 +316,6 @@ disk_space::estimate(
 ) -> Vec<DiskRequirement>
 
 disk_space::check(reqs: &[DiskRequirement]) -> Result<Vec<DiskSpaceReport>, DiskSpaceError>
-
-// Test seam: inject a custom available_space query (used by core unit tests)
-disk_space::check_with(
-    reqs: &[DiskRequirement],
-    available_space_fn: &dyn Fn(&Path) -> std::io::Result<u64>,
-) -> Result<Vec<DiskSpaceReport>, DiskSpaceError>
 ```
 
 `Builder::estimate_disk_requirements()` returns the same `Vec<DiskRequirement>` for the current state, so the CLI/TUI/server can preview requirements without invoking `build()`.
@@ -493,7 +487,7 @@ GPU selection is handled by the `Builder` as a flat list of `GpuLibSelection { a
 
 ## Test coverage
 
-172 tests across core library (127), CLI (18), and TUI (27):
+175 tests across core library (128), CLI (18), and TUI (29):
 
 | Module | Tests | What's covered |
 |--------|-------|----------------|
@@ -504,7 +498,7 @@ GPU selection is handled by the `Builder` as a flat list of `GpuLibSelection { a
 | `config_store` | 14 | CRUD, list sorting, find by name/UUID, cleanup unnamed, resolve_defaults (structural checks), round-trip |
 | `cache` | 5 | Cache status: local existing/missing, generated, URL partial/complete/missing |
 | `config_manager` | 6 | Load, fallback, invalid JSON, bare array rejection, apply update, version comparison |
-| `disk_space` | 17 | Estimation per source/role, cache hits, output sizing, filesystem-id grouping (literal-same path AND distinct paths sharing one fs), error on insufficient, real fs4 sanity |
+| `disk_space` | 18 | Estimation per source/role, cache hits, partial-download remainder, output sizing, filesystem-id grouping (literal-same path AND distinct paths sharing one fs), error on insufficient, real fs4 sanity |
 | `validation` | 5 | Required components, context length, custom binary, large context |
 | `ollama` | 6 | Availability, scanning, missing blobs, empty dirs |
 | `lmstudio` | 7 | Availability, scanning, role inference, non-gguf filtering |
@@ -512,4 +506,4 @@ GPU selection is handled by the `Builder` as a flat list of `GpuLibSelection { a
 | CLI `server` | 15 | Data endpoints, recipe CRUD (create/list/get/delete/name), state mutations (model, config, GPU), derived queries (args, components, validate, disk-requirements), cancel, missing recipe 404 |
 | TUI `app` | 18 | Defaults, focus navigation (wrap, skip, local model), model source switching, output filenames, GPU libs, log filtering |
 | TUI `events` | 7 | Q/Ctrl+C dispatch (idle vs. mid-build), cancel-confirm popup yes/no, build-error popup dismiss |
-| TUI `main` | 2 | `is_user_cancellation` classification |
+| TUI `main` | 4 | `is_user_cancellation` classifies `Error::Cancelled`, `Error::Download(DownloadError::Cancelled)`, and rejects unrelated errors (structured, not string-matched) |

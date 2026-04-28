@@ -28,6 +28,9 @@ use app::{App, BuildStatus, LogEntry, LogLevel};
 /// Result sent back from the build task.
 enum BuildResult {
     Complete { path: String, size: u64 },
+    /// User-initiated cancellation. Distinct from `Failed` so the UI can show
+    /// a notice instead of an error popup.
+    Cancelled,
     Failed { error: String },
 }
 
@@ -185,15 +188,18 @@ async fn run_app(
                     ));
                     build_result_rx = None;
                 }
+                Ok(BuildResult::Cancelled) => {
+                    app.build_status = BuildStatus::Failed {
+                        error: "Cancelled".to_string(),
+                    };
+                    app.add_log(LogLevel::Warn, "Build cancelled".to_string());
+                    build_result_rx = None;
+                }
                 Ok(BuildResult::Failed { error }) => {
                     app.build_status = BuildStatus::Failed { error: error.clone() };
-                    if is_user_cancellation(&error) {
-                        app.add_log(LogLevel::Warn, "Build cancelled".to_string());
-                    } else {
-                        app.add_log(LogLevel::Error, format!("Build failed: {}", error));
-                        if matches!(app.popup, app::Popup::None) {
-                            app.popup = app::Popup::BuildError { message: error.clone() };
-                        }
+                    app.add_log(LogLevel::Error, format!("Build failed: {}", error));
+                    if matches!(app.popup, app::Popup::None) {
+                        app.popup = app::Popup::BuildError { message: error.clone() };
                     }
                     build_result_rx = None;
                 }
@@ -332,6 +338,9 @@ async fn run_app(
                                     size,
                                 });
                             }
+                            Err(e) if is_user_cancellation(&e) => {
+                                let _ = tx.send(BuildResult::Cancelled);
+                            }
                             Err(e) => {
                                 let _ = tx.send(BuildResult::Failed {
                                     error: format!("{}", e),
@@ -377,13 +386,17 @@ async fn run_app(
     Ok(())
 }
 
-/// True for `Error::Cancelled` and `DownloadError::Cancelled` — both render
-/// to the literal string "Cancelled" via thiserror's Display. User-initiated
-/// cancellations should not show as build-failed popups.
-fn is_user_cancellation(error: &str) -> bool {
-    let trimmed = error.trim();
-    trimmed.eq_ignore_ascii_case("cancelled")
-        || trimmed.eq_ignore_ascii_case("download cancelled")
+/// True when the error chain represents a user-initiated cancellation —
+/// either `Error::Cancelled` (the build's own check) or
+/// `Error::Download(DownloadError::Cancelled)` (raised mid-download by
+/// `Cache::ensure`). User cancellations should surface as a status notice,
+/// not an error popup.
+fn is_user_cancellation(error: &llamafile_builder_core::Error) -> bool {
+    use llamafile_builder_core::{DownloadError, Error};
+    matches!(
+        error,
+        Error::Cancelled | Error::Download(DownloadError::Cancelled)
+    )
 }
 
 /// Extract a u64 field value from a log message like "bytes_downloaded=12345"
@@ -410,22 +423,38 @@ fn extract_str_field(msg: &str, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use llamafile_builder_core::{DownloadError, Error};
 
     #[test]
-    fn cancellation_strings_classified_as_user_cancel() {
-        assert!(is_user_cancellation("Cancelled"));
-        assert!(is_user_cancellation("cancelled"));
-        assert!(is_user_cancellation("  Cancelled  "));
-        assert!(is_user_cancellation("Download cancelled"));
+    fn error_cancelled_is_user_cancellation() {
+        assert!(is_user_cancellation(&Error::Cancelled));
     }
 
     #[test]
-    fn build_failures_not_classified_as_cancel() {
-        assert!(!is_user_cancellation(
-            "Insufficient disk space at /home/u/.cache: need 5 GB, have 1 GB"
-        ));
-        assert!(!is_user_cancellation("HTTP request failed: timeout"));
-        assert!(!is_user_cancellation("zipalign failed with exit code: 1"));
-        assert!(!is_user_cancellation(""));
+    fn download_cancelled_through_wrapper_is_user_cancellation() {
+        // Reproduces the case the string matcher used to miss: a download
+        // cancelled mid-flight comes back wrapped in Error::Download, whose
+        // Display renders as "Download error: Download cancelled".
+        let err = Error::Download(DownloadError::Cancelled);
+        assert!(is_user_cancellation(&err));
+        // Sanity: the formatted string is what we'd previously have had to
+        // pattern-match.
+        assert_eq!(format!("{}", err), "Download error: Download cancelled");
+    }
+
+    #[test]
+    fn other_download_errors_are_not_user_cancellation() {
+        let mismatch = Error::Download(DownloadError::SizeMismatch {
+            expected: 100,
+            actual: 50,
+        });
+        assert!(!is_user_cancellation(&mismatch));
+    }
+
+    #[test]
+    fn other_top_level_errors_are_not_user_cancellation() {
+        assert!(!is_user_cancellation(&Error::Build("zipalign failed".into())));
+        assert!(!is_user_cancellation(&Error::NotFound("model".into())));
+        assert!(!is_user_cancellation(&Error::Validation("ctx too long".into())));
     }
 }

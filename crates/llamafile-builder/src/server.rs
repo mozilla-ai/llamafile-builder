@@ -804,6 +804,15 @@ async fn start_build(
                 let size = tokio::fs::metadata(&path).await.map(|m| m.len()).unwrap_or(0);
                 let _ = tx.send(json!({"stage": "complete", "path": path.to_string_lossy(), "size": size}).to_string());
             }
+            Err(e) if matches!(
+                e,
+                llamafile_builder_core::Error::Cancelled
+                    | llamafile_builder_core::Error::Download(
+                        llamafile_builder_core::DownloadError::Cancelled
+                    )
+            ) => {
+                let _ = tx.send(json!({"stage": "cancelled"}).to_string());
+            }
             Err(e) => {
                 let _ = tx.send(json!({"stage": "error", "message": format!("{e}")}).to_string());
             }

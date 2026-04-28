@@ -1622,20 +1622,21 @@ function handleBuildEvent(ev) {
       showToast('Build complete: ' + (ev.path || ''), 'ok');
       break;
     }
+    case 'cancelled':
+      // Server emits this for Error::Cancelled / DownloadError::Cancelled;
+      // structural, no string sniffing.
+      S.buildCompleted = true;
+      pushLog({ level: 'warn', message: 'Build cancelled' });
+      setStatus('Build cancelled', 'warn');
+      setBuildPhase('Cancelled');
+      break;
     case 'error':
       S.buildCompleted = true;
-      if (isUserCancellation(ev.message)) {
-        // User-initiated cancel — not a failure, just an info-level note.
-        pushLog({ level: 'warn', message: 'Build cancelled' });
-        setStatus('Build cancelled', 'warn');
-        setBuildPhase('Cancelled');
-      } else {
-        pushLog({ level: 'error', message: `✗ ${ev.message}` });
-        setStatus('Build failed', 'err');
-        setBuildPhase('Failed');
-        showToast('Build failed', 'err');
-        showBuildErrorModal(ev.message);
-      }
+      pushLog({ level: 'error', message: `✗ ${ev.message}` });
+      setStatus('Build failed', 'err');
+      setBuildPhase('Failed');
+      showToast('Build failed', 'err');
+      showBuildErrorModal(ev.message);
       break;
     case 'log': {
       // Forwarded tracing event. Cache every event regardless of current filter.
@@ -1726,14 +1727,6 @@ async function doCancelBuild() {
     pushLog({ level: 'warn', message: 'Cancellation requested…' });
     setStatus('Cancelling…', 'running');
   } catch (e) { showToast(e.message, 'err'); }
-}
-
-// "Cancelled" / "Download cancelled" are user-initiated and should not surface
-// as build-failed errors. Mirrors `is_user_cancellation` in the TUI binary.
-function isUserCancellation(message) {
-  if (!message) return false;
-  const m = String(message).trim().toLowerCase();
-  return m === 'cancelled' || m === 'download cancelled';
 }
 
 // Show the build-failed error in a modal with the raw error text. The same
