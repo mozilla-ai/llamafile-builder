@@ -113,40 +113,56 @@ setup: setup-zig
 	rustup target add $(TARGETS)
 	@echo "Done. Run 'make all' to build."
 
-# Install zig if not already on PATH. macOS uses Homebrew; Linux downloads
-# the official tarball from ziglang.org into $$HOME/.local/bin.
+# Install zig pinned to $(ZIG_VERSION). macOS uses Homebrew; Linux downloads
+# the official tarball from ziglang.org into $$HOME/.local/bin. If a different
+# zig is already on PATH, prompts the user (default: keep current); in
+# non-interactive environments (CI) it installs the pinned version automatically.
 .PHONY: setup-zig
 setup-zig:
-	@if command -v zig >/dev/null 2>&1; then \
-		echo "zig already installed: $$(zig version)"; \
-	else \
-		uname_s=$$(uname -s); \
-		if [ "$$uname_s" = "Darwin" ]; then \
-			command -v brew >/dev/null 2>&1 || { echo "Install Homebrew first: https://brew.sh"; exit 1; }; \
-			brew install zig; \
-		elif [ "$$uname_s" = "Linux" ]; then \
-			arch=$$(uname -m); \
-			case "$$arch" in \
-				x86_64) zig_arch=x86_64 ;; \
-				aarch64|arm64) zig_arch=aarch64 ;; \
-				*) echo "Unsupported Linux arch: $$arch"; exit 1 ;; \
-			esac; \
-			dir="zig-$$zig_arch-linux-$(ZIG_VERSION)"; \
-			url="https://ziglang.org/download/$(ZIG_VERSION)/$$dir.tar.xz"; \
-			echo "Downloading $$url"; \
-			mkdir -p $$HOME/.local/share $$HOME/.local/bin; \
-			tmp=$$(mktemp -d); \
-			curl -fsSL "$$url" -o "$$tmp/zig.tar.xz"; \
-			tar -xf "$$tmp/zig.tar.xz" -C "$$tmp"; \
-			rm -rf "$$HOME/.local/share/zig-$(ZIG_VERSION)"; \
-			mv "$$tmp/$$dir" "$$HOME/.local/share/zig-$(ZIG_VERSION)"; \
-			ln -sf "$$HOME/.local/share/zig-$(ZIG_VERSION)/zig" "$$HOME/.local/bin/zig"; \
-			rm -rf "$$tmp"; \
-			echo "Installed zig to $$HOME/.local/bin/zig"; \
-			case ":$$PATH:" in *":$$HOME/.local/bin:"*) ;; *) echo "WARNING: $$HOME/.local/bin is not on PATH — add it before running 'make all'." ;; esac; \
+	@installed=$$(command -v zig >/dev/null 2>&1 && zig version || true); \
+	if [ "$$installed" = "$(ZIG_VERSION)" ]; then \
+		echo "zig $(ZIG_VERSION) already installed"; \
+		exit 0; \
+	fi; \
+	if [ -n "$$installed" ]; then \
+		echo "zig $$installed is on PATH but the pinned version is $(ZIG_VERSION)."; \
+		if [ -t 0 ]; then \
+			printf "Install pinned zig $(ZIG_VERSION) [y/N]? "; \
+			read ans; \
 		else \
-			echo "Unsupported OS: $$uname_s — install zig manually."; exit 1; \
+			ans=y; \
 		fi; \
+		case "$$ans" in \
+			[yY]*) ;; \
+			*) echo "Keeping zig $$installed (cross-compile builds will use this version)."; exit 0 ;; \
+		esac; \
+	fi; \
+	uname_s=$$(uname -s); \
+	if [ "$$uname_s" = "Darwin" ]; then \
+		command -v brew >/dev/null 2>&1 || { echo "Install Homebrew first: https://brew.sh"; exit 1; }; \
+		brew install zig; \
+	elif [ "$$uname_s" = "Linux" ]; then \
+		arch=$$(uname -m); \
+		case "$$arch" in \
+			x86_64) zig_arch=x86_64 ;; \
+			aarch64|arm64) zig_arch=aarch64 ;; \
+			*) echo "Unsupported Linux arch: $$arch"; exit 1 ;; \
+		esac; \
+		dir="zig-$$zig_arch-linux-$(ZIG_VERSION)"; \
+		url="https://ziglang.org/download/$(ZIG_VERSION)/$$dir.tar.xz"; \
+		echo "Downloading $$url"; \
+		mkdir -p $$HOME/.local/share $$HOME/.local/bin; \
+		tmp=$$(mktemp -d); \
+		curl -fsSL "$$url" -o "$$tmp/zig.tar.xz"; \
+		tar -xf "$$tmp/zig.tar.xz" -C "$$tmp"; \
+		rm -rf "$$HOME/.local/share/zig-$(ZIG_VERSION)"; \
+		mv "$$tmp/$$dir" "$$HOME/.local/share/zig-$(ZIG_VERSION)"; \
+		ln -sf "$$HOME/.local/share/zig-$(ZIG_VERSION)/zig" "$$HOME/.local/bin/zig"; \
+		rm -rf "$$tmp"; \
+		echo "Installed zig to $$HOME/.local/bin/zig"; \
+		case ":$$PATH:" in *":$$HOME/.local/bin:"*) ;; *) echo "WARNING: $$HOME/.local/bin is not on PATH — add it before running 'make all'." ;; esac; \
+	else \
+		echo "Unsupported OS: $$uname_s — install zig manually."; exit 1; \
 	fi
 
 .PHONY: clean
