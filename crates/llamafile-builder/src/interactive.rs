@@ -231,6 +231,59 @@ impl Session {
                 let path = str_param(params, "path")?;
                 self.mutate_state(|s| { s.args_file = Some(path); })
             }
+            "set_args_override" => {
+                // Inline `.args` content. Mirrors what the TUI's .args
+                // editor stores. `apply_saved_state` reads
+                // `args_override` ahead of `args_file`, so this slot
+                // wins if both are set.
+                let content = str_param(params, "content")?;
+                self.mutate_state(|s| { s.args_override = Some(content); })
+            }
+            "clear_args_override" => {
+                self.mutate_state(|s| { s.args_override = None; })
+            }
+            "set_mmproj_disabled" => {
+                let disabled = params.get("disabled").and_then(|v| v.as_bool())
+                    .ok_or((-32602, "missing 'disabled' bool param".to_string()))?;
+                self.mutate_state(|s| { s.mmproj_disabled = disabled; })
+            }
+            "add_custom_gpu" => {
+                // Mirrors the HTTP server's POST /state/custom-gpu (action=add).
+                let path = str_param(params, "path")?;
+                let accel = str_param(params, "accel")?.to_lowercase();
+                let os = str_param(params, "os")?.to_lowercase();
+                llamafile_builder_core::parse_gpu_spec(&format!("{accel}:{os}"))
+                    .map_err(|e| (-32000, e))?;
+                self.mutate_state(|s| {
+                    s.custom_gpu_libs
+                        .retain(|l| !(l.accel == accel && l.os == os));
+                    s.custom_gpu_libs.push(llamafile_builder_core::CustomGpuLib {
+                        path,
+                        accel,
+                        os,
+                    });
+                })
+            }
+            "remove_custom_gpu" => {
+                let path = str_param(params, "path")?;
+                self.mutate_state(|s| {
+                    s.custom_gpu_libs.retain(|l| l.path != path);
+                })
+            }
+            "add_companion_file" => {
+                // Mirrors the HTTP server's POST /state/companion-file (action=add).
+                let role = str_param(params, "role")?;
+                let path = str_param(params, "path")?;
+                self.mutate_state(|s| {
+                    s.custom_companion_files.insert(role, path);
+                })
+            }
+            "remove_companion_file" => {
+                let role = str_param(params, "role")?;
+                self.mutate_state(|s| {
+                    s.custom_companion_files.remove(&role);
+                })
+            }
             "add_gpu" => {
                 let spec = str_param(params, "spec")?;
                 crate::commands::build::parse_gpu_spec(&spec).map_err(|e| (-32000, e))?;

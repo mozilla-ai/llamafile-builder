@@ -181,11 +181,42 @@ Value can be any JSON type (bool, number, string).
 {"jsonrpc":"2.0","id":1,"method":"set_args_file","params":{"path":"/path/to/custom.args"}}
 ```
 
+#### set_args_override / clear_args_override
+Inline raw `.args` content. Stored in the `args_override` slot, which
+takes precedence over `args_file` at build time. Mirrors the TUI's
+`.args` editor.
+```json
+{"jsonrpc":"2.0","id":1,"method":"set_args_override","params":{"content":"-m\n/zip/x.gguf\n--ctx-size\n4096\n"}}
+{"jsonrpc":"2.0","id":1,"method":"clear_args_override"}
+```
+
+#### set_mmproj_disabled
+Drop the vision adapter even if the selected model offers one.
+```json
+{"jsonrpc":"2.0","id":1,"method":"set_mmproj_disabled","params":{"disabled":true}}
+```
+
 #### add_gpu / remove_gpu
 ```json
 {"jsonrpc":"2.0","id":1,"method":"add_gpu","params":{"spec":"cuda"}}
 {"jsonrpc":"2.0","id":1,"method":"add_gpu","params":{"spec":"cuda:linux"}}
 {"jsonrpc":"2.0","id":1,"method":"remove_gpu","params":{"spec":"cuda"}}
+```
+
+#### add_custom_gpu / remove_custom_gpu
+GPU library by local file path (not from the version catalog). `accel`
+is `cuda` | `rocm` | `vulkan`; `os` is `linux` | `windows`.
+```json
+{"jsonrpc":"2.0","id":1,"method":"add_custom_gpu","params":{"path":"/lib/ggml-cuda.so","accel":"cuda","os":"linux"}}
+{"jsonrpc":"2.0","id":1,"method":"remove_custom_gpu","params":{"path":"/lib/ggml-cuda.so"}}
+```
+
+#### add_companion_file / remove_companion_file
+Extra files to bundle alongside a `set_model_file` selection — for
+example, an mmproj for a local multimodal model. Keyed by `role`.
+```json
+{"jsonrpc":"2.0","id":1,"method":"add_companion_file","params":{"role":"mmproj","path":"/models/mmproj.gguf"}}
+{"jsonrpc":"2.0","id":1,"method":"remove_companion_file","params":{"role":"mmproj"}}
 ```
 
 #### set_runtime
