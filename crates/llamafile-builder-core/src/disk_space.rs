@@ -297,9 +297,11 @@ fn check_with(
 }
 
 /// Identity of the filesystem hosting a path. The first variant is preferred
-/// — `dev()` on Unix and `volume_serial_number()` on Windows return a stable
-/// id that's identical for any two paths on the same volume. The second is a
-/// fallback for platforms where neither is available (or the metadata call
+/// — on Unix `dev()` returns a stable id that's identical for any two paths
+/// on the same volume; on Windows we approximate that with the volume prefix
+/// of the canonical path (e.g. `\\?\C:`), which is shared by every path on
+/// the same drive letter or UNC share. The second is a fallback for
+/// platforms where neither is available (or the metadata/canonicalize call
 /// fails); in that case we degrade to canonical-path equality, which is the
 /// pre-fix behaviour.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -321,13 +323,28 @@ fn filesystem_id(path: &Path) -> Option<u64> {
     std::fs::metadata(path).ok().map(|m| m.dev())
 }
 
+// `std::os::windows::fs::MetadataExt::volume_serial_number` would be the
+// direct analogue of `dev()` here, but it's gated behind the unstable
+// `windows_by_handle` feature (rust-lang/rust#63010) and therefore unusable
+// on stable. Hash the volume prefix of the canonical path instead — every
+// path on the same drive letter or UNC share canonicalizes to the same
+// prefix, so this gives the same grouping in the common case without an
+// FFI dependency.
 #[cfg(windows)]
 fn filesystem_id(path: &Path) -> Option<u64> {
-    use std::os::windows::fs::MetadataExt;
-    std::fs::metadata(path)
-        .ok()
-        .and_then(|m| m.volume_serial_number())
-        .map(|v| v as u64)
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    use std::path::Component;
+
+    let canonical = std::fs::canonicalize(path).ok()?;
+    match canonical.components().next()? {
+        Component::Prefix(p) => {
+            let mut hasher = DefaultHasher::new();
+            p.as_os_str().hash(&mut hasher);
+            Some(hasher.finish())
+        }
+        _ => None,
+    }
 }
 
 #[cfg(not(any(unix, windows)))]
