@@ -31,12 +31,16 @@ Produced binaries: `target/{debug,release}/llamafile-builder` and `llamafile-bui
 ## Build and test
 
 ```bash
+make setup        # install zig + cargo-zigbuild + cross-compile rust targets (macOS/Linux)
 make              # debug build of both binaries
 make test         # cargo test --workspace
 make release      # release build
 make all          # cross-compile all 5 targets (needs zig + cargo-zigbuild)
 make target T=<triple>   # single cross-compile target
+make dist         # cross-compile all targets and stage binaries under dist/<target>/
 ```
+
+`make setup` is also what the release CI workflow runs before `make dist`; the GitHub Actions release job (`.github/workflows/release.yml`) attaches per-target archives plus `SHA256SUMS` to a published GitHub release.
 
 When iterating, prefer `cargo check --workspace --all-targets` for fast validation and `cargo test --workspace` for correctness. The only pre-existing warnings are two `tempfile::TempDir::into_path` deprecations in test code — ignore them unless you're fixing that specifically.
 
