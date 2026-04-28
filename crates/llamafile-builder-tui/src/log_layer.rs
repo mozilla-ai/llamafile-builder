@@ -175,9 +175,10 @@ impl Visit for MessageVisitor {
             return;
         }
 
-        // Structured signal extraction. `BuildPhase::from_str` accepts
-        // both the kebab-case Display form and the PascalCase Debug form,
-        // so callers using either `%` or `?` with the enum work.
+        // Structured signal extraction. Strict kebab-only — emit sites
+        // must use `%` (Display); a stray `?` produces "PreparingZipalign"
+        // which `BuildPhase::from_str` rejects, surfacing the drift loudly
+        // via the `log_layer_integration` tests.
         match name {
             "phase" => {
                 if let Some(p) = BuildPhase::from_str(&formatted) {
