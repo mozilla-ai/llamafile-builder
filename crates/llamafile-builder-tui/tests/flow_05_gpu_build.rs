@@ -36,7 +36,7 @@ fn gpu_build_select_cuda_and_rocm_linux() {
 
     // Failure-mode-D: the SavedState now lists both GPU libs in the
     // builder's parse format (`accel:os`).
-    let saved = app.prepare_build();
+    let saved = app.to_saved_state();
     assert_eq!(saved.gpu_libs, vec!["cuda:linux", "rocm:linux"]);
     insta::assert_debug_snapshot!("04_prepare_build", saved);
 }

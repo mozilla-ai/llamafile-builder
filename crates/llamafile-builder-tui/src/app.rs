@@ -523,7 +523,7 @@ impl App {
         build_from_state(
             self.config.clone(),
             self.cache_dir.clone(),
-            &self.prepare_build(),
+            &self.to_saved_state(),
         )
     }
 
@@ -635,16 +635,10 @@ impl App {
         }
     }
 
-    /// Snapshot the current selections into the form a `Builder` would be
-    /// constructed from. The TUI main loop calls this when the user triggers
-    /// a build, then hands the snapshot to a background task.
-    ///
-    /// This is the assertion point flow tests use to verify that the build
-    /// invocation matches the configured state — see `specs/TUI_TESTING.md`
-    /// §4.1 / §9.
-    pub fn prepare_build(&self) -> SavedState {
-        self.to_saved_state()
-    }
+    // `prepare_build` was a one-line alias the spec named for clarity in
+    // §4.1; `to_saved_state` is the actual surface and the only one
+    // worth keeping. Tests and the main loop call `to_saved_state`
+    // directly.
 
     /// Load App fields from a BuildRecipe.
     pub fn load_from_recipe(&mut self, recipe: &BuildRecipe) {
@@ -768,18 +762,17 @@ pub fn apply_build_result(app: &mut App, result: BuildResult) {
 }
 
 /// Apply the "build task terminated unexpectedly" path — i.e. the
-/// `oneshot` sender was dropped without sending a result. Treated as a
-/// failure so the user sees something rather than the build appearing
-/// to hang forever.
+/// `oneshot` sender was dropped without sending a result. Routes
+/// through `apply_build_result` so the popup-guard rule lives in one
+/// place: a Confirm popup that's already open (e.g. cancel-confirm)
+/// must survive the unexpected termination.
 pub fn apply_build_task_terminated(app: &mut App) {
-    let msg = "Build task terminated unexpectedly".to_string();
-    app.build_status = BuildStatus::Failed {
-        error: msg.clone(),
-    };
-    app.add_log(LogLevel::Error, msg.clone());
-    if matches!(app.popup, Popup::None) {
-        app.popup = Popup::BuildError { message: msg };
-    }
+    apply_build_result(
+        app,
+        BuildResult::Failed {
+            error: "Build task terminated unexpectedly".to_string(),
+        },
+    );
 }
 
 /// Construct a fully configured `Builder` from a `SavedState`.
@@ -803,21 +796,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    fn test_config() -> BuilderConfig {
-        BuilderConfig {
-            versions: llamafile_builder_core::config_manager::parse_config_data(
-                include_str!("../../../data/versions.json"),
-            ).unwrap(),
-            models: llamafile_builder_core::config_manager::parse_config_data(
-                include_str!("../../../data/models.json"),
-            ).unwrap(),
-            config_schema: llamafile_builder_core::config_manager::parse_config_data(
-                include_str!("../../../data/config.json"),
-            ).unwrap(),
-            config_version: 1,
-            min_builder_version: None,
-        }
-    }
+    use llamafile_builder_core::test_utils::test_config;
 
     fn test_app() -> App {
         let tmp = tempfile::TempDir::new().unwrap();

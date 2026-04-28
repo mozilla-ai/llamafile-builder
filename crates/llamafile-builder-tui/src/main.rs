@@ -181,7 +181,7 @@ async fn run_app(
 
                     // Snapshot the user's selections; the build task rebuilds
                     // a Builder from this on a Send-compatible thread.
-                    let prepared = app.prepare_build();
+                    let prepared = app.to_saved_state();
                     let config = app.config.clone();
                     let cache_dir = app.cache_dir.clone();
                     let shared_cancel = cancel_flag.clone();

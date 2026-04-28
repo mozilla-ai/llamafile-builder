@@ -117,6 +117,17 @@ struct MessageVisitor {
     download_finished: bool,
 }
 
+/// The exact set of message strings that mean "stop showing download
+/// progress". The cache and download layers don't emit a structured
+/// "finished" field yet; this is the fallback contract. Substring
+/// matching is deliberately avoided so a message tweak elsewhere can't
+/// accidentally clear the progress display.
+const DOWNLOAD_FINISHED_MESSAGES: &[&str] = &[
+    "download complete",
+    "already cached",
+    "already in HF cache",
+];
+
 impl MessageVisitor {
     fn into_signals(self) -> BuildSignals {
         let download = match (self.bytes_downloaded, self.bytes_total) {
@@ -131,17 +142,6 @@ impl MessageVisitor {
             phase: self.phase,
             download,
             download_finished: self.download_finished,
-        }
-    }
-
-    fn note_message_for_finish(&mut self, msg: &str) {
-        // The cache and download layers don't yet emit a structured
-        // "download terminated" field. Until they do, recognise the small
-        // closed set of messages that mean the same thing. Limited to known
-        // exact phrases (no substring sniffing) so message tweaks elsewhere
-        // can't accidentally clear the progress display.
-        if msg == "download complete" || msg == "already cached" || msg == "already in HF cache" {
-            self.download_finished = true;
         }
     }
 }
@@ -169,7 +169,9 @@ impl Visit for MessageVisitor {
 
         if name == "message" {
             self.message = unquote(formatted);
-            self.note_message_for_finish(&self.message.clone());
+            if DOWNLOAD_FINISHED_MESSAGES.contains(&self.message.as_str()) {
+                self.download_finished = true;
+            }
             return;
         }
 
@@ -202,7 +204,9 @@ impl Visit for MessageVisitor {
         match name {
             "message" => {
                 self.message = value.to_string();
-                self.note_message_for_finish(value);
+                if DOWNLOAD_FINISHED_MESSAGES.contains(&value) {
+                    self.download_finished = true;
+                }
             }
             "phase" => {
                 if let Some(p) = BuildPhase::from_str(value) {

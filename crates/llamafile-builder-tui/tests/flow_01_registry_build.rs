@@ -55,5 +55,5 @@ fn registry_build_pick_mistral_bf16() {
 
     // Failure-mode-D assertion: the SavedState that would drive the build
     // matches the user's selections.
-    insta::assert_debug_snapshot!("07_prepare_build", app.prepare_build());
+    insta::assert_debug_snapshot!("07_prepare_build", app.to_saved_state());
 }

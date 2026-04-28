@@ -25,7 +25,7 @@ fn recipe_save_writes_file_matching_in_memory_state() {
     // Capture the in-memory state we expect to be persisted. Doing this
     // *before* the save lets the assertion be exact (resolve_defaults
     // mutates the saved copy at write time).
-    let in_memory = app.prepare_build();
+    let in_memory = app.to_saved_state();
     assert_eq!(in_memory.gpu_libs, vec!["cuda:linux"]);
 
     // Open the Save Recipe popup.

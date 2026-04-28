@@ -100,7 +100,7 @@ fn recipe_load_picks_second_entry_and_round_trips_state() {
     insta::assert_snapshot!("02_dashboard_after_load", frame);
 
     // SavedState round-trips back through prepare_build.
-    insta::assert_debug_snapshot!("03_prepare_build", app.prepare_build());
+    insta::assert_debug_snapshot!("03_prepare_build", app.to_saved_state());
 
     // Now load the *other* recipe (Ctrl+L again, top-of-list, Enter).
     // Verifies that loading a second recipe replaces fields cleanly —
@@ -114,5 +114,5 @@ fn recipe_load_picks_second_entry_and_round_trips_state() {
     assert!(!app.mmproj_disabled, "switching recipes must clear mmproj_disabled");
     assert_eq!(app.gpu_libs, vec![(GpuAccel::Cuda, Os::Linux), (GpuAccel::Rocm, Os::Linux)]);
 
-    insta::assert_debug_snapshot!("04_prepare_build_after_swap", app.prepare_build());
+    insta::assert_debug_snapshot!("04_prepare_build_after_swap", app.to_saved_state());
 }

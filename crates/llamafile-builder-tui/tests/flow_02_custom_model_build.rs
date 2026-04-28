@@ -66,7 +66,7 @@ fn custom_model_build_via_recipe_load() {
 
     // Spec contract for Flow #2: SavedState carries the custom file and
     // no registry model id.
-    let saved = app.prepare_build();
+    let saved = app.to_saved_state();
     assert_eq!(
         saved.custom_model_file.as_deref(),
         Some("/path/to/local/model.gguf"),
