@@ -3,6 +3,7 @@ use std::path::Path;
 use llamafile_builder_core::cache::Cache;
 use llamafile_builder_core::config_manager::BuilderConfig;
 use llamafile_builder_core::config_store::{ConfigStore, SavedState};
+use llamafile_builder_core::models::format_size;
 use llamafile_builder_core::Builder;
 
 use crate::cli::RecipeCmd;
@@ -388,29 +389,13 @@ fn show_disk_requirements(builder: &Builder, json: bool) {
         println!(
             "  {:<20} {:>14}  {}",
             r.purpose.label(),
-            format_bytes(r.bytes),
+            format_size(r.bytes),
             r.destination.display()
         );
         total = total.saturating_add(r.bytes);
     }
     println!();
-    println!("  {:<20} {:>14}", "total", format_bytes(total));
+    println!("  {:<20} {:>14}", "total", format_size(total));
     println!();
     println!("Note: components already cached and Local/Generated sources contribute 0 bytes.");
-}
-
-fn format_bytes(bytes: u64) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = KB * 1024.0;
-    const GB: f64 = MB * 1024.0;
-    let b = bytes as f64;
-    if b >= GB {
-        format!("{:.2} GB", b / GB)
-    } else if b >= MB {
-        format!("{:.2} MB", b / MB)
-    } else if b >= KB {
-        format!("{:.2} KB", b / KB)
-    } else {
-        format!("{} B", bytes)
-    }
 }

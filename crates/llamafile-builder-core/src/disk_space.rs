@@ -25,7 +25,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::cache::{Cache, CacheStatus};
-use crate::models::{Component, ComponentRole, ComponentSource};
+use crate::models::{format_size, Component, ComponentRole, ComponentSource};
 
 /// Why a particular block of disk space is needed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,10 +80,10 @@ impl DiskSpaceReport {
 #[derive(Debug, thiserror::Error)]
 pub enum DiskSpaceError {
     #[error(
-        "Insufficient disk space at {path}: need {required_human} ({required} bytes) for {purposes}, only {available_human} ({available} bytes) available",
+        "Insufficient disk space at {path}: need {required_h} ({required} bytes) for {purposes}, only {available_h} ({available} bytes) available",
         path = path.display(),
-        required_human = format_size(*required),
-        available_human = format_size(*available),
+        required_h = format_size(*required),
+        available_h = format_size(*available),
         purposes = purposes.join(", "),
     )]
     Insufficient {
@@ -338,7 +338,8 @@ fn filesystem_id(_path: &Path) -> Option<u64> {
 /// Walk up the path until we find a component that exists on disk. Used so
 /// that the disk-space check works even when the cache or output directory
 /// hasn't been created yet — its parent (or some grand-parent) will still
-/// resolve to a real filesystem.
+/// resolve to a real filesystem. `pop()` returns false at the root, which
+/// terminates the loop.
 fn nearest_existing_ancestor(path: &Path) -> Option<PathBuf> {
     let mut p = path.to_path_buf();
     loop {
@@ -348,25 +349,6 @@ fn nearest_existing_ancestor(path: &Path) -> Option<PathBuf> {
         if !p.pop() {
             return None;
         }
-        if p.as_os_str().is_empty() {
-            return None;
-        }
-    }
-}
-
-fn format_size(bytes: u64) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = KB * 1024.0;
-    const GB: f64 = MB * 1024.0;
-    let b = bytes as f64;
-    if b >= GB {
-        format!("{:.2} GB", b / GB)
-    } else if b >= MB {
-        format!("{:.2} MB", b / MB)
-    } else if b >= KB {
-        format!("{:.2} KB", b / KB)
-    } else {
-        format!("{} B", bytes)
     }
 }
 
@@ -823,14 +805,4 @@ mod tests {
         );
     }
 
-    // ── format_size ──
-
-    #[test]
-    fn format_size_uses_human_units() {
-        assert_eq!(format_size(0), "0 B");
-        assert_eq!(format_size(512), "512 B");
-        assert_eq!(format_size(2_048), "2.00 KB");
-        assert_eq!(format_size(5_242_880), "5.00 MB");
-        assert_eq!(format_size(2_147_483_648), "2.00 GB");
-    }
 }

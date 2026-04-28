@@ -544,7 +544,8 @@ impl Builder {
                 );
                 Ok(())
             }
-            Err(e @ crate::disk_space::DiskSpaceError::Insufficient { .. }) => {
+            Err(e) => {
+                // Only `Insufficient` reaches here; `Query` is handled above.
                 tracing::error!(error = %e, "disk-space pre-check failed");
                 Err(crate::Error::DiskSpace(e))
             }

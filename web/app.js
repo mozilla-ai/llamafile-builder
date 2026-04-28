@@ -1706,11 +1706,12 @@ function stopBuildTicker() {
 
 async function cancelBuild() {
   // Confirmation modal — same UX as the TUI's cancel-build prompt. The user
-  // explicitly opts in before we fire /api/cancel.
+  // explicitly opts in before we fire /api/cancel. showModal ignores onOk
+  // when customFooter is set, so the OK handler is bound after-the-fact.
   showModal(
     'Cancel build?',
     `<p>The current build will stop. Already-downloaded components stay in the cache so the next build can resume.</p>`,
-    () => doCancelBuild(),
+    null,
     {
       customFooter: `
         <button class="btn btn-secondary" onclick="closeModal()">Keep building</button>

@@ -60,17 +60,10 @@ pub fn handle_key(app: &mut App, key: event::KeyEvent) -> bool {
     }
 }
 
-fn handle_build_error_popup(app: &mut App, key: event::KeyEvent) -> bool {
-    // Any keypress dismisses (Enter / Esc / space / q / etc.)
-    match key.code {
-        KeyCode::Char('q') | KeyCode::Char('Q') => {
-            // Dismiss the popup; treat 'q' here as cancel-popup, not quit-app
-            app.popup = Popup::None;
-        }
-        _ => {
-            app.popup = Popup::None;
-        }
-    }
+fn handle_build_error_popup(app: &mut App, _key: event::KeyEvent) -> bool {
+    // Any keypress dismisses. Ctrl+C is intercepted earlier by the global
+    // shortcut, so it doesn't reach here.
+    app.popup = Popup::None;
     true
 }
 

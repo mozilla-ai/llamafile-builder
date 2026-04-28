@@ -487,7 +487,7 @@ GPU selection is handled by the `Builder` as a flat list of `GpuLibSelection { a
 
 ## Test coverage
 
-175 tests across core library (128), CLI (18), and TUI (29):
+174 tests across core library (127), CLI (18), and TUI (29):
 
 | Module | Tests | What's covered |
 |--------|-------|----------------|
@@ -498,7 +498,7 @@ GPU selection is handled by the `Builder` as a flat list of `GpuLibSelection { a
 | `config_store` | 14 | CRUD, list sorting, find by name/UUID, cleanup unnamed, resolve_defaults (structural checks), round-trip |
 | `cache` | 5 | Cache status: local existing/missing, generated, URL partial/complete/missing |
 | `config_manager` | 6 | Load, fallback, invalid JSON, bare array rejection, apply update, version comparison |
-| `disk_space` | 18 | Estimation per source/role, cache hits, partial-download remainder, output sizing, filesystem-id grouping (literal-same path AND distinct paths sharing one fs), error on insufficient, real fs4 sanity |
+| `disk_space` | 17 | Estimation per source/role, cache hits, partial-download remainder, output sizing, filesystem-id grouping (literal-same path AND distinct paths sharing one fs), error on insufficient, real fs4 sanity |
 | `validation` | 5 | Required components, context length, custom binary, large context |
 | `ollama` | 6 | Availability, scanning, missing blobs, empty dirs |
 | `lmstudio` | 7 | Availability, scanning, role inference, non-gguf filtering |
