@@ -44,11 +44,31 @@ test:
 	cargo test --workspace
 
 # Cross-compile all targets (release).
+#
 # On macOS, *-apple-darwin targets are built with the native Apple toolchain
 # (`cargo build`) — zig's `ar` wrapper has shown spurious archive-creation
 # failures with `ring` on some macOS versions, and Apple's clang+ld handle
 # both arm64 and x86_64 darwin natively. zigbuild is still used for the
 # linux-gnu and windows-gnu targets, where it is the whole reason this works.
+#
+# The `zigbuild-ar` shell snippet (below) resolves a working AR for the
+# zigbuild branch and exports AR_<target>: on macOS 26 (Tahoe), zig 0.16.0's
+# bundled llvm-ar (LLVM 21) fails to create archives at all (`ring` dies with
+# `ar: error: unable to open … No such file or directory`). Homebrew's
+# standalone llvm-ar handles the same inputs fine. On other macOS versions
+# the override is harmless. On Linux, zig ar works, so it's a no-op.
+ZIGBUILD_AR_SETUP := \
+	if [ "$$(uname -s)" = "Darwin" ]; then \
+		prefix=$$(brew --prefix llvm 2>/dev/null || true); \
+		if [ -z "$$prefix" ] || [ ! -x "$$prefix/bin/llvm-ar" ]; then \
+			echo "Error: Homebrew llvm-ar not found. Install with: brew install llvm" >&2; \
+			echo "(Workaround for zig 0.16.0 bundled llvm-ar bug on macOS 26.)" >&2; \
+			exit 1; \
+		fi; \
+		ar_var=$$(echo "AR_$$ar_target" | tr '-' '_'); \
+		export $$ar_var="$$prefix/bin/llvm-ar"; \
+	fi
+
 .PHONY: all
 all: check-deps
 	@for target in $(TARGETS); do \
@@ -56,6 +76,7 @@ all: check-deps
 		if [ "$$(uname -s)" = "Darwin" ] && echo "$$target" | grep -q apple-darwin; then \
 			cargo build --release --target $$target $(CRATES) || exit 1; \
 		else \
+			ar_target=$$target; $(ZIGBUILD_AR_SETUP) && \
 			cargo zigbuild --release --target $$target $(CRATES) || exit 1; \
 		fi; \
 	done
@@ -69,6 +90,7 @@ target: check-deps
 	@if [ "$$(uname -s)" = "Darwin" ] && echo "$(T)" | grep -q apple-darwin; then \
 		cargo build --release --target $(T) $(CRATES); \
 	else \
+		ar_target=$(T); $(ZIGBUILD_AR_SETUP) && \
 		cargo zigbuild --release --target $(T) $(CRATES); \
 	fi
 

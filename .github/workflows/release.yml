@@ -31,6 +31,15 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           make setup
 
+      # Workaround for zig 0.16.0's bundled llvm-ar (LLVM 21) failing to
+      # create archives on macOS 26 (Tahoe) — `ring` builds die with
+      # `ar: error: unable to open … No such file or directory`. The
+      # Makefile points AR_<target> at Homebrew's standalone llvm-ar
+      # for the linux-gnu / windows-gnu zigbuild targets. Harmless on
+      # older macOS runners.
+      - name: Install Homebrew LLVM (for working llvm-ar on macOS)
+        run: brew install llvm
+
       - name: Cross-compile all targets
         run: make dist
 
