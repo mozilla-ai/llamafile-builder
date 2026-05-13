@@ -82,6 +82,22 @@ fn build_router(config: BuilderConfig, store: ConfigStore, recipes_dir: PathBuf)
         build_tx,
     });
 
+    // Restrict CORS to localhost origins. The server already binds to 127.0.0.1 only,
+    // so this is hygiene against a curious browser more than a remote attacker. The
+    // load-bearing defence against DNS rebinding is the host_guard middleware below,
+    // which rejects requests whose Host header isn't 127.0.0.1 / localhost / ::1.
+    let cors = tower_http::cors::CorsLayer::new()
+        .allow_origin(tower_http::cors::AllowOrigin::predicate(|origin, _| {
+            is_localhost_origin(origin.as_bytes())
+        }))
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::PUT,
+            axum::http::Method::DELETE,
+        ])
+        .allow_headers([axum::http::header::CONTENT_TYPE]);
+
     let router = Router::new()
         // Read-only data
         .route("/api/versions", get(get_versions))
@@ -127,7 +143,6 @@ fn build_router(config: BuilderConfig, store: ConfigStore, recipes_dir: PathBuf)
         .route("/api/recipes/{id}/build", post(start_build))
         .route("/api/cancel", post(cancel_build))
         .with_state(state.clone())
-        .layer(tower_http::cors::CorsLayer::permissive())
         .merge(
             utoipa_swagger_ui::SwaggerUi::new(DOCS_PATH)
                 .url("/api-docs/openapi.json", ApiDoc::openapi())
@@ -137,9 +152,59 @@ fn build_router(config: BuilderConfig, store: ConfigStore, recipes_dir: PathBuf)
                         .display_request_duration(true)
                         .try_it_out_enabled(true)
                 ),
-        );
+        )
+        .layer(cors)
+        .layer(axum::middleware::from_fn(host_guard));
 
     (router, state)
+}
+
+/// Reject requests whose `Host` header isn't a loopback address. This is the
+/// primary defence against DNS rebinding: a malicious page can resolve its own
+/// domain to 127.0.0.1 and trick the browser into hitting our API, but the
+/// browser still sends `Host: attacker.example` — never `127.0.0.1` or
+/// `localhost` — so we can refuse the request server-side.
+async fn host_guard(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response, StatusCode> {
+    let ok = req.headers()
+        .get(axum::http::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .map(is_localhost_host)
+        .unwrap_or(false);
+    if ok {
+        Ok(next.run(req).await)
+    } else {
+        Err(StatusCode::FORBIDDEN)
+    }
+}
+
+/// True for `127.0.0.1`, `localhost`, `::1` (with or without a `:port` suffix,
+/// IPv6 may be wrapped in `[…]`).
+fn is_localhost_host(value: &str) -> bool {
+    let host = if let Some(rest) = value.strip_prefix('[') {
+        // IPv6 literal: take everything up to the closing bracket.
+        rest.split(']').next().unwrap_or("")
+    } else {
+        // Bare host or host:port. The first ':' starts the port.
+        value.split(':').next().unwrap_or(value)
+    };
+    matches!(host, "127.0.0.1" | "localhost" | "::1")
+}
+
+/// True for an `Origin` header pointing at a loopback host.
+fn is_localhost_origin(bytes: &[u8]) -> bool {
+    let s = match std::str::from_utf8(bytes) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let after_scheme = match s.strip_prefix("http://").or_else(|| s.strip_prefix("https://")) {
+        Some(rest) => rest,
+        None => return false,
+    };
+    let host_with_port = after_scheme.split('/').next().unwrap_or("");
+    is_localhost_host(host_with_port)
 }
 
 pub async fn run(
@@ -849,9 +914,13 @@ mod tests {
         build_router(test_config(), store, tmp_path)
     }
 
+    // Loopback host header — required by the host_guard middleware. Tests
+    // exercise the full middleware stack, so without this they'd all 403.
+    const LOCAL_HOST: &str = "127.0.0.1";
+
     async fn get_json(router: &Router, uri: &str) -> (StatusCode, Value) {
         let resp = router.clone()
-            .oneshot(Request::get(uri).body(Body::empty()).unwrap())
+            .oneshot(Request::get(uri).header("host", LOCAL_HOST).body(Body::empty()).unwrap())
             .await.unwrap();
         let status = resp.status();
         let body = resp.into_body().collect().await.unwrap().to_bytes();
@@ -861,6 +930,7 @@ mod tests {
     async fn post_json(router: &Router, uri: &str, body: Value) -> (StatusCode, Value) {
         let resp = router.clone()
             .oneshot(Request::post(uri)
+                .header("host", LOCAL_HOST)
                 .header("content-type", "application/json")
                 .body(Body::from(serde_json::to_string(&body).unwrap())).unwrap())
             .await.unwrap();
@@ -871,13 +941,14 @@ mod tests {
 
     async fn delete_req(router: &Router, uri: &str) -> StatusCode {
         router.clone()
-            .oneshot(Request::delete(uri).body(Body::empty()).unwrap())
+            .oneshot(Request::delete(uri).header("host", LOCAL_HOST).body(Body::empty()).unwrap())
             .await.unwrap().status()
     }
 
     async fn put_json(router: &Router, uri: &str, body: Value) -> (StatusCode, Value) {
         let resp = router.clone()
             .oneshot(Request::put(uri)
+                .header("host", LOCAL_HOST)
                 .header("content-type", "application/json")
                 .body(Body::from(serde_json::to_string(&body).unwrap())).unwrap())
             .await.unwrap();
@@ -1124,5 +1195,70 @@ mod tests {
         assert!(!st.cancel_flag.load(Ordering::Relaxed));
         post_json(&router, "/api/cancel", json!({})).await;
         assert!(st.cancel_flag.load(Ordering::Relaxed));
+    }
+
+    // ── Host guard / CORS hardening ──
+
+    async fn raw_get_status(router: &Router, uri: &str, host: Option<&str>) -> StatusCode {
+        let mut req = Request::get(uri);
+        if let Some(h) = host {
+            req = req.header("host", h);
+        }
+        router.clone().oneshot(req.body(Body::empty()).unwrap()).await.unwrap().status()
+    }
+
+    #[tokio::test]
+    async fn host_guard_accepts_loopback_hosts() {
+        let (router, _) = app();
+        for host in ["127.0.0.1", "127.0.0.1:8765", "localhost", "localhost:8765", "[::1]", "[::1]:8765"] {
+            let s = raw_get_status(&router, "/api/versions", Some(host)).await;
+            assert_eq!(s, StatusCode::OK, "host {host:?} should be allowed but got {s}");
+        }
+    }
+
+    #[tokio::test]
+    async fn host_guard_rejects_non_loopback_hosts() {
+        let (router, _) = app();
+        for host in ["evil.example", "evil.example:8765", "192.168.1.10", "10.0.0.1:8765", "127.0.0.2"] {
+            let s = raw_get_status(&router, "/api/versions", Some(host)).await;
+            assert_eq!(s, StatusCode::FORBIDDEN, "host {host:?} should be rejected but got {s}");
+        }
+    }
+
+    #[tokio::test]
+    async fn host_guard_rejects_missing_host_header() {
+        let (router, _) = app();
+        let s = raw_get_status(&router, "/api/versions", None).await;
+        assert_eq!(s, StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn is_localhost_host_classification() {
+        assert!(is_localhost_host("127.0.0.1"));
+        assert!(is_localhost_host("127.0.0.1:8765"));
+        assert!(is_localhost_host("localhost"));
+        assert!(is_localhost_host("localhost:1"));
+        assert!(is_localhost_host("[::1]"));
+        assert!(is_localhost_host("[::1]:8765"));
+        assert!(!is_localhost_host("127.0.0.2"));
+        assert!(!is_localhost_host("evil.example"));
+        assert!(!is_localhost_host("localhost.evil.example"));
+        assert!(!is_localhost_host(""));
+        // No partial-match shenanigans for the IPv6 case.
+        assert!(!is_localhost_host("[::2]"));
+    }
+
+    #[test]
+    fn is_localhost_origin_classification() {
+        assert!(is_localhost_origin(b"http://127.0.0.1:8765"));
+        assert!(is_localhost_origin(b"http://localhost"));
+        assert!(is_localhost_origin(b"https://[::1]:8765"));
+        assert!(is_localhost_origin(b"http://localhost:8765/some/path"));
+        assert!(!is_localhost_origin(b"http://evil.example"));
+        assert!(!is_localhost_origin(b"https://evil.example:8765"));
+        // Non-http(s) schemes don't count, even if the host is loopback.
+        assert!(!is_localhost_origin(b"file://127.0.0.1"));
+        assert!(!is_localhost_origin(b"null"));
+        assert!(!is_localhost_origin(b""));
     }
 }
