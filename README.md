@@ -82,6 +82,20 @@ The core owns all state, validation, downloads, and assembly. Interface layers o
 
 The model registry, llamafile versions, and configuration schema are **not** embedded at compile time — they are fetched from a remote URL at startup (with a bundled fallback for first-run and offline use), so the catalog can be updated without shipping a new binary. See `NFR-9` and `NFR-10` in [`specs/README.md`](specs/README.md).
 
+## Installation
+
+Prebuilt binaries for macOS, Linux, and Windows are attached to each [GitHub release](https://github.com/mozilla-ai/llamafile-builder/releases). Download the archive for your platform, extract it, and place `llamafile-builder` (and `llamafile-builder-tui` if you want the TUI) somewhere on your `PATH`.
+
+### macOS Gatekeeper
+
+The macOS binaries are not yet codesigned, so the first time you run them macOS will refuse with *"cannot be opened because the developer cannot be verified"*. Clear the quarantine attribute that the browser added on download:
+
+```bash
+xattr -d com.apple.quarantine llamafile-builder llamafile-builder-tui
+```
+
+After that the binaries run normally.
+
 ## Building
 
 ### Native (current platform)
