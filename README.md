@@ -135,6 +135,15 @@ Binaries are 2.5–4 MB, statically linked for TLS (rustls).
 └── Makefile              native + cross-compile build targets
 ```
 
+## Security model
+
+llamafile-builder is a local build tool. The HTTP server (`--serve`) binds to `127.0.0.1` only and there is no remote API. That said, **recipes are trust-sensitive**: a `BuildRecipe` JSON file can specify
+
+- `custom_runtime` and `custom_zipalign` — paths to binaries that the builder will **execute** during a build,
+- `custom_model_file`, `args_file`, and `custom_companion_files` — paths to files that the builder will **read** (and in the case of `args_file`, embed verbatim into the produced llamafile).
+
+These fields exist on purpose so power users can point at locally-built binaries or hand-written `.args` files. The implication is that loading a recipe from an untrusted source is equivalent to running an untrusted program. Only import recipes you would be willing to `bash` from the same author.
+
 ## Further reading
 
 The `specs/` directory is the authoritative source of truth.
