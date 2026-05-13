@@ -41,8 +41,6 @@ pub enum ConfigEntry {
         key: String,
         label: String,
         description: String,
-        #[allow(dead_code)]
-        value_type: String,
         indent: usize,
     },
 }
@@ -254,7 +252,6 @@ fn flatten_items(
                 key,
                 label,
                 description,
-                value_type,
                 hidden,
                 ..
             } => {
@@ -263,7 +260,6 @@ fn flatten_items(
                     key: key.clone(),
                     label: label.clone(),
                     description: description.clone(),
-                    value_type: value_type.clone(),
                     indent,
                 });
             }

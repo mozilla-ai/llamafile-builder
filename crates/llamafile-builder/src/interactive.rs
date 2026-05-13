@@ -435,3 +435,274 @@ pub async fn run(config: BuilderConfig) -> Result<(), String> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    //! Direct tests of the JSON-RPC dispatcher (`Session::handle`). The async
+    //! `build` method is not exercised here — it routes through `run()`'s main
+    //! loop, and the build pipeline itself is covered end-to-end in
+    //! `llamafile-builder-core::builder::tests`. These tests focus on the
+    //! protocol surface: method dispatch, parameter validation, state
+    //! mutations, and error classification.
+    use super::*;
+    use llamafile_builder_core::test_utils::test_config;
+    use serde_json::json;
+
+    fn session() -> (Session, tempfile::TempDir) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = ConfigStore::new(tmp.path().to_path_buf());
+        (Session::new(test_config(), store), tmp)
+    }
+
+    fn ok(s: &mut Session, method: &str, params: Value) -> Value {
+        s.handle(method, &params).unwrap_or_else(|(c, m)| panic!("{method} failed: ({c}) {m}"))
+    }
+
+    fn err(s: &mut Session, method: &str, params: Value) -> (i32, String) {
+        s.handle(method, &params).err().unwrap_or_else(|| panic!("{method} should have failed"))
+    }
+
+    // ── Method dispatch ──
+
+    #[test]
+    fn unknown_method_returns_method_not_found() {
+        let (mut s, _t) = session();
+        let (code, msg) = err(&mut s, "no_such_method", json!({}));
+        assert_eq!(code, -32601);
+        assert!(msg.contains("no_such_method"));
+    }
+
+    #[test]
+    fn build_method_is_routed_specially() {
+        // `build` is handled outside `Session::handle` (in `run()`'s loop)
+        // because it's async. The dispatcher returns a sentinel error so a
+        // direct caller doesn't silently no-op.
+        let (mut s, _t) = session();
+        let (code, msg) = err(&mut s, "build", json!({}));
+        assert_eq!(code, -32000);
+        assert!(msg.contains("build_async"));
+    }
+
+    // ── Data queries ──
+
+    #[test]
+    fn list_versions_returns_configured_versions() {
+        let (mut s, _t) = session();
+        let v = ok(&mut s, "list_versions", json!({}));
+        assert!(v.is_array() && !v.as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn list_models_filters_by_search() {
+        let (mut s, _t) = session();
+        let all = ok(&mut s, "list_models", json!({})).as_array().unwrap().len();
+        let filtered = ok(&mut s, "list_models", json!({"search": "qwen"}));
+        let n = filtered.as_array().unwrap().len();
+        assert!(n > 0 && n <= all, "qwen filter should match a non-empty subset (got {n}/{all})");
+    }
+
+    #[test]
+    fn show_model_round_trips_known_id() {
+        let (mut s, _t) = session();
+        let v = ok(&mut s, "show_model", json!({"id": "Qwen/Qwen3-0.6B-GGUF"}));
+        assert_eq!(v["id"].as_str(), Some("Qwen/Qwen3-0.6B-GGUF"));
+    }
+
+    #[test]
+    fn show_model_unknown_id_errors() {
+        let (mut s, _t) = session();
+        let (code, msg) = err(&mut s, "show_model", json!({"id": "nonexistent/model"}));
+        assert_eq!(code, -32000);
+        assert!(msg.contains("nonexistent/model"));
+    }
+
+    #[test]
+    fn show_model_missing_param_errors() {
+        let (mut s, _t) = session();
+        let (code, _) = err(&mut s, "show_model", json!({}));
+        assert_eq!(code, -32602, "missing required param should be -32602");
+    }
+
+    // ── Recipe lifecycle ──
+
+    #[test]
+    fn recipe_create_list_load_delete_cycle() {
+        let (mut s, _t) = session();
+
+        // Empty initially
+        let listed = ok(&mut s, "list_recipes", json!({}));
+        assert_eq!(listed.as_array().unwrap().len(), 0);
+
+        // Create
+        let created = ok(&mut s, "create_recipe", json!({}));
+        let id = created["id"].as_str().unwrap().to_string();
+        assert!(uuid::Uuid::parse_str(&id).is_ok());
+        assert_eq!(s.current_recipe_id.map(|u| u.to_string()), Some(id.clone()));
+
+        // List shows it as `current`
+        let listed = ok(&mut s, "list_recipes", json!({}));
+        let arr = listed.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["current"].as_bool(), Some(true));
+
+        // Load it back (de-selects then re-selects via the loader)
+        s.current_recipe_id = None;
+        let loaded = ok(&mut s, "load_recipe", json!({"id": id}));
+        assert_eq!(loaded["id"].as_str(), Some(id.as_str()));
+        assert_eq!(s.current_recipe_id.map(|u| u.to_string()), Some(id.clone()));
+
+        // Delete it; current_recipe_id is cleared
+        ok(&mut s, "delete_recipe", json!({"id": id}));
+        assert_eq!(s.current_recipe_id, None);
+        let listed = ok(&mut s, "list_recipes", json!({}));
+        assert_eq!(listed.as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn load_recipe_unknown_id_errors() {
+        let (mut s, _t) = session();
+        let (code, _) = err(&mut s, "load_recipe", json!({"id": "does-not-exist"}));
+        assert_eq!(code, -32000);
+    }
+
+    #[test]
+    fn save_recipe_without_active_errors() {
+        let (mut s, _t) = session();
+        let (code, msg) = err(&mut s, "save_recipe", json!({"name": "anything"}));
+        assert_eq!(code, -32000);
+        assert!(msg.contains("no active recipe"));
+    }
+
+    // ── State mutations on the current recipe ──
+
+    #[test]
+    fn set_model_persists_to_current_recipe() {
+        let (mut s, _t) = session();
+        ok(&mut s, "set_model", json!({"id": "Qwen/Qwen3-0.6B-GGUF"}));
+        let state = ok(&mut s, "get_state", json!({}));
+        assert_eq!(state["model_id"].as_str(), Some("Qwen/Qwen3-0.6B-GGUF"));
+    }
+
+    #[test]
+    fn set_model_unknown_id_errors_without_creating_recipe() {
+        let (mut s, _t) = session();
+        let (code, _) = err(&mut s, "set_model", json!({"id": "nonexistent/model"}));
+        assert_eq!(code, -32000);
+        // Validation rejects the model before mutate_state runs, so no
+        // recipe should have been auto-created.
+        assert_eq!(s.current_recipe_id, None);
+    }
+
+    #[test]
+    fn set_args_override_then_clear() {
+        let (mut s, _t) = session();
+        ok(&mut s, "set_args_override", json!({"content": "-m\n/zip/foo.gguf\n..."}));
+        let state = ok(&mut s, "get_state", json!({}));
+        assert_eq!(state["args_override"].as_str(), Some("-m\n/zip/foo.gguf\n..."));
+
+        ok(&mut s, "clear_args_override", json!({}));
+        let state = ok(&mut s, "get_state", json!({}));
+        assert!(state["args_override"].is_null());
+    }
+
+    #[test]
+    fn set_config_requires_value() {
+        let (mut s, _t) = session();
+        let (code, msg) = err(&mut s, "set_config", json!({"key": "context_length"}));
+        assert_eq!(code, -32602);
+        assert!(msg.contains("value"));
+    }
+
+    #[test]
+    fn set_config_persists_value() {
+        let (mut s, _t) = session();
+        ok(&mut s, "set_config", json!({"key": "context_length", "value": 8192}));
+        let state = ok(&mut s, "get_state", json!({}));
+        assert_eq!(state["config_values"]["context_length"].as_i64(), Some(8192));
+    }
+
+    #[test]
+    fn add_then_remove_gpu_lib_round_trips() {
+        let (mut s, _t) = session();
+        ok(&mut s, "add_gpu", json!({"spec": "cuda:linux"}));
+        let state = ok(&mut s, "get_state", json!({}));
+        assert_eq!(state["gpu_libs"], json!(["cuda:linux"]));
+
+        ok(&mut s, "remove_gpu", json!({"spec": "cuda:linux"}));
+        let state = ok(&mut s, "get_state", json!({}));
+        // SavedState skips serializing an empty `gpu_libs`, so the field is
+        // either absent (Null) or an empty array. Both mean "no GPU libs".
+        let empty = state["gpu_libs"].as_array().map(|a| a.is_empty()).unwrap_or(true);
+        assert!(empty, "gpu_libs should be empty after removal, got {:?}", state["gpu_libs"]);
+    }
+
+    #[test]
+    fn add_gpu_invalid_spec_errors() {
+        let (mut s, _t) = session();
+        let (code, _) = err(&mut s, "add_gpu", json!({"spec": "fictional-accelerator"}));
+        assert_eq!(code, -32000);
+    }
+
+    #[test]
+    fn add_companion_file_then_remove() {
+        let (mut s, _t) = session();
+        ok(&mut s, "add_companion_file", json!({"role": "mmproj", "path": "/tmp/mm.gguf"}));
+        let state = ok(&mut s, "get_state", json!({}));
+        assert_eq!(state["custom_companion_files"]["mmproj"].as_str(), Some("/tmp/mm.gguf"));
+
+        ok(&mut s, "remove_companion_file", json!({"role": "mmproj"}));
+        let state = ok(&mut s, "get_state", json!({}));
+        // Empty HashMap is skipped at serialization; either way the role is gone.
+        let empty = state["custom_companion_files"].as_object().map(|o| o.is_empty()).unwrap_or(true);
+        assert!(empty, "custom_companion_files should be empty after removal, got {:?}", state["custom_companion_files"]);
+    }
+
+    #[test]
+    fn reset_clears_recipe_state() {
+        let (mut s, _t) = session();
+        ok(&mut s, "set_model", json!({"id": "Qwen/Qwen3-0.6B-GGUF"}));
+        ok(&mut s, "set_output", json!({"path": "/tmp/out.llamafile"}));
+        ok(&mut s, "reset", json!({}));
+        let state = ok(&mut s, "get_state", json!({}));
+        assert!(state["model_id"].is_null());
+        assert!(state["output_path"].is_null());
+    }
+
+    // ── Derived queries ──
+
+    #[test]
+    fn validate_reports_errors_for_bogus_custom_runtime() {
+        let (mut s, _t) = session();
+        // `apply_saved_state` fills in default version + model for a sparse
+        // state, so an "empty" recipe actually validates clean. To exercise
+        // the error path, point the runtime at a path that definitely does
+        // not exist.
+        ok(&mut s, "set_runtime", json!({"path": "/nonexistent/definitely-not-here"}));
+        let msgs = ok(&mut s, "validate", json!({}));
+        let arr = msgs.as_array().unwrap();
+        let errors: Vec<_> = arr.iter()
+            .filter(|m| m["level"].as_str() == Some("error"))
+            .collect();
+        assert!(
+            !errors.is_empty(),
+            "non-existent custom runtime should produce a validation error, got: {arr:?}",
+        );
+    }
+
+    #[test]
+    fn show_args_returns_renderable_args_after_full_setup() {
+        let (mut s, _t) = session();
+        // Pick the first version + first release from the bundled config so
+        // this test doesn't go stale every release.
+        let versions = ok(&mut s, "list_versions", json!({}));
+        let group = versions[0]["name"].as_str().unwrap().to_string();
+        let release = versions[0]["releases"][0]["version"].as_str().unwrap().to_string();
+        ok(&mut s, "set_version", json!({"group": group, "version": release}));
+        ok(&mut s, "set_model", json!({"id": "Qwen/Qwen3-0.6B-GGUF"}));
+
+        let args = ok(&mut s, "show_args", json!({}));
+        let s = args.as_str().unwrap();
+        assert!(s.contains("-m"), "args should contain '-m' flag, got: {s}");
+        assert!(s.contains(".gguf"), "args should reference a .gguf file");
+    }
+}

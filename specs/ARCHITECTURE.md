@@ -483,6 +483,7 @@ PUT  /api/recipes/:id/name         { name }    -> name/rename (resolves defaults
 
 # Recipe state (scoped by recipe UUID)
 GET  /api/recipes/:id/state
+PUT  /api/recipes/:id/state                { ...SavedState }   -> bulk replace
 POST /api/recipes/:id/state/version        { group, version }
 POST /api/recipes/:id/state/model          { id }
 POST /api/recipes/:id/state/model-file     { path }
@@ -492,14 +493,21 @@ POST /api/recipes/:id/state/quantization   { role, name }
 POST /api/recipes/:id/state/config         { key, value }
 POST /api/recipes/:id/state/output         { path }
 POST /api/recipes/:id/state/args-file      { path }
+POST /api/recipes/:id/state/args-content   { content }         -> inline .args override
 POST /api/recipes/:id/state/gpu            { action, spec }
+POST /api/recipes/:id/state/custom-gpu     { action, path, accel, os }
+POST /api/recipes/:id/state/companion-file { action, role, path }
 POST /api/recipes/:id/state/runtime        { path }
 POST /api/recipes/:id/state/zipalign       { path }
 POST /api/recipes/:id/state/reset
 GET  /api/recipes/:id/state/args           -> preview .args
+GET  /api/recipes/:id/state/resolved       -> fully resolved state
 GET  /api/recipes/:id/state/validate       -> validation messages
 GET  /api/recipes/:id/state/components     -> resolved components
 GET  /api/recipes/:id/state/disk-requirements -> [{ destination, bytes, purpose }]
+
+# File picker (web UI helper)
+POST /api/file-dialog                      { mode, filter? }   -> selected path
 
 # Build execution (scoped by recipe UUID)
 POST /api/recipes/:id/build                -> SSE stream

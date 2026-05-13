@@ -26,16 +26,15 @@ If a test doesn't clearly catch one of A–E, it's probably not worth writing.
 
 ## 3. Current state of testing
 
-From a survey of the workspace:
+Snapshot of the workspace as of this revision:
 
-- **`llamafile-builder-core`**: 121 tests across `state`, `args`, `download`, `builder`, `config_store`, `cache`, `config_manager`, `disk_space`, `validation`, `ollama`, `lmstudio`. Solid coverage of model selection, schema-driven `.args` generation, recipes, and validation.
-- **`llamafile-builder` (CLI)**: 3 tests in `state_file.rs`.
-- **`llamafile-builder-tui`**: 29 tests — 18 in `app.rs` (state mutations, focus navigation, GPU parsing, log filtering), 7 in `events.rs` (key dispatch, cancel-confirm, error popup), 4 in `main.rs` (cancellation classification).
-- **No rendering tests, no flow tests, no log-driven progress tests anywhere.**
-- **`insta` is not a workspace dependency.** No `.snap` files exist.
-- **No CI pipeline** (no `.github/workflows`, no other CI config).
+- **`llamafile-builder-core`**: ~136 unit tests across `state`, `args`, `download`, `builder`, `config_store`, `cache`, `config_manager`, `disk_space`, `validation`, `ollama`, `lmstudio`. Solid coverage of model selection, schema-driven `.args` generation, recipes, and validation.
+- **`llamafile-builder` (CLI)**: 15 tests in `server.rs` (REST endpoints against a real `Router`), 21 in `interactive.rs` (JSON-RPC dispatch), and 1 in `state_file.rs`.
+- **`llamafile-builder-tui`**: 36 unit tests in `src/` (23 in `app.rs`, 9 in `events.rs`, 4 in `main.rs`) plus 24 integration tests under `tests/` — 11 flow tests (`flow_01`…`flow_11`), `log_layer_integration.rs` (7), `smoke.rs` (2).
+- **`insta` is wired** as a workspace dev-dependency; ~38 `.snap` files committed under `crates/llamafile-builder-tui/tests/snapshots/`.
+- **CI**: `.github/workflows/release.yml` exists for cross-compiled releases. There is no test-on-PR workflow yet (Phase 5 below).
 
-The 29 TUI tests cover failure mode A and parts of B, in isolation. They don't cover C, D, or E at all.
+Coverage now spans failure modes A, B, C, and D for the documented flows. Failure mode E (log-driven progress) is partially covered via `log_layer_integration.rs` but not exhaustively per `BuildPhase` variant.
 
 ## 4. Architectural prerequisites
 
@@ -181,25 +180,28 @@ fn registry_build_flow_qwen_q4() {
 
 ## 7. Phased implementation
 
-| Phase | Work | Outcome |
-|---|---|---|
-| 0 | Refactors §4.1 + §4.2 | `prepare_build()` exists; phase emitted as structured field |
-| 1 | Add `insta`, set up `TestBackend` harness, write `support` helpers (keys, fixtures, render) | Infra ready; one trivial rendering snapshot proves the pipeline |
-| 2 | L3 flow tests for the 10 flows in §5 | Failure modes B + D covered for documented flows |
-| 3 | L4 log-driven progress tests | Failure mode E covered |
-| 4 | L1 gap-fill (popup edit-mode transitions, args override locking, etc.) | Failure mode A fully covered |
-| 5 | CI wiring (GitHub Actions). Run `cargo test --workspace`, fail on snapshot drift unless reviewed | Regressions caught automatically |
-| later | L2 component snapshots, added as visual regressions surface | Failure mode C covered opportunistically |
+| Phase | Status | Work | Outcome |
+|---|---|---|---|
+| 0 | done | Refactors §4.1 + §4.2 | `prepare_build()` exists; phase emitted as structured field |
+| 1 | done | Add `insta`, set up `TestBackend` harness, write `support` helpers (keys, fixtures, render) | Infra ready; one trivial rendering snapshot proves the pipeline |
+| 2 | done | L3 flow tests for the 10 flows in §5 (plus `flow_11_custom_files_round_trip`) | Failure modes B + D covered for documented flows |
+| 3 | partial | L4 log-driven progress tests | `log_layer_integration.rs` covers the visitor + a subset of phases; not yet one test per `BuildPhase` variant |
+| 4 | not started | L1 gap-fill (popup edit-mode transitions, args override locking, etc.) | Failure mode A fully covered |
+| 5 | not started | Test-on-PR workflow in `.github/workflows/`. Run `cargo test --workspace`, fail on snapshot drift unless reviewed | Regressions caught automatically |
+| later | not started | L2 component snapshots, added as visual regressions surface | Failure mode C covered opportunistically |
 
-Phases 0–2 are the critical path for the stated pain.
+Phases 0–2 are the critical path for the stated pain and are complete; Phases 3–5 are the remaining work before this spec can be considered fully delivered.
 
 ## 8. Done criteria
 
-- Every flow in §5 table has a passing flow test asserting both rendered state and `SavedState`.
-- Every key binding in [`specs/TUI.md`](TUI.md) has a state transition test.
-- Every `BuildPhase` variant has a log-driven progress test.
-- `cargo test --workspace` runs the whole TUI suite in <30s on a developer laptop.
-- `insta` is wired and snapshot files are committed.
+| Criterion | Status |
+|---|---|
+| Every flow in §5 table has a passing flow test asserting both rendered state and `SavedState` | done (10/10, plus `flow_11`) |
+| `insta` is wired and snapshot files are committed | done |
+| `cargo test --workspace` runs the whole TUI suite in <30s on a developer laptop | done |
+| Every key binding in [`specs/TUI.md`](TUI.md) has a state transition test | partial (Phase 4) |
+| Every `BuildPhase` variant has a log-driven progress test | partial (Phase 3) |
+| Test-on-PR CI runs the whole workspace and gates snapshot drift | not started (Phase 5) |
 
 L2 (component rendering) is intentionally not in the done criteria; it's add-as-needed.
 
@@ -230,7 +232,7 @@ Explicitly deferred:
 
 ## 12. How to add a flow test
 
-The §5 table starts at 10 flows. The 11th should take ~10 minutes once Phase 1's harness exists. Recipe:
+The §5 table started at 10 flows; `flow_11_custom_files_round_trip` already lives in `crates/llamafile-builder-tui/tests/`. Adding the 12th should take ~10 minutes now that Phase 1's harness exists. Recipe:
 
 1. **Identify the flow.** A flow is a sequence of user actions ending in a build trigger or a state-affecting action (save recipe, load recipe, etc.). If it's a single popup interaction with no surrounding context, write a Level 1 test instead.
 2. **Pick fixtures.** Reuse the `support::fixtures` canned `versions.json`/`models.json`/`config.json` if possible. Add a new fixture only if no existing one covers the data needs (e.g., a new GPU library variant).
