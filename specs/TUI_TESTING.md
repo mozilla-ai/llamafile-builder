@@ -29,7 +29,7 @@ If a test doesn't clearly catch one of A–E, it's probably not worth writing.
 Snapshot of the workspace as of this revision:
 
 - **`llamafile-builder-core`**: ~136 unit tests across `state`, `args`, `download`, `builder`, `config_store`, `cache`, `config_manager`, `disk_space`, `validation`, `ollama`, `lmstudio`. Solid coverage of model selection, schema-driven `.args` generation, recipes, and validation.
-- **`llamafile-builder` (CLI)**: 15 tests in `server.rs` (REST endpoints against a real `Router`) plus 1 in `state_file.rs`. JSON-RPC dispatch in `interactive.rs` is currently uncovered.
+- **`llamafile-builder` (CLI)**: 15 tests in `server.rs` (REST endpoints against a real `Router`), 21 in `interactive.rs` (JSON-RPC dispatch), and 1 in `state_file.rs`.
 - **`llamafile-builder-tui`**: 36 unit tests in `src/` (23 in `app.rs`, 9 in `events.rs`, 4 in `main.rs`) plus 24 integration tests under `tests/` — 11 flow tests (`flow_01`…`flow_11`), `log_layer_integration.rs` (7), `smoke.rs` (2).
 - **`insta` is wired** as a workspace dev-dependency; ~38 `.snap` files committed under `crates/llamafile-builder-tui/tests/snapshots/`.
 - **CI**: `.github/workflows/release.yml` exists for cross-compiled releases. There is no test-on-PR workflow yet (Phase 5 below).
