@@ -1399,4 +1399,155 @@ mod tests {
             ComponentSource::Local(PathBuf::from("/my/custom/zipalign"))
         );
     }
+
+    // ── End-to-end build pipeline ──
+
+    /// Run the full 5-phase pipeline against an isolated tempdir, with all
+    /// remote dependencies (zipalign, runtime, model weights) substituted by
+    /// local stub files. This is the only test that calls `build()` itself
+    /// rather than its individual helpers; it's the regression guard for the
+    /// pipeline's wiring (phase ordering, output assembly, error
+    /// classification).
+    ///
+    /// The stub `zipalign` is a shell script that exits 0. That's enough
+    /// because `create_executable` copies the runtime to the output path
+    /// *before* invoking zipalign, so the output file already exists when
+    /// zipalign runs. The contents of the produced llamafile are not
+    /// asserted — those are the responsibility of the real zipalign and
+    /// llamafile binaries, both of which are out of scope here.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn build_pipeline_runs_end_to_end_with_stubbed_artefacts() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+
+        let runtime_path = root.join("fake-runtime");
+        tokio::fs::write(&runtime_path, b"#!/bin/sh\nexit 0\n").await.unwrap();
+
+        let model_path = root.join("fake-weights.gguf");
+        // Plausible-looking GGUF magic bytes + some padding so file size is non-trivial.
+        let mut gguf = b"GGUF".to_vec();
+        gguf.extend_from_slice(&[0u8; 1024]);
+        tokio::fs::write(&model_path, &gguf).await.unwrap();
+
+        let zipalign_path = root.join("fake-zipalign");
+        tokio::fs::write(
+            &zipalign_path,
+            b"#!/bin/sh\n# stub zipalign for tests: succeed without modifying $2\nexit 0\n",
+        ).await.unwrap();
+        crate::zipalign::make_executable(&zipalign_path).await.unwrap();
+
+        let output_path = root.join("out.llamafile");
+        let cache = Cache::new(root.join("cache"));
+        let mut builder = Builder::new(test_config(), cache);
+        builder.use_custom_zipalign(&zipalign_path);
+        builder.use_custom_runtime(&runtime_path);
+        builder.select_custom_model(&model_path);
+        builder.set_output_path(&output_path);
+
+        // Sanity check: the configuration we just built must be buildable.
+        let validation_errors: Vec<_> = builder.validate().iter().filter_map(|m| match m {
+            crate::ValidationMessage::Error(s) => Some(s.clone()),
+            _ => None,
+        }).collect();
+        assert!(
+            validation_errors.is_empty(),
+            "test setup produced validation errors: {validation_errors:?}",
+        );
+
+        let result = builder.build().await.expect("build should succeed");
+
+        assert_eq!(result, output_path, "build should return the configured output path");
+        assert!(output_path.exists(), "output file should have been written");
+        // The runtime was copied to the output path before zipalign ran;
+        // its contents should still be readable from the result.
+        let written = tokio::fs::read(&output_path).await.unwrap();
+        assert_eq!(written, b"#!/bin/sh\nexit 0\n", "output should contain the runtime bytes");
+    }
+
+    /// If the stubbed zipalign fails, `build()` must surface a `Build` error
+    /// rather than reporting success. Guards against the regression of
+    /// silently swallowing a non-zero exit code.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn build_pipeline_propagates_zipalign_failure() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+
+        let runtime_path = root.join("fake-runtime");
+        tokio::fs::write(&runtime_path, b"runtime").await.unwrap();
+        let model_path = root.join("fake-weights.gguf");
+        tokio::fs::write(&model_path, b"GGUF\0\0\0\0").await.unwrap();
+
+        let zipalign_path = root.join("failing-zipalign");
+        tokio::fs::write(
+            &zipalign_path,
+            b"#!/bin/sh\necho 'simulated zipalign failure' >&2\nexit 7\n",
+        ).await.unwrap();
+        crate::zipalign::make_executable(&zipalign_path).await.unwrap();
+
+        let cache = Cache::new(root.join("cache"));
+        let mut builder = Builder::new(test_config(), cache);
+        builder.use_custom_zipalign(&zipalign_path);
+        builder.use_custom_runtime(&runtime_path);
+        builder.select_custom_model(&model_path);
+        builder.set_output_path(&root.join("out.llamafile"));
+
+        let err = builder.build().await.expect_err("build should fail when zipalign exits non-zero");
+        match err {
+            crate::Error::Build(msg) => {
+                assert!(msg.contains("zipalign") && msg.contains('7'),
+                    "error should mention zipalign and the exit code, got: {msg}");
+            }
+            other => panic!("expected Error::Build, got {other:?}"),
+        }
+    }
+
+    /// Cancellation flipped between phases must short-circuit the pipeline
+    /// with `Error::Cancelled` rather than running to completion.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn build_pipeline_honours_cancel_flag() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+
+        let runtime_path = root.join("fake-runtime");
+        tokio::fs::write(&runtime_path, b"runtime").await.unwrap();
+        let model_path = root.join("fake-weights.gguf");
+        tokio::fs::write(&model_path, b"GGUF\0\0\0\0").await.unwrap();
+        let zipalign_path = root.join("fake-zipalign");
+        tokio::fs::write(&zipalign_path, b"#!/bin/sh\nexit 0\n").await.unwrap();
+        crate::zipalign::make_executable(&zipalign_path).await.unwrap();
+
+        let cache = Cache::new(root.join("cache"));
+        let mut builder = Builder::new(test_config(), cache);
+        builder.use_custom_zipalign(&zipalign_path);
+        builder.use_custom_runtime(&runtime_path);
+        builder.select_custom_model(&model_path);
+        builder.set_output_path(&root.join("out.llamafile"));
+
+        let cancel = Arc::new(AtomicBool::new(false));
+        builder.set_cancel_flag(cancel.clone());
+        // Pre-flip the flag. `build()` resets it, then re-checks between
+        // phases — so we need to flip it again after the reset by spawning
+        // a flipper. The simplest approach: just flip *during* the build via
+        // a spawned task with a tiny delay. The pipeline's `check_cancelled`
+        // calls between phases will then observe it.
+        let cancel_flipper = cancel.clone();
+        tokio::spawn(async move {
+            // Yield a few times so the build progresses past phase 0/1.
+            for _ in 0..10 {
+                tokio::task::yield_now().await;
+            }
+            cancel_flipper.store(true, Ordering::Relaxed);
+        });
+
+        let err = builder.build().await.expect_err("cancelled build should error");
+        // Cancellation may surface as Error::Cancelled directly, or as a
+        // download error wrapping cancellation if it lands inside ensure_*.
+        assert!(
+            matches!(err, crate::Error::Cancelled | crate::Error::Download(crate::DownloadError::Cancelled)),
+            "expected Cancelled, got {err:?}"
+        );
+    }
 }
