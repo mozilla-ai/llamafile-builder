@@ -3,11 +3,9 @@ name = "llamafile-builder-tui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 description = "Terminal UI for llamafile-builder"
-
-[[bin]]
-name = "llamafile-builder-tui"
-path = "src/main.rs"
 
 [dependencies]
 llamafile-builder-core = { path = "../llamafile-builder-core" }

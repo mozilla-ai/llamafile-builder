@@ -1,5 +1,3 @@
-use llamafile_builder_tui::{app, events, log_layer, ui};
-
 use std::io;
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -19,30 +17,16 @@ use tracing_subscriber::util::SubscriberInitExt;
 use llamafile_builder_core::config_manager::ConfigManager;
 use llamafile_builder_core::config_store::ConfigStore;
 
-use app::{
+use crate::app::{
     apply_build_result, apply_build_task_terminated, build_from_state, App, BuildResult,
     BuildStatus, LogEntry, LogLevel,
 };
+use crate::{events, log_layer, ui};
 
-fn get_config_dir() -> PathBuf {
-    directories::BaseDirs::new()
-        .map(|dirs| {
-            if cfg!(target_os = "windows") {
-                dirs.data_local_dir().join("llamafile-builder")
-            } else {
-                dirs.home_dir().join(".llamafile-builder")
-            }
-        })
-        .unwrap_or_else(|| PathBuf::from(".llamafile-builder"))
-}
-
-fn get_cache_dir() -> PathBuf {
-    get_config_dir().join("cache")
-}
-
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run(
+    config_dir: PathBuf,
+    cache_dir: PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Set up tracing with our custom TUI layer
     let (log_tx, log_rx) = mpsc::channel::<LogEntry>();
     let tui_layer = log_layer::TuiLogLayer::new(log_tx);
@@ -53,8 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     // Load config
-    let config_dir = get_config_dir().join("config");
-    let cm = ConfigManager::new(config_dir);
+    let cm = ConfigManager::new(config_dir.join("config"));
     let config = cm.load()?;
 
     // Setup terminal
@@ -64,8 +47,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let store = ConfigStore::new(get_config_dir().join("recipes"));
-    let mut app = App::new(config, get_cache_dir(), store);
+    let store = ConfigStore::new(config_dir.join("recipes"));
+    let mut app = App::new(config, cache_dir, store);
     app.add_log(LogLevel::Info, "llamafile-builder TUI started".to_string());
 
     let result = run_app(&mut terminal, &mut app, log_rx).await;
@@ -116,7 +99,7 @@ async fn run_app(
                     } else {
                         0.0
                     };
-                    app.download_info = Some(app::DownloadInfo {
+                    app.download_info = Some(crate::app::DownloadInfo {
                         filename: dl.filename.clone().unwrap_or_else(|| "file".to_string()),
                         bytes_downloaded: dl.bytes_downloaded,
                         bytes_total: dl.bytes_total,

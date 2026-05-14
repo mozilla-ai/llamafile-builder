@@ -22,11 +22,15 @@ llamafile-builder-core (library crate, zero UI deps)
        |       |     HTTP + SSE on localhost, serves web UI
        |       |
        |       +-- Interactive mode (--interactive)
-       |             $ llamafile-builder --interactive
-       |             JSON-RPC over stdio
+       |       |     $ llamafile-builder --interactive
+       |       |     JSON-RPC over stdio
+       |       |
+       |       +-- TUI mode (--tui)
+       |             $ llamafile-builder --tui
+       |             ratatui wizard
        |
-       +-- llamafile-builder-tui (optional separate binary)
-               ratatui, links directly to core
+       +-- llamafile-builder-tui (library)
+               ratatui modules, consumed by the binary above
 ```
 
 
@@ -540,9 +544,9 @@ Methods mirror the core library API one-to-one. This mode is useful for integrat
 
 Note: the `cancel` method is not yet implemented in JSON-RPC mode (planned for a future phase).
 
-### TUI (`llamafile-builder-tui`)
+### TUI (`llamafile-builder --tui`)
 
-A separate binary using `ratatui` + `crossterm`. Links directly to `llamafile-builder-core` (no IPC). The TUI provides an interactive wizard in the terminal without requiring a browser or display server.
+A `ratatui` + `crossterm` wizard. The TUI lives in the `llamafile-builder-tui` library crate; it's invoked from the `llamafile-builder` binary when `--tui` is passed (the binary calls `llamafile_builder_tui::run`). Links directly to `llamafile-builder-core` (no IPC). Provides an interactive wizard in the terminal without requiring a browser or display server.
 
 The TUI is fully functional: version/model/quantization selection via popup menus, schema-driven configuration editing, multi-select GPU library picker, `.args` editor with `tui-textarea`, real-time log pane with level filtering, and non-blocking builds via `tokio::spawn`.
 
@@ -577,34 +581,32 @@ llamafile-builder/
 |   |       +-- models.json
 |   |       +-- config.json
 |   |
-|   +-- llamafile-builder/                # Binary: CLI + server + interactive
+|   +-- llamafile-builder-tui/            # Library: ratatui wizard
 |   |   +-- Cargo.toml
 |   |   +-- src/
-|   |       +-- main.rs               # Entry point, mode dispatch
-|   |       +-- cli.rs                # Clap definitions
-|   |       +-- commands/             # CLI subcommand handlers
-|   |       |   +-- mod.rs
-|   |       |   +-- versions.rs
-|   |       |   +-- models.rs
-|   |       |   +-- build.rs
-|   |       |   +-- scan.rs
-|   |       +-- server.rs             # Axum HTTP server
-|   |       +-- sse.rs                # SSE bridge (BuildProgress -> SSE events)
-|   |       +-- interactive.rs        # JSON-RPC over stdio
-|   |       +-- progress.rs           # Terminal progress display (indicatif)
+|   |       +-- lib.rs                # Module index, re-exports `run()`
+|   |       +-- runner.rs             # `pub async fn run(config_dir, cache_dir)` entry
+|   |       +-- app.rs                # App state, build orchestration
+|   |       +-- events.rs             # Key event handlers
+|   |       +-- log_layer.rs          # tracing Layer that feeds the UI log pane
+|   |       +-- ui.rs                 # ratatui rendering
+|   |       +-- config_ui.rs          # schema-driven config editor
 |   |
-|   +-- llamafile-builder-tui/                # Terminal UI wizard
+|   +-- llamafile-builder/                # Binary: CLI + server + interactive + tui
 |       +-- Cargo.toml
 |       +-- src/
-|           +-- main.rs              # Entry point, tokio runtime, build task spawning
-|           +-- app.rs               # App state, Focus/Popup enums, Builder bridge
-|           +-- ui.rs                # Dashboard and popup rendering
-|           +-- events.rs            # Key handling for all popups
-|           +-- config_ui.rs         # Schema flattening for config popup
-|           +-- log_layer.rs         # Custom tracing Layer -> mpsc channel
-|           +-- app.rs
-|           +-- ui.rs
-|           +-- events.rs
+|           +-- main.rs               # Entry point, mode dispatch
+|           +-- cli.rs                # Clap definitions
+|           +-- commands/             # CLI subcommand handlers
+|           |   +-- mod.rs
+|           |   +-- versions.rs
+|           |   +-- models.rs
+|           |   +-- build.rs
+|           |   +-- scan.rs
+|           +-- server.rs             # Axum HTTP server
+|           +-- sse.rs                # SSE bridge (BuildProgress -> SSE events)
+|           +-- interactive.rs        # JSON-RPC over stdio
+|           +-- progress.rs           # Terminal progress display (indicatif)
 |
 +-- web/                              # Web UI static assets (served from disk)
 |   +-- index.html

@@ -1,4 +1,10 @@
-# llamafile-builder build system
+# llamafile-builder local build system
+#
+# Release artifacts are produced by cargo-dist (see .github/workflows/release.yml
+# and dist-workspace.toml). This Makefile is the local-development convenience
+# for cross-compiling without going through CI. The Windows target here is
+# `*-pc-windows-gnu` (zigbuild-compatible); cargo-dist ships `*-pc-windows-msvc`
+# from a native Windows runner.
 #
 # Prerequisites:
 #   Rust toolchain (https://rustup.rs)
@@ -26,7 +32,7 @@ TARGETS := \
 # cargo-zigbuild requires a newer toolchain.
 ZIG_VERSION := 0.16.0
 
-CRATES := -p llamafile-builder -p llamafile-builder-tui
+CRATES := -p llamafile-builder
 
 # Default: build for current platform in debug mode
 .PHONY: build
@@ -102,10 +108,8 @@ dist: all
 		mkdir -p dist/$$target; \
 		if echo $$target | grep -q windows; then \
 			cp target/$$target/release/llamafile-builder.exe dist/$$target/ 2>/dev/null || true; \
-			cp target/$$target/release/llamafile-builder-tui.exe dist/$$target/ 2>/dev/null || true; \
 		else \
 			cp target/$$target/release/llamafile-builder dist/$$target/ 2>/dev/null || true; \
-			cp target/$$target/release/llamafile-builder-tui dist/$$target/ 2>/dev/null || true; \
 		fi; \
 	done
 	@echo ""
@@ -119,13 +123,11 @@ dist: all
 sizes:
 	@for target in $(TARGETS); do \
 		if echo $$target | grep -q windows; then \
-			cli=$$(du -h target/$$target/release/llamafile-builder.exe 2>/dev/null | cut -f1); \
-			tui=$$(du -h target/$$target/release/llamafile-builder-tui.exe 2>/dev/null | cut -f1); \
+			size=$$(du -h target/$$target/release/llamafile-builder.exe 2>/dev/null | cut -f1); \
 		else \
-			cli=$$(du -h target/$$target/release/llamafile-builder 2>/dev/null | cut -f1); \
-			tui=$$(du -h target/$$target/release/llamafile-builder-tui 2>/dev/null | cut -f1); \
+			size=$$(du -h target/$$target/release/llamafile-builder 2>/dev/null | cut -f1); \
 		fi; \
-		printf "  %-35s CLI: %s  TUI: %s\n" "$$target" "$$cli" "$$tui"; \
+		printf "  %-35s %s\n" "$$target" "$$size"; \
 	done
 
 # Verify all build dependencies are installed

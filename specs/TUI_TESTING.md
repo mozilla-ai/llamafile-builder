@@ -30,7 +30,7 @@ Snapshot of the workspace as of this revision:
 
 - **`llamafile-builder-core`**: ~136 unit tests across `state`, `args`, `download`, `builder`, `config_store`, `cache`, `config_manager`, `disk_space`, `validation`, `ollama`, `lmstudio`. Solid coverage of model selection, schema-driven `.args` generation, recipes, and validation.
 - **`llamafile-builder` (CLI)**: 15 tests in `server.rs` (REST endpoints against a real `Router`), 21 in `interactive.rs` (JSON-RPC dispatch), and 1 in `state_file.rs`.
-- **`llamafile-builder-tui`**: 36 unit tests in `src/` (23 in `app.rs`, 9 in `events.rs`, 4 in `main.rs`) plus 24 integration tests under `tests/` — 11 flow tests (`flow_01`…`flow_11`), `log_layer_integration.rs` (7), `smoke.rs` (2).
+- **`llamafile-builder-tui`** (library): 36 unit tests in `src/` (23 in `app.rs`, 9 in `events.rs`, 4 in `runner.rs`) plus 24 integration tests under `tests/` — 11 flow tests (`flow_01`…`flow_11`), `log_layer_integration.rs` (7), `smoke.rs` (2).
 - **`insta` is wired** as a workspace dev-dependency; ~38 `.snap` files committed under `crates/llamafile-builder-tui/tests/snapshots/`.
 - **CI**: `.github/workflows/release.yml` exists for cross-compiled releases. There is no test-on-PR workflow yet (Phase 5 below).
 
@@ -228,7 +228,7 @@ Explicitly deferred:
 - **Snapshot diffs reviewed in PR.** A snapshot diff without a matching code change in the same PR is a red flag — either an unintentional regression or evidence the snapshot is testing something noisier than intended.
 - **Bulk-accept (`cargo insta accept`) only when the PR description names the UI change driving the diff.** Avoids snapshot tests becoming rubber stamps.
 - **Snap file rot.** If a `.snap` is modified more than three times in unrelated PRs, treat it as evidence the underlying assertion is too coarse — replace with a finer-grained state assertion or split.
-- **Failure mode discipline.** When a TUI bug ships, classify it as A–E from §2 and write the missing test at the corresponding level before fixing. Same rule as the existing `is_user_cancellation` regression-guard pattern in `main.rs`.
+- **Failure mode discipline.** When a TUI bug ships, classify it as A–E from §2 and write the missing test at the corresponding level before fixing. Same rule as the existing `is_user_cancellation` regression-guard pattern in `runner.rs`.
 
 ## 12. How to add a flow test
 

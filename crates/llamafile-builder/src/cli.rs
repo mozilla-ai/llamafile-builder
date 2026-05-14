@@ -12,12 +12,16 @@ pub struct Cli {
     pub command: Option<Commands>,
 
     /// Start JSON-RPC interactive mode over stdio
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["serve", "tui"])]
     pub interactive: bool,
 
     /// Start HTTP server mode
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["interactive", "tui"])]
     pub serve: bool,
+
+    /// Start the terminal UI
+    #[arg(long, conflicts_with_all = ["interactive", "serve"])]
+    pub tui: bool,
 
     /// Port for HTTP server (default: 8765)
     #[arg(long, default_value = "8765")]
