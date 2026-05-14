@@ -129,6 +129,8 @@ pub struct Builder {
     args_override: Option<String>,
     agent_config: AgentConfig,
     gpu_libs: Vec<GpuLibSelection>,
+    #[cfg(test)]
+    phase_observer: Option<Arc<dyn Fn(BuildPhase) + Send + Sync>>,
 }
 
 impl Builder {
@@ -142,6 +144,8 @@ impl Builder {
             args_override: None,
             agent_config: AgentConfig::default(),
             gpu_libs: Vec::new(),
+            #[cfg(test)]
+            phase_observer: None,
         }
     }
 
@@ -478,6 +482,29 @@ impl Builder {
         self.cancel_flag = flag;
     }
 
+    /// Test-only hook: invoked synchronously after each phase completes,
+    /// before the inter-phase cancellation check. Lets tests deterministically
+    /// flip the cancel flag at a known point in the pipeline instead of
+    /// racing the build with `tokio::spawn` + yields.
+    #[cfg(test)]
+    pub(crate) fn set_phase_observer<F>(&mut self, f: F)
+    where
+        F: Fn(BuildPhase) + Send + Sync + 'static,
+    {
+        self.phase_observer = Some(Arc::new(f));
+    }
+
+    #[cfg(test)]
+    fn notify_phase(&self, phase: BuildPhase) {
+        if let Some(obs) = &self.phase_observer {
+            obs(phase);
+        }
+    }
+
+    #[cfg(not(test))]
+    #[inline(always)]
+    fn notify_phase(&self, _phase: BuildPhase) {}
+
     /// Run the build pipeline. Returns the path to the created llamafile.
     ///
     /// All progress is observable via `tracing` spans and events.
@@ -496,6 +523,7 @@ impl Builder {
             tracing::info!(phase = %BuildPhase::PreparingZipalign, "preparing zipalign");
             self.ensure_zipalign().await?
         };
+        self.notify_phase(BuildPhase::PreparingZipalign);
         self.check_cancelled()?;
 
         // Phase 2: Ensure runtime
@@ -503,6 +531,7 @@ impl Builder {
             tracing::info!(phase = %BuildPhase::PreparingRuntime, "preparing runtime binary");
             self.ensure_runtime().await?
         };
+        self.notify_phase(BuildPhase::PreparingRuntime);
         self.check_cancelled()?;
 
         // Phase 3: Ensure model files
@@ -510,6 +539,7 @@ impl Builder {
             tracing::info!(phase = %BuildPhase::PreparingModel, "preparing model files");
             self.ensure_model_files().await?
         };
+        self.notify_phase(BuildPhase::PreparingModel);
         self.check_cancelled()?;
 
         // Phase 4: Write .args
@@ -525,12 +555,14 @@ impl Builder {
                 .await
                 .map_err(|e| crate::Error::Build(format!("Failed to write .args: {e}")))?
         };
+        self.notify_phase(BuildPhase::WritingArgs);
         self.check_cancelled()?;
 
         // Phase 5: Ensure GPU libraries
         let gpu_lib_paths = {
             self.ensure_gpu_libs().await
         };
+        self.notify_phase(BuildPhase::PreparingGpuLibs);
         self.check_cancelled()?;
 
         // Phase 6: Create executable
@@ -1528,18 +1560,15 @@ mod tests {
 
         let cancel = Arc::new(AtomicBool::new(false));
         builder.set_cancel_flag(cancel.clone());
-        // Pre-flip the flag. `build()` resets it, then re-checks between
-        // phases — so we need to flip it again after the reset by spawning
-        // a flipper. The simplest approach: just flip *during* the build via
-        // a spawned task with a tiny delay. The pipeline's `check_cancelled`
-        // calls between phases will then observe it.
+        // Deterministic synchronization: the phase observer fires after each
+        // phase completes, immediately before the inter-phase `check_cancelled`.
+        // Flipping the flag inside the observer guarantees the next check
+        // observes it, regardless of workspace test-suite scheduling pressure.
         let cancel_flipper = cancel.clone();
-        tokio::spawn(async move {
-            // Yield a few times so the build progresses past phase 0/1.
-            for _ in 0..10 {
-                tokio::task::yield_now().await;
+        builder.set_phase_observer(move |phase| {
+            if phase == BuildPhase::PreparingRuntime {
+                cancel_flipper.store(true, Ordering::Relaxed);
             }
-            cancel_flipper.store(true, Ordering::Relaxed);
         });
 
         let err = builder.build().await.expect_err("cancelled build should error");
