@@ -70,6 +70,18 @@ pub fn get_cache_dir() -> PathBuf {
 async fn main() -> ExitCode {
     let cli = Cli::parse();
 
+    // TUI installs its own tracing subscriber (with the in-UI log layer),
+    // so it has to run before we initialize ours.
+    if cli.tui {
+        return match llamafile_builder_tui::run(get_config_dir(), get_cache_dir()).await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("Error: {e}");
+                ExitCode::from(1)
+            }
+        };
+    }
+
     // Configure tracing subscriber.
     // Default: INFO level. Use RUST_LOG=debug for more detail.
     // The BroadcastLogLayer is a no-op until server::run() calls log_forwarder::init().

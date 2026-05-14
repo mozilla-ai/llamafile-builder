@@ -1239,6 +1239,7 @@ dependencies = [
  "directories",
  "http-body-util",
  "llamafile-builder-core",
+ "llamafile-builder-tui",
  "open",
  "serde",
  "serde_json",

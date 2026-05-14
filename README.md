@@ -43,7 +43,7 @@ See [`specs/CLI.md`](specs/CLI.md) for the full reference.
 ### TUI
 
 ```bash
-llamafile-builder-tui
+llamafile-builder --tui
 ```
 
 A [ratatui](https://ratatui.rs/) terminal wizard: dashboard form on top, live log pane below. See [`specs/TUI.md`](specs/TUI.md).
@@ -71,30 +71,42 @@ JSON-RPC 2.0 over stdin/stdout — one request per line, one response per line, 
 The builder is split into a **core library** (pure Rust, no UI dependencies) and **thin interface layers** that call into it:
 
 ```
-llamafile-builder-core (library)
-       |
-       +-- llamafile-builder  (one binary: CLI + --serve + --interactive)
-       |
-       +-- llamafile-builder-tui  (one binary: ratatui)
+llamafile-builder-core (library)   ── state, validation, downloads, assembly
+       ▲
+       │
+llamafile-builder-tui  (library)   ── ratatui wizard
+       ▲
+       │
+llamafile-builder      (binary)    ── CLI + --serve + --interactive + --tui
 ```
 
-The core owns all state, validation, downloads, and assembly. Interface layers only handle argument parsing, rendering, and protocol translation. This keeps the logic portable to headless environments (CI, containers, SSH) and makes each layer independently testable. See [`specs/ARCHITECTURE.md`](specs/ARCHITECTURE.md) for the details.
+The core owns all state, validation, downloads, and assembly. The CLI binary is the single user-facing entry point, dispatching to one of four modes (subcommand CLI, HTTP server, JSON-RPC, TUI) based on the flags passed. Interface layers only handle argument parsing, rendering, and protocol translation. This keeps the logic portable to headless environments (CI, containers, SSH) and makes each layer independently testable. See [`specs/ARCHITECTURE.md`](specs/ARCHITECTURE.md) for the details.
 
 The model registry, llamafile versions, and configuration schema are **not** embedded at compile time — they are fetched from a remote URL at startup (with a bundled fallback for first-run and offline use), so the catalog can be updated without shipping a new binary. See `NFR-9` and `NFR-10` in [`specs/README.md`](specs/README.md).
 
 ## Installation
 
-Prebuilt binaries for macOS, Linux, and Windows are attached to each [GitHub release](https://github.com/mozilla-ai/llamafile-builder/releases). Download the archive for your platform, extract it, and place `llamafile-builder` (and `llamafile-builder-tui` if you want the TUI) somewhere on your `PATH`.
-
-### macOS Gatekeeper
-
-The macOS binaries are not yet codesigned, so the first time you run them macOS will refuse with *"cannot be opened because the developer cannot be verified"*. Clear the quarantine attribute that the browser added on download:
+### Homebrew (macOS, Linux)
 
 ```bash
-xattr -d com.apple.quarantine llamafile-builder llamafile-builder-tui
+brew install mozilla-ai/tap/llamafile-builder
 ```
 
-After that the binaries run normally.
+### Shell installer (macOS, Linux)
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/mozilla-ai/llamafile-builder/releases/latest/download/llamafile-builder-installer.sh | sh
+```
+
+### PowerShell installer (Windows)
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/mozilla-ai/llamafile-builder/releases/latest/download/llamafile-builder-installer.ps1 | iex"
+```
+
+### Manual download
+
+Prebuilt archives for macOS, Linux, and Windows are attached to each [GitHub release](https://github.com/mozilla-ai/llamafile-builder/releases). Extract and place `llamafile-builder` on your `PATH`. On macOS, binaries downloaded through a browser carry a quarantine attribute that triggers a Gatekeeper warning on first launch — either install via brew or the shell installer (both bypass quarantine), or clear it manually: `xattr -d com.apple.quarantine llamafile-builder`.
 
 ## Building
 
@@ -106,13 +118,15 @@ make test     # run the test suite
 make release  # optimized build
 ```
 
-Output binaries: `target/debug/llamafile-builder` and `target/debug/llamafile-builder-tui` (or `target/release/…`).
+Output binary: `target/debug/llamafile-builder` (or `target/release/llamafile-builder`).
 
 Only Rust (stable, 1.70+) is required for native builds.
 
 ### Cross-compilation
 
-All five supported targets are cross-compilable from a single host. The Linux and Windows targets use [`cargo-zigbuild`](https://github.com/rust-cross/cargo-zigbuild) and [Zig](https://ziglang.org/) as a drop-in C cross-compiler; macOS targets are built with the native Apple toolchain when the host is itself macOS. No Docker, no VMs.
+The Makefile cross-compiles all five supported targets from a single host. The Linux and Windows targets use [`cargo-zigbuild`](https://github.com/rust-cross/cargo-zigbuild) and [Zig](https://ziglang.org/) as a drop-in C cross-compiler; macOS targets are built with the native Apple toolchain when the host is itself macOS. No Docker, no VMs.
+
+This path is for local development — release artifacts on GitHub are produced by [cargo-dist](https://github.com/axodotdev/cargo-dist) on per-OS runners, which ships `*-pc-windows-msvc` instead of the gnu target the Makefile produces.
 
 ```bash
 make setup    # one-time: installs zig, cargo-zigbuild, and required Rust targets
@@ -139,8 +153,8 @@ Binaries are 2.5–4 MB, statically linked for TLS (rustls).
 .
 ├── crates/
 │   ├── llamafile-builder-core/   pure library — state, downloads, assembly, validation
-│   ├── llamafile-builder/    CLI + --serve (HTTP) + --interactive (JSON-RPC)
-│   └── llamafile-builder-tui/    ratatui wizard
+│   ├── llamafile-builder-tui/    ratatui wizard (library)
+│   └── llamafile-builder/        binary — CLI + --serve (HTTP) + --interactive (JSON-RPC) + --tui
 ├── data/                 default versions.json, models.json, config.json (bundled fallback)
 ├── web/                  static assets served by --serve
 ├── assets/icons/         icon masters (icon.png 512×512, icon.icns, icon.ico) for future packaging

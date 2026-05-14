@@ -3,7 +3,9 @@ name = "llamafile-builder"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "CLI interface for llamafile-builder"
+repository.workspace = true
+homepage.workspace = true
+description = "Assemble single-file llamafile executables (CLI + HTTP server + JSON-RPC)"
 
 [[bin]]
 name = "llamafile-builder"
@@ -11,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 llamafile-builder-core = { path = "../llamafile-builder-core" }
+llamafile-builder-tui = { path = "../llamafile-builder-tui" }
 clap = { version = "4", features = ["derive", "env"] }
 tokio = { workspace = true, features = ["full"] }
 serde = { workspace = true }

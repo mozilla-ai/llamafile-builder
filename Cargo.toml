@@ -5,7 +5,10 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "Apache 2.0"
+license = "Apache-2.0"
+description = "Assemble single-file llamafile executables — bundles an inference runtime, GGUF model weights, a .args config, and optional GPU libraries into one APE binary."
+repository = "https://github.com/mozilla-ai/llamafile-builder"
+homepage = "https://github.com/mozilla-ai/llamafile-builder"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["fs", "sync", "rt-multi-thread", "macros", "process", "io-util"] }
@@ -33,3 +36,8 @@ codegen-units = 1
 lto = true
 opt-level = "z"
 strip = true
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

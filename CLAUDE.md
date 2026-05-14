@@ -14,8 +14,8 @@ The project is split into a **core library** (pure Rust, zero UI dependencies) a
 .
 ├── crates/
 │   ├── llamafile-builder-core/   library — state, downloads, assembly, validation
-│   ├── llamafile-builder/        CLI binary + --serve (HTTP) + --interactive (JSON-RPC)
-│   └── llamafile-builder-tui/    TUI binary (ratatui)
+│   ├── llamafile-builder-tui/    library — ratatui wizard, invoked via `--tui`
+│   └── llamafile-builder/        binary — CLI + --serve (HTTP) + --interactive (JSON-RPC) + --tui
 ├── data/                         default versions.json, models.json, config.json
 ├── web/                          static assets served by `--serve` (incl. favicon)
 ├── assets/icons/                 icon masters (PNG/ICNS/ICO) for future packaging
@@ -26,13 +26,13 @@ The project is split into a **core library** (pure Rust, zero UI dependencies) a
 └── CLAUDE.md                     this file
 ```
 
-Produced binaries: `target/{debug,release}/llamafile-builder` and `llamafile-builder-tui`.
+Produced binary: `target/{debug,release}/llamafile-builder`. The TUI is the same binary invoked with `--tui`; `llamafile-builder-tui` is a library crate consumed by it.
 
 ## Build and test
 
 ```bash
 make setup        # install zig + cargo-zigbuild + cross-compile rust targets (macOS/Linux)
-make              # debug build of both binaries
+make              # debug build of the binary
 make test         # cargo test --workspace
 make release      # release build
 make all          # cross-compile all 5 targets (needs zig + cargo-zigbuild)
@@ -40,15 +40,15 @@ make target T=<triple>   # single cross-compile target
 make dist         # cross-compile all targets and stage binaries under dist/<target>/
 ```
 
-`make setup` is also what the release CI workflow runs before `make dist`; the GitHub Actions release job (`.github/workflows/release.yml`) attaches per-target archives plus `SHA256SUMS` to a published GitHub release.
+Release artifacts on GitHub are produced by [cargo-dist](https://github.com/axodotdev/cargo-dist) (see `dist-workspace.toml` and the generated `.github/workflows/release.yml`). The Makefile's `make all`/`make dist` are for local cross-compilation only and aren't used by CI.
 
 When iterating, prefer `cargo check --workspace --all-targets` for fast validation and `cargo test --workspace` for correctness. The only pre-existing warnings are two `tempfile::TempDir::into_path` deprecations in test code — ignore them unless you're fixing that specifically.
 
 ## Architecture at a glance
 
 - **`llamafile-builder-core`** owns all state, validation, downloads, config generation, and the build pipeline. Zero UI/renderer dependencies. Public API documented in [`specs/LIBRARY.md`](specs/LIBRARY.md).
-- **`llamafile-builder`** (the CLI binary) provides three modes from a single binary: default CLI (`build`, `recipe`, `models`, …), `--serve` (HTTP + SSE + web UI), and `--interactive` (JSON-RPC 2.0 over stdin/stdout).
-- **`llamafile-builder-tui`** is a separate ratatui binary. It links the core directly and uses its own tracing `Layer` to pipe events into an in-UI log pane.
+- **`llamafile-builder`** (the only binary) provides four modes from a single binary: default CLI (`build`, `recipe`, `models`, …), `--serve` (HTTP + SSE + web UI), `--interactive` (JSON-RPC 2.0 over stdin/stdout), and `--tui` (ratatui wizard). The three mode flags are mutually exclusive (clap `conflicts_with`).
+- **`llamafile-builder-tui`** is a library crate exporting `pub async fn run(config_dir, cache_dir)` plus the wizard's modules (`app`, `events`, `ui`, `log_layer`, …). The `llamafile-builder` binary calls `run` when `--tui` is passed. The TUI uses its own tracing `Layer` to pipe events into an in-UI log pane.
 
 Key shared abstractions (all in core):
 
