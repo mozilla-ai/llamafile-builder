@@ -2,6 +2,22 @@
 /target/
 **/*.rs.bk
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+htmlcov/
+
 # Node (if using for dev tooling)
 node_modules/
 npm-debug.log
