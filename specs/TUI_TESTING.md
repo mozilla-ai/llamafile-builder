@@ -228,7 +228,7 @@ Explicitly deferred:
 - **Snapshot diffs reviewed in PR.** A snapshot diff without a matching code change in the same PR is a red flag — either an unintentional regression or evidence the snapshot is testing something noisier than intended.
 - **Bulk-accept (`cargo insta accept`) only when the PR description names the UI change driving the diff.** Avoids snapshot tests becoming rubber stamps.
 - **Snap file rot.** If a `.snap` is modified more than three times in unrelated PRs, treat it as evidence the underlying assertion is too coarse — replace with a finer-grained state assertion or split.
-- **Failure mode discipline.** When a TUI bug ships, classify it as A–E from §2 and write the missing test at the corresponding level before fixing. Same rule as the existing `is_user_cancellation` regression-guard pattern in `main.rs`.
+- **Failure mode discipline.** When a TUI bug ships, classify it as A–E from §2 and write the missing test at the corresponding level before fixing. Same rule as the existing `is_user_cancellation` regression-guard pattern in `runner.rs`.
 
 ## 12. How to add a flow test
 
