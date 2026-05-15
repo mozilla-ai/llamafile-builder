@@ -36,6 +36,14 @@ pub struct LlamafileRelease {
     pub version: String,
     #[serde(default)]
     pub description: Option<String>,
+    /// Free-form release channel tag (e.g. "latest", "stable", "testing", "alpha").
+    /// Optional — releases without a tag render without a badge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    /// If true, this release is the default pick when no version is specified.
+    /// At most one release across all groups should be marked default.
+    #[serde(default)]
+    pub default: bool,
     pub release_date: String,
     pub download_url: String,
     pub size_bytes: u64,
@@ -54,11 +62,8 @@ pub struct LlamafileRelease {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LlamafileVersionGroup {
     pub name: String,
-    pub tag: String,
     #[serde(default)]
     pub description: Option<String>,
-    #[serde(default)]
-    pub default: bool,
     pub releases: Vec<LlamafileRelease>,
 }
 

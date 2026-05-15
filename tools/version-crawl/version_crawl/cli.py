@@ -87,8 +87,7 @@ def _version_family(version: str) -> str | None:
     default=None,
     help="When merging with --input, force insertion into the group whose 'name' "
     "matches this value. Defaults to picking the group whose existing releases "
-    "share the same MAJOR.MINOR family, falling back to the first 'tag: latest' "
-    "group.",
+    "share the same MAJOR.MINOR family, falling back to the first group.",
 )
 @click.option(
     "-v",
@@ -188,7 +187,7 @@ def _pick_group(groups: list, version: str, target_group: str | None) -> dict | 
     1. If --target-group was passed, match by 'name'.
     2. Otherwise pick the first group whose existing releases share the
        MAJOR.MINOR family with `version`.
-    3. Otherwise fall back to the first 'tag: latest' group.
+    3. Otherwise fall back to the first group.
     """
     if target_group is not None:
         for g in groups:
@@ -208,7 +207,7 @@ def _pick_group(groups: list, version: str, target_group: str | None) -> dict | 
                     return g
 
     for g in groups:
-        if isinstance(g, dict) and g.get("tag") == "latest":
+        if isinstance(g, dict):
             return g
     return None
 

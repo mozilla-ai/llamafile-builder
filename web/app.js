@@ -728,7 +728,6 @@ function renderVersionContent() {
           <div class="card-title">${esc(group.name)}</div>
           <div class="card-desc">${renderDesc(group.description)}</div>
         </div>
-        ${group.tag ? `<div class="card-badge badge-${esc(group.tag)}">${esc(group.tag)}</div>` : ''}
         <div class="expand-toggle" data-vgroup-toggle="${esc(group.name)}">
           <span class="expand-icon ${expanded ? 'expanded' : ''}">▶</span>
           <span>${group.releases.length}</span>
@@ -739,11 +738,18 @@ function renderVersionContent() {
       html += '<div class="version-releases">';
       for (const rel of group.releases) {
         const sel = rel.version === effVer && group.name === effGroup;
+        const tagBadge = rel.tag
+          ? `<span class="card-badge badge-${esc(rel.tag)}">${esc(rel.tag)}</span>`
+          : '';
+        const defaultBadge = rel.default
+          ? `<span class="card-badge badge-default">default</span>`
+          : '';
         html += `<div class="release-row ${sel ? 'selected' : ''}"
             data-vgroup="${esc(group.name)}" data-vrel="${esc(rel.version)}">
           <div class="release-radio"></div>
           <div class="release-version">${esc(rel.version)}</div>
           <div class="release-desc">${renderDesc(rel.description)}</div>
+          <div class="release-badges">${tagBadge}${defaultBadge}</div>
           <div class="release-date">${esc(rel.release_date || '')}</div>
         </div>`;
       }

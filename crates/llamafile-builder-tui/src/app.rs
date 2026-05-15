@@ -399,17 +399,22 @@ impl App {
     }
 
     fn apply_defaults(&mut self) {
-        // Default version
-        if let Some(group) = self.config.versions.iter().find(|g| g.default) {
-            if let Some(release) = group.releases.first() {
-                self.version_group = Some(group.name.clone());
-                self.version = Some(release.version.clone());
-            }
-        } else if let Some(group) = self.config.versions.first() {
-            if let Some(release) = group.releases.first() {
-                self.version_group = Some(group.name.clone());
-                self.version = Some(release.version.clone());
-            }
+        // Default version: first release marked `default`, else first release
+        // of the first group.
+        let picked = self.config.versions.iter()
+            .find_map(|g| {
+                g.releases.iter()
+                    .find(|r| r.default)
+                    .map(|r| (g.name.clone(), r.version.clone()))
+            })
+            .or_else(|| {
+                self.config.versions.first().and_then(|g| {
+                    g.releases.first().map(|r| (g.name.clone(), r.version.clone()))
+                })
+            });
+        if let Some((group, version)) = picked {
+            self.version_group = Some(group);
+            self.version = Some(version);
         }
         // Default model
         if let Some(model) = self.config.models.iter().find(|m| m.default) {

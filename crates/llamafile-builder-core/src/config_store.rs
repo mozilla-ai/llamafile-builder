@@ -85,13 +85,20 @@ impl SavedState {
     pub fn resolve_defaults(&mut self, config: &BuilderConfig) {
         // Version
         if self.version_group.is_none() && self.version.is_none() && self.custom_runtime.is_none() {
-            let group = config.versions.iter().find(|g| g.default)
-                .or_else(|| config.versions.first());
-            if let Some(group) = group {
-                if let Some(release) = group.releases.first() {
-                    self.version_group = Some(group.name.clone());
-                    self.version = Some(release.version.clone());
-                }
+            let picked = config.versions.iter()
+                .find_map(|g| {
+                    g.releases.iter()
+                        .find(|r| r.default)
+                        .map(|r| (g.name.clone(), r.version.clone()))
+                })
+                .or_else(|| {
+                    config.versions.first().and_then(|g| {
+                        g.releases.first().map(|r| (g.name.clone(), r.version.clone()))
+                    })
+                });
+            if let Some((group, version)) = picked {
+                self.version_group = Some(group);
+                self.version = Some(version);
             }
         }
 

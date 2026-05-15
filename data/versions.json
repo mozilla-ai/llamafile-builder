@@ -4,12 +4,12 @@
   "data": [
     {
       "name": "llamafile 0.10",
-      "tag": "latest",
-      "default": true,
       "description": "Latest release — support for recent models, multimodal, tool calling.",
       "releases": [
         {
           "version": "0.10.1",
+          "tag": "stable",
+          "default": true,
           "description": "Server, CLI, chat, combined mode, Metal+CUDA+Vulkan support on Linux+Windows ([release notes](https://github.com/mozilla-ai/llamafile/releases/tag/0.10.1))",
           "release_date": "2026-05-01",
           "download_url": "https://github.com/mozilla-ai/llamafile/releases/download/0.10.1/llamafile-0.10.1-thin",
@@ -59,6 +59,7 @@
         },
         {
           "version": "0.10.2_alpha",
+          "tag": "testing",
           "description": "Our WIP build: more recent than the release, less stable. Usually built from latest main",
           "release_date": "2026-05-13",
           "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/llamafile-0.10.2-alpha",
@@ -88,11 +89,11 @@
     },
     {
       "name": "llamafile 0.9",
-      "tag": "legacy",
       "description": "Former release — CUDA 12 support, multi-GPU, flash attention.",
       "releases": [
         {
           "version": "0.9.3",
+          "tag": "legacy",
           "description": "Phi4 + Qwen3 Support, Localscore plaintext output ([release notes](https://github.com/mozilla-ai/llamafile/releases/tag/0.9.3))",
           "release_date": "2025-05-14",
           "download_url": "https://github.com/mozilla-ai/llamafile/releases/download/0.9.3/llamafile-0.9.3",

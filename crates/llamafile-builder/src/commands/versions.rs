@@ -10,12 +10,7 @@ pub fn run(config: &BuilderConfig, json: bool) {
     }
 
     for group in &config.versions {
-        let tag = if group.tag.is_empty() {
-            String::new()
-        } else {
-            format!(" ({})", group.tag)
-        };
-        println!("{}{}", group.name, tag);
+        println!("{}", group.name);
         if let Some(desc) = &group.description {
             println!("  {}", desc);
         }
@@ -32,11 +27,19 @@ pub fn run(config: &BuilderConfig, json: bool) {
             } else {
                 desc.to_string()
             };
+            let mut suffix = String::new();
+            if let Some(tag) = &release.tag {
+                suffix.push_str(&format!(" [{}]", tag));
+            }
+            if release.default {
+                suffix.push_str(" (default)");
+            }
             println!(
-                "  {} - {} ({})",
+                "  {} - {} ({}){}",
                 release.version,
                 release.release_date,
-                llamafile_builder_core::models::format_size(release.size_bytes)
+                llamafile_builder_core::models::format_size(release.size_bytes),
+                suffix,
             );
             if !desc_short.is_empty() {
                 println!("    {}", desc_short);
