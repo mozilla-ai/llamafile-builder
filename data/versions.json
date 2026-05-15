@@ -9,7 +9,7 @@
       "description": "Latest release — support for recent models, multimodal, tool calling.",
       "releases": [
         {
-          "version": "0.10.1 (stable)",
+          "version": "0.10.1",
           "description": "Server, CLI, chat, combined mode, Metal+CUDA+Vulkan support on Linux+Windows ([release notes](https://github.com/mozilla-ai/llamafile/releases/tag/0.10.1))",
           "release_date": "2026-05-01",
           "download_url": "https://github.com/mozilla-ai/llamafile/releases/download/0.10.1/llamafile-0.10.1-thin",
@@ -58,7 +58,7 @@
           }
         },
         {
-          "version": "0.10.2_alpha (testing)",
+          "version": "0.10.2_alpha",
           "description": "Our WIP build: more recent than the release, less stable. Usually built from latest main",
           "release_date": "2026-05-13",
           "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/llamafile-0.10.2-alpha",
