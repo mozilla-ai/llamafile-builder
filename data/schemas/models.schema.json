@@ -27,6 +27,7 @@
       "description": "A model available for building into a llamafile",
       "required": [
         "id",
+        "source",
         "name",
         "organization",
         "parameters",
@@ -40,7 +41,12 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "Unique identifier for the model (e.g., 'qwen3-8b', 'llava-v1.6-mistral-7b')"
+          "description": "Unique identifier for the model. For HF sources, this is the repo ID (e.g. 'Qwen/Qwen3-0.6B-GGUF')."
+        },
+        "source": {
+          "type": "string",
+          "enum": ["hf"],
+          "description": "Where this model's files come from. Currently only 'hf' (Hugging Face) is supported."
         },
         "name": {
           "type": "string",
@@ -77,13 +83,26 @@
           "description": "Capability tags for filtering and display",
           "items": {
             "type": "string",
-            "enum": ["chat", "vision", "code", "reasoning"]
+            "enum": [
+              "chat",
+              "vision",
+              "code",
+              "reasoning",
+              "tools",
+              "audio",
+              "embedding"
+            ]
           }
         },
         "context_length": {
           "type": "integer",
           "minimum": 1,
           "description": "Default context length for this model"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp when the upstream repository was created (informational only)."
         },
         "default": {
           "type": "boolean",
@@ -129,11 +148,16 @@
     "Quantization": {
       "type": "object",
       "description": "A specific quantized version of a model file",
-      "required": ["name", "size_bytes", "download_url"],
+      "required": ["name", "filename", "size_bytes", "sha256"],
       "properties": {
         "name": {
           "type": "string",
-          "description": "Quantization name (e.g., 'Q4_K_M', 'Q8_0', 'BF16', 'F16')"
+          "enum": ["Q4_K_M", "Q6_K", "Q8_0", "MXFP4", "F16", "BF16"],
+          "description": "Quantization name. Restricted to the set llamafile-builder understands; the hf-crawl tool emits the same allowlist."
+        },
+        "filename": {
+          "type": "string",
+          "description": "Basename of the file inside the source repository (e.g. 'model-Q4_K_M.gguf'). For HF sources, hf-hub resolves this against the repo ID."
         },
         "size_bytes": {
           "type": "integer",
@@ -143,7 +167,7 @@
         "download_url": {
           "type": "string",
           "format": "uri",
-          "description": "Direct download URL for the GGUF file"
+          "description": "Optional override for the download URL. When omitted, the URL is constructed from the model's source + id + filename. Used when a quantization lives in a different repo than the rest of the model."
         },
         "sha256": {
           "type": "string",
