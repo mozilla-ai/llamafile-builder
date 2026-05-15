@@ -447,8 +447,16 @@ fn draw_version_popup(frame: &mut Frame, app: &App, selected: usize) {
             {
                 active_idx = idx;
             }
-            let tag = if group.default { " (default)" } else { "" };
-            let label = format!("{} / {} [{}]{}", group.name, release.version, group.tag, tag);
+            let tag_part = release
+                .tag
+                .as_deref()
+                .map(|t| format!(" [{}]", t))
+                .unwrap_or_default();
+            let default_part = if release.default { " (default)" } else { "" };
+            let label = format!(
+                "{} / {}{}{}",
+                group.name, release.version, tag_part, default_part
+            );
             items.push(label);
             idx += 1;
         }

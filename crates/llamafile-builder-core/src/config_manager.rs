@@ -155,12 +155,16 @@ impl ConfigManager {
         let models = models_env.data;
         let config_schema = config_env.data;
 
-        // Validate: at most one default per list
-        let default_version_count = versions.iter().filter(|v| v.default).count();
-        if default_version_count > 1 {
+        // Validate: at most one default release across all groups
+        let default_release_count: usize = versions
+            .iter()
+            .flat_map(|g| g.releases.iter())
+            .filter(|r| r.default)
+            .count();
+        if default_release_count > 1 {
             tracing::warn!(
-                count = default_version_count,
-                "multiple version groups marked as default, using the first one"
+                count = default_release_count,
+                "multiple releases marked as default, using the first one"
             );
         }
         let default_model_count = models.iter().filter(|m| m.default).count();
@@ -395,7 +399,7 @@ mod tests {
 
         let cm = ConfigManager::new(config_dir.clone());
         let update = ConfigUpdate {
-            versions_json: r#"{"config_version": 2, "data": [{"name":"test","tag":"latest","releases":[]}]}"#.to_string(),
+            versions_json: r#"{"config_version": 2, "data": [{"name":"test","releases":[]}]}"#.to_string(),
             models_json: r#"{"config_version": 2, "data": []}"#.to_string(),
             config_json: r#"{"config_version": 2, "data": []}"#.to_string(),
             config_version: 2,

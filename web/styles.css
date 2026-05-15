@@ -494,10 +494,15 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   flex-shrink: 0;
+  background: var(--border);
+  color: var(--text-dim);
 }
-.badge-latest { background: var(--green-dim); color: var(--green); }
-.badge-stable { background: var(--blue-dim); color: var(--blue); }
-.badge-legacy { background: var(--border); color: var(--text-dim); }
+.badge-latest  { background: var(--green-dim);  color: var(--green); }
+.badge-stable  { background: var(--blue-dim);   color: var(--blue); }
+.badge-testing { background: var(--purple-dim); color: var(--purple); }
+.badge-alpha   { background: var(--red-dim);    color: var(--red); }
+.badge-legacy  { background: var(--border);     color: var(--text-dim); }
+.badge-default { background: var(--green-dim);  color: var(--green); }
 
 .card-meta {
   font-family: 'JetBrains Mono', monospace;
@@ -581,8 +586,9 @@ body {
   flex-shrink: 0;
   min-width: 48px;
 }
-.release-desc  { flex: 1; font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.release-date  { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
+.release-desc   { flex: 1; font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.release-badges { display: flex; gap: 4px; flex-shrink: 0; }
+.release-date   { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
 
 /* ============================================================================
    Model Tabs + Search

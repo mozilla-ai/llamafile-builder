@@ -338,16 +338,21 @@ impl Builder {
 
     // ── Version / binaries ──
 
-    /// Select the default version: the version group marked `default: true`,
-    /// or the first group if none is marked. Picks the first release within
-    /// that group. Returns false if no versions are available.
+    /// Select the default version: the release marked `default: true`,
+    /// or the first release of the first group as a fallback. Returns false
+    /// if no versions are available.
     pub fn select_default_version(&mut self) -> bool {
-        let group = self.config.versions.iter()
-            .find(|g| g.default)
-            .or_else(|| self.config.versions.first());
-        let picked = group.and_then(|g| {
-            g.releases.first().map(|r| (g.name.clone(), r.version.clone()))
-        });
+        let picked = self.config.versions.iter()
+            .find_map(|g| {
+                g.releases.iter()
+                    .find(|r| r.default)
+                    .map(|r| (g.name.clone(), r.version.clone()))
+            })
+            .or_else(|| {
+                self.config.versions.first().and_then(|g| {
+                    g.releases.first().map(|r| (g.name.clone(), r.version.clone()))
+                })
+            });
         if let Some((group, version)) = picked {
             self.select_version(&group, &version);
             true
