@@ -452,7 +452,12 @@ pub fn parse_gpu_spec(spec: &str) -> Result<(GpuAccel, Vec<Os>), String> {
     Ok((accel, os_list))
 }
 
-/// Search models by name, organization, or ID, with optional tag filter.
+/// Search models by name, organization, ID, or tags, with optional exact-tag filter.
+///
+/// The free-text `query` matches any substring of `name`, `organization`, `id`,
+/// or any of the model's `tags` (case-insensitive). The separate `tag` parameter
+/// is an exact, case-insensitive equality filter on the tag list — used by the
+/// CLI's `--tag` flag and the web UI's tag filter chip.
 pub fn search_models<'a>(
     models: &'a [Model],
     query: Option<&str>,
@@ -463,10 +468,11 @@ pub fn search_models<'a>(
         .filter(|m| {
             if let Some(q) = query {
                 let q = q.to_lowercase();
-                let name_match = m.name.to_lowercase().contains(&q)
+                let matches = m.name.to_lowercase().contains(&q)
                     || m.organization.to_lowercase().contains(&q)
-                    || m.id.to_lowercase().contains(&q);
-                if !name_match {
+                    || m.id.to_lowercase().contains(&q)
+                    || m.tags.iter().any(|t| t.to_lowercase().contains(&q));
+                if !matches {
                     return false;
                 }
             }
@@ -528,6 +534,75 @@ pub fn format_size(bytes: u64) -> String {
         format!("{:.1} KiB", b / KIB)
     } else {
         format!("{} B", bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn model(id: &str, name: &str, org: &str, tags: &[&str]) -> Model {
+        Model {
+            id: id.to_string(),
+            source: "hf".to_string(),
+            name: name.to_string(),
+            organization: org.to_string(),
+            parameters: "0.6B".to_string(),
+            param_count: 600_000_000,
+            description: String::new(),
+            license: String::new(),
+            tags: tags.iter().map(|s| s.to_string()).collect(),
+            context_length: 0,
+            default: false,
+            files: vec![],
+        }
+    }
+
+    fn ids(matches: &[&Model]) -> Vec<String> {
+        matches.iter().map(|m| m.id.clone()).collect()
+    }
+
+    #[test]
+    fn search_query_matches_tags_substring_case_insensitive() {
+        let models = vec![
+            model("a/x", "Alpha", "OrgA", &["chat", "vision"]),
+            model("b/y", "Beta", "OrgB", &["chat"]),
+            model("c/z", "Gamma", "OrgC", &["embedding"]),
+        ];
+        // "vis" matches only the vision-tagged model via its tag, case-insensitive
+        let hits = search_models(&models, Some("VIS"), None);
+        assert_eq!(ids(&hits), vec!["a/x".to_string()]);
+    }
+
+    #[test]
+    fn search_query_still_matches_name_org_id() {
+        let models = vec![
+            model("foo/qwen-3", "Qwen 3", "Foo", &[]),
+            model("bar/llama", "Llama", "Bar", &["chat"]),
+        ];
+        // name
+        assert_eq!(ids(&search_models(&models, Some("qwen"), None)), vec!["foo/qwen-3"]);
+        // org
+        assert_eq!(ids(&search_models(&models, Some("bar"), None)), vec!["bar/llama"]);
+        // id
+        assert_eq!(ids(&search_models(&models, Some("foo/"), None)), vec!["foo/qwen-3"]);
+    }
+
+    #[test]
+    fn exact_tag_filter_independent_of_query() {
+        let models = vec![
+            model("a/x", "Alpha", "Org", &["chat"]),
+            model("b/y", "Beta",  "Org", &["vision"]),
+        ];
+        // Exact tag filter ignores partial matches
+        let hits = search_models(&models, None, Some("chat"));
+        assert_eq!(ids(&hits), vec!["a/x"]);
+        // Combining tag filter with query still works
+        let hits = search_models(&models, Some("alpha"), Some("chat"));
+        assert_eq!(ids(&hits), vec!["a/x"]);
+        // Mismatched combination returns nothing
+        let hits = search_models(&models, Some("alpha"), Some("vision"));
+        assert!(hits.is_empty());
     }
 }
 

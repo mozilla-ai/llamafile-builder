@@ -821,8 +821,10 @@ function renderModelContent() {
   if (modelSearch) {
     const q = modelSearch.toLowerCase();
     filtered = filtered.filter(m =>
-      m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q) ||
-      (m.organization || '').toLowerCase().includes(q)
+      m.name.toLowerCase().includes(q) ||
+      m.id.toLowerCase().includes(q) ||
+      (m.organization || '').toLowerCase().includes(q) ||
+      (m.tags || []).some(t => t.toLowerCase().includes(q))
     );
   }
   if (modelTag) filtered = filtered.filter(m => m.tags?.includes(modelTag));
