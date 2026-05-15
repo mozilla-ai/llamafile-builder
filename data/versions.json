@@ -9,56 +9,7 @@
       "description": "Latest release — support for recent models, multimodal, tool calling.",
       "releases": [
         {
-          "version": "0.10.1_alpha",
-          "description": "Supports Metal (Mac), CUDA/ROCm/Vulkan(Linux/Windows), gemma-4",
-          "release_date": "2026-04-19",
-          "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/llamafile",
-          "size_bytes": 43264942,
-          "sha256": "ba84f0c4d5b5729f343b7600d63fd8450dd248674396d2bf8cda9d7c53875632",
-          "zipalign_url": "https://github.com/mozilla-ai/llamafile/releases/download/0.10.0/zipalign-0.10.0",
-          "zipalign_size_bytes": 851513,
-          "zipalign_sha256": "7eac59c658226027b365d92131babf06341f746fb20c0db33115bbdf5c5c6c4b",
-          "gpu_libs": {
-            "cuda": {
-              "linux": {
-                "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/ggml-cuda.so",
-                "size_bytes": 834493568,
-                "sha256": "b6b278699cb283f4e3d55448dc37516fb647ad45e2c7a66d4ac266ee869c5a68"
-              },
-              "windows": {
-                "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/ggml-cuda.dll",
-                "size_bytes": 826787328,
-                "sha256": "6d0cb11806922ed4b53dbf901a354e25b72b90104ce3a11221458251a365c9e7"
-              }
-            },
-            "rocm": {
-              "linux": {
-                "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/ggml-rocm.so",
-                "size_bytes": 566567992,
-                "sha256": "78b2c47473bf845df901fb85e64cb22946cc4ac412311d9dc6cfb0f507ee4c25"
-              },
-              "windows": {
-                "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/ggml-rocm.dll",
-                "size_bytes": 577027584,
-                "sha256": "7cfcda91d6d0187f8136fdb1cd46243b09b4d7eadad5ad7ecbac516053569e75"
-              }
-            },
-            "vulkan": {
-              "linux": {
-                "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/ggml-vulkan.so",
-                "size_bytes": 34530528,
-                "sha256": "daeb7d020d8ae22bf71e961d04983e8a90bc772db970462080f3875ef555e8c8"
-              },
-              "windows": {
-                "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/ggml-vulkan.dll",
-                "size_bytes": 32253952,
-                "sha256": "ed6eee0919358df4460de660d6a0aca1dbb42958da406d7938bf2267154b8a5c"
-              }
-            }
-          }
-        },
-        {
-          "version": "0.10.1",
+          "version": "0.10.1 (stable)",
           "description": "Server, CLI, chat, combined mode, Metal+CUDA+Vulkan support on Linux+Windows ([release notes](https://github.com/mozilla-ai/llamafile/releases/tag/0.10.1))",
           "release_date": "2026-05-01",
           "download_url": "https://github.com/mozilla-ai/llamafile/releases/download/0.10.1/llamafile-0.10.1-thin",
@@ -107,28 +58,28 @@
           }
         },
         {
-          "version": "0.10.0",
-          "description": "Server, CLI, chat, combined mode, Metal+CUDA(linux) support ([release notes](https://github.com/mozilla-ai/llamafile/blob/main/README_0.10.0.md))",
-          "release_date": "2026-03-19",
-          "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10.0/resolve/main/llamafile_thin_0.10.0",
-          "size_bytes": 30845952,
-          "sha256": "6e124c7298e3971081981f022189f714e15c6a8c0977954f98a9c0948a164e20",
-          "zipalign_url": "https://github.com/mozilla-ai/llamafile/releases/download/0.10.0/zipalign-0.10.0",
+          "version": "0.10.2_alpha (testing)",
+          "description": "Our WIP build: more recent than the release, less stable. Usually built from latest main",
+          "release_date": "2026-05-13",
+          "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/llamafile-0.10.2-alpha",
+          "size_bytes": 46346896,
+          "sha256": "ed712e5809eb02f9cd399f21c3755b18104a20d8313c79924f242ec7a283b74b",
+          "zipalign_url": "https://github.com/mozilla-ai/llamafile/releases/download/0.10.1/zipalign-0.10.1",
           "zipalign_size_bytes": 851513,
           "zipalign_sha256": "7eac59c658226027b365d92131babf06341f746fb20c0db33115bbdf5c5c6c4b",
           "gpu_libs": {
             "cuda": {
-              "linux": {
-                "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10.0/resolve/main/ggml-cuda.so",
-                "size_bytes": 725569384,
-                "sha256": "fa9d019e5bc6630cab262acc751d6541e4b6c17a599e18a3f135b3e0d445310c"
+              "windows": {
+                "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/ggml-cuda.dll",
+                "size_bytes": 106703872,
+                "sha256": "f24d38d4828d51c7b4c34e849a0be278eaa952a397a51384d3c50d38f7527d94"
               }
             },
             "rocm": {
-              "linux": {
-                "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10.0/resolve/main/ggml-rocm.so",
-                "size_bytes": 512408000,
-                "sha256": "596088de8be1b47777173e8056127b830cc57fa17f89d36716e32f528130cd7d"
+              "windows": {
+                "download_url": "https://huggingface.co/mozilla-ai/llamafile_0.10_alpha/resolve/main/ggml-rocm.dll",
+                "size_bytes": 544154624,
+                "sha256": "82713b54bf6a0ab1a9059150a53b31c8aac94c284f5dac2174c24dfea406e0fa"
               }
             }
           }
@@ -148,15 +99,6 @@
           "size_bytes": 307741491,
           "sha256": "c62b303d2fa6ca6829f10cf9b3c9bfae38a28182eacea92502a399b90547b24b",
           "zipalign_url": "https://github.com/mozilla-ai/llamafile/releases/download/0.9.3/zipalign-0.9.3"
-        },
-        {
-          "version": "0.9.2",
-          "description": "DeepSeek Distil R1 Models, Gemma 3, IBM granite support ([release notes](https://github.com/mozilla-ai/llamafile/releases/tag/0.9.2))",
-          "release_date": "2024-12-15",
-          "download_url": "https://github.com/mozilla-ai/llamafile/releases/download/0.9.2/llamafile-0.9.2",
-          "size_bytes": 307675955,
-          "sha256": "5f75c5bb5b4b120e27a8f964d95fab3ccb994099909d6ee512a06b7c33bcdea2",
-          "zipalign_url": "https://github.com/mozilla-ai/llamafile/releases/download/0.9.2/zipalign-0.9.2"
         }
       ]
     }
