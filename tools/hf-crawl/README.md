@@ -29,11 +29,32 @@ existing entries in `data/models.json`:
   one quantization per allowed name. File `size_bytes` and `sha256` come from
   the LFS pointer returned by the HF API — no GGUFs are downloaded.
 
-Only the following quantizations are kept; anything else is skipped:
+By default, only the following quantizations are kept; anything else is
+skipped:
 
 ```
 Q4_K_M, Q6_K, Q8_0, MXFP4, F16, BF16
 ```
+
+Override the list with `--quant NAME` (repeatable) — e.g.
+`--quant Q4_K_M --quant Q8_0` to crawl just those two.
+
+Two further filtering rules apply:
+
+- **Multi-shard ggufs are dropped.** `llamafile-builder` cannot yet assemble
+  a model split across `*-NNNNN-of-NNNNN.gguf` shards, so any such file is
+  skipped and a log line is emitted. If the only available variant of a
+  large-precision quant (often BF16) is sharded, that quant won't appear
+  in the output for that model.
+- **Plain variants are preferred over Unsloth-Dynamic (`UD-*`).** When a
+  repo ships both `model-Q4_K_M.gguf` and `model-UD-Q4_K_M.gguf`, only the
+  plain one is kept. `UD-*` files are only emitted when no plain variant
+  exists for the same quant.
+
+If two files still match the same quant after these rules (e.g. two model
+variants packaged in one repo), the crawler aborts with an error listing
+the conflicting filenames. Tighten `--quant` to drop the offending name
+and pick a winner by hand.
 
 ## Setup
 

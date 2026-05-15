@@ -18,6 +18,7 @@
         "tools"
       ],
       "context_length": 65536,
+      "created_at": "2025-10-02T22:14:35+00:00",
       "files": [
         {
           "role": "weights",
@@ -68,17 +69,12 @@
         "tools"
       ],
       "context_length": 262144,
+      "created_at": "2026-04-01T14:42:29+00:00",
       "files": [
         {
           "role": "weights",
           "label": "Model Weights",
           "quantizations": [
-            {
-              "name": "BF16",
-              "filename": "BF16/gemma-4-26B-A4B-it-BF16-00002-of-00002.gguf",
-              "size_bytes": 581922272,
-              "sha256": "c79ca03db75b9a8644cf7dca80c248f4957324410547a88cfb5b0c07875516da"
-            },
             {
               "name": "Q4_K_M",
               "filename": "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
@@ -96,12 +92,6 @@
               "filename": "gemma-4-26B-A4B-it-Q8_0.gguf",
               "size_bytes": 26859859744,
               "sha256": "b26c56ea4bf724b4efa0161bb4615e974847ec64450a4dd49da8712614a128c7"
-            },
-            {
-              "name": "BF16",
-              "filename": "BF16/gemma-4-26B-A4B-it-BF16-00001-of-00002.gguf",
-              "size_bytes": 49923213568,
-              "sha256": "e4f5879330c54468ca1d1620291cfc38e0c33201c19d4fb34f3cecc5d7fe6e44"
             }
           ]
         },
@@ -149,12 +139,6 @@
           "label": "Model Weights",
           "quantizations": [
             {
-              "name": "BF16",
-              "filename": "BF16/gemma-4-31B-it-BF16-00002-of-00002.gguf",
-              "size_bytes": 11463033568,
-              "sha256": "eca9083855ec546e8cbad372e4348e7f9a118a4925fb108052621252dcb43504"
-            },
-            {
               "name": "Q4_K_M",
               "filename": "gemma-4-31B-it-Q4_K_M.gguf",
               "size_bytes": 18323731456,
@@ -171,12 +155,6 @@
               "filename": "gemma-4-31B-it-Q8_0.gguf",
               "size_bytes": 32635675648,
               "sha256": "85c623b5383e5b462e3d49490990a3cdfd0abf6b09f8f5e6c5881903d7de67cc"
-            },
-            {
-              "name": "BF16",
-              "filename": "BF16/gemma-4-31B-it-BF16-00001-of-00002.gguf",
-              "size_bytes": 49950154976,
-              "sha256": "bf138c32eb1e57d8b3358dd7fa131411fbed99121a7e624659e66f0d0aeb719f"
             }
           ]
         },
@@ -218,6 +196,7 @@
         "audio"
       ],
       "context_length": 131072,
+      "created_at": "2026-04-01T14:40:57+00:00",
       "files": [
         {
           "role": "weights",
@@ -287,6 +266,7 @@
         "audio"
       ],
       "context_length": 131072,
+      "created_at": "2026-04-01T14:42:04+00:00",
       "files": [
         {
           "role": "weights",
@@ -353,6 +333,7 @@
         "tools"
       ],
       "context_length": 131072,
+      "created_at": "2025-08-05T17:12:17+00:00",
       "files": [
         {
           "role": "weights",
@@ -401,6 +382,7 @@
         "tools"
       ],
       "context_length": 262144,
+      "created_at": "2025-10-31T08:45:13+00:00",
       "files": [
         {
           "role": "weights",
@@ -456,6 +438,7 @@
         "tools"
       ],
       "context_length": 1048576,
+      "created_at": "2026-04-27T21:42:38+00:00",
       "files": [
         {
           "role": "weights",
@@ -505,6 +488,7 @@
       "id": "unsloth/Qwen3.5-0.8B-GGUF",
       "source": "hf",
       "name": "Qwen3.5-0.8B",
+      "default": true,
       "organization": "unsloth",
       "parameters": "0.75B",
       "param_count": 752393024,
@@ -515,6 +499,7 @@
         "vision"
       ],
       "context_length": 262144,
+      "created_at": "2026-03-01T14:38:35+00:00",
       "files": [
         {
           "role": "weights",
@@ -580,6 +565,7 @@
         "vision"
       ],
       "context_length": 262144,
+      "created_at": "2026-02-28T14:04:40+00:00",
       "files": [
         {
           "role": "weights",
@@ -645,6 +631,7 @@
         "vision"
       ],
       "context_length": 262144,
+      "created_at": "2026-03-02T05:46:32+00:00",
       "files": [
         {
           "role": "weights",
@@ -712,6 +699,7 @@
         "code"
       ],
       "context_length": 262144,
+      "created_at": "2026-02-28T14:04:29+00:00",
       "files": [
         {
           "role": "weights",
@@ -780,17 +768,12 @@
         "tools"
       ],
       "context_length": 262144,
+      "created_at": "2026-04-22T05:43:37+00:00",
       "files": [
         {
           "role": "weights",
           "label": "Model Weights",
           "quantizations": [
-            {
-              "name": "BF16",
-              "filename": "BF16/Qwen3.6-27B-BF16-00002-of-00002.gguf",
-              "size_bytes": 3803783936,
-              "sha256": "75fd5ed66db232ef1526e7d18ac3e057af6fda8fb7d4802a4541e1972e5bd25e"
-            },
             {
               "name": "Q4_K_M",
               "filename": "Qwen3.6-27B-Q4_K_M.gguf",
@@ -808,12 +791,6 @@
               "filename": "Qwen3.6-27B-Q8_0.gguf",
               "size_bytes": 28595763424,
               "sha256": "f93f517f38e696d35a1a7df2c0e3155a64f4c4dcd662107a146ae263f7fb14ce"
-            },
-            {
-              "name": "BF16",
-              "filename": "BF16/Qwen3.6-27B-BF16-00001-of-00002.gguf",
-              "size_bytes": 50004497824,
-              "sha256": "897fb005062c86d71d86b4aabc702af46e2c2c81643bad3a77ce2bb5745b73f1"
             }
           ]
         },
@@ -853,17 +830,12 @@
         "tools"
       ],
       "context_length": 262144,
+      "created_at": "2026-04-16T04:31:31+00:00",
       "files": [
         {
           "role": "weights",
           "label": "Model Weights",
           "quantizations": [
-            {
-              "name": "BF16",
-              "filename": "BF16/Qwen3.6-35B-A3B-BF16-00002-of-00002.gguf",
-              "size_bytes": 19462922752,
-              "sha256": "a5e66b67d4f2cdfc0cb9e399fc7d569576521d76cb69f186bdaff2b577457d66"
-            },
             {
               "name": "Q4_K_M",
               "filename": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
@@ -881,12 +853,6 @@
               "filename": "Qwen3.6-35B-A3B-Q8_0.gguf",
               "size_bytes": 36903140320,
               "sha256": "d1a395809f65a43a13ad119eb4e7acdef1ac6d68120f39902c8ab96e72794a59"
-            },
-            {
-              "name": "BF16",
-              "filename": "BF16/Qwen3.6-35B-A3B-BF16-00001-of-00002.gguf",
-              "size_bytes": 49913715424,
-              "sha256": "783c22885003ac7607020cd9c318db7232a0cc206fa7b8dc064fa262e28d4db7"
             }
           ]
         },

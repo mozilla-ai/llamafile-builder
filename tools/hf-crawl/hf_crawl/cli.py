@@ -10,7 +10,7 @@ from pathlib import Path
 
 import click
 
-from .crawler import crawl
+from .crawler import ALLOWED_QUANTS_DEFAULT, crawl
 from .errors import HfCrawlError
 from .llm import LlmClient
 
@@ -52,6 +52,14 @@ DEFAULT_MIN_BUILDER_VERSION = "0.1.0"
     help="Optional API key for the LLM endpoint (env: HF_CRAWL_LLM_API_KEY).",
 )
 @click.option(
+    "--quant",
+    "quants",
+    multiple=True,
+    metavar="NAME",
+    help="Allowed quantization (repeatable). Defaults to "
+    f"{', '.join(ALLOWED_QUANTS_DEFAULT)}.",
+)
+@click.option(
     "--readme-chars",
     default=8000,
     show_default=True,
@@ -85,6 +93,7 @@ def main(
     llm_base_url: str,
     llm_model: str,
     llm_api_key: str | None,
+    quants: tuple[str, ...],
     readme_chars: int,
     sort_field: str | None,
     reverse: bool,
@@ -101,12 +110,15 @@ def main(
         stream=sys.stderr,
     )
 
+    allowed_quants = tuple(q.upper() for q in quants) or ALLOWED_QUANTS_DEFAULT
+
     llm = LlmClient(base_url=llm_base_url, model=llm_model, api_key=llm_api_key)
     try:
         entry = crawl(
             repo_id=repo_id,
             display_name=model_name,
             llm=llm,
+            allowed_quants=allowed_quants,
             readme_char_limit=readme_chars,
         )
     except HfCrawlError as exc:

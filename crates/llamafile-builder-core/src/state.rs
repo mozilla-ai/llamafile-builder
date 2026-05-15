@@ -423,13 +423,13 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     fn load_models() -> Vec<Model> {
-        crate::config_manager::parse_config_data(include_str!("../../../data/models.json"))
-            .expect("models.json must be valid")
+        crate::config_manager::parse_config_data(crate::test_utils::MODELS_JSON)
+            .expect("fixture models.json must parse")
     }
 
     fn load_versions() -> Vec<LlamafileVersionGroup> {
-        crate::config_manager::parse_config_data(include_str!("../../../data/versions.json"))
-            .expect("versions.json must be valid")
+        crate::config_manager::parse_config_data(crate::test_utils::VERSIONS_JSON)
+            .expect("fixture versions.json must parse")
     }
 
     // ---------- select_registry_model ----------

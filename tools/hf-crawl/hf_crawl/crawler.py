@@ -124,6 +124,26 @@ def _classify_role(filename: str) -> str:
     return "mmproj" if "mmproj" in filename.lower() else "weights"
 
 
+# Multi-shard GGUFs use llama.cpp's '-NNNNN-of-NNNNN.gguf' suffix. The current
+# llamafile-builder schema has no concept of multi-part files, so we drop them
+# entirely and rely on the user picking a smaller quant that fits in one file.
+_SHARD_RE = re.compile(r"-\d{5}-of-\d{5}\.gguf$", re.IGNORECASE)
+
+
+def _is_sharded(filename: str) -> bool:
+    return bool(_SHARD_RE.search(filename))
+
+
+# Unsloth Dynamic ggufs are tagged with 'UD-' (or 'UD_') before the quant token,
+# e.g. 'gemma-4-E4B-it-UD-Q4_K_M.gguf'. They are preferred only when no plain
+# variant of the same quant exists in the repo.
+_UD_RE = re.compile(r"(?:^|[-_])UD[-_]")
+
+
+def _is_ud(filename: str) -> bool:
+    return bool(_UD_RE.search(filename.rsplit("/", 1)[-1]))
+
+
 def _lfs_sha256(sibling) -> str | None:
     lfs = getattr(sibling, "lfs", None)
     if lfs is None:
@@ -145,11 +165,20 @@ def _lfs_size(sibling) -> int | None:
 
 
 def _collect_files(siblings, allowed_quants: Iterable[str]) -> list[dict]:
-    """Group gguf siblings by role, filter to allowed quants, sort by size."""
-    by_role: dict[str, list[dict]] = {"weights": [], "mmproj": []}
+    """Group gguf siblings by role + quant, filter, dedupe, and sort by size.
+
+    Skips multi-shard ggufs (llamafile-builder cannot assemble them yet). When
+    multiple files match a single (role, quant) pair, prefers a non-UD variant
+    over an Unsloth-Dynamic one. If a tie remains, raises :class:`HfRepoError`
+    so the caller can refine the allowed-quants filter.
+    """
+    candidates: dict[tuple[str, str], list[dict]] = {}
     for sib in siblings:
         filename = sib.rfilename
         if not filename.lower().endswith(".gguf"):
+            continue
+        if _is_sharded(filename):
+            log.info("skipping %s: multi-shard ggufs are not supported", filename)
             continue
         quant = _quant_from_filename(filename, allowed_quants)
         if quant is None:
@@ -161,7 +190,7 @@ def _collect_files(siblings, allowed_quants: Iterable[str]) -> list[dict]:
             log.warning("skipping %s: missing LFS size or sha256", filename)
             continue
         role = _classify_role(filename)
-        by_role[role].append(
+        candidates.setdefault((role, quant), []).append(
             {
                 "name": quant,
                 "filename": filename,
@@ -169,6 +198,30 @@ def _collect_files(siblings, allowed_quants: Iterable[str]) -> list[dict]:
                 "sha256": sha,
             }
         )
+
+    by_role: dict[str, list[dict]] = {"weights": [], "mmproj": []}
+    for (role, quant), entries in candidates.items():
+        if len(entries) > 1:
+            non_ud = [e for e in entries if not _is_ud(e["filename"])]
+            if non_ud and len(non_ud) < len(entries):
+                dropped = [e["filename"] for e in entries if _is_ud(e["filename"])]
+                log.info(
+                    "preferring non-UD for %s/%s; dropped UD variants: %s",
+                    role, quant, ", ".join(dropped),
+                )
+                entries = non_ud
+            elif not non_ud:
+                # only UD variants exist for this quant — keep them all and
+                # let the duplicate check below decide
+                entries = list(entries)
+        if len(entries) > 1:
+            names = ", ".join(e["filename"] for e in entries)
+            raise HfRepoError(
+                f"multiple files match quant {quant!r} for role {role!r}: "
+                f"{names}. Refine the allowed-quants filter (e.g. drop "
+                f"{quant!r} via --quant) or pick one file by hand."
+            )
+        by_role[role].append(entries[0])
 
     files: list[dict] = []
     if by_role["weights"]:
